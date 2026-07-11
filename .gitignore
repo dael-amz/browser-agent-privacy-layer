@@ -1,0 +1,26 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Privacy-sensitive runtime output
+artifacts/
+captures/
+screenshots/
+transcripts/
+vault/
+
+# Local editor and OS files
+.DS_Store
+.idea/
+.vscode/
