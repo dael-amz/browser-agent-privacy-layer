@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from plva_proxy.tools import ToolCall, ToolError, ToolRegistry, find_tool_call
+from plva_proxy.tools import ToolCall, ToolError, ToolLoop, ToolRegistry, find_tool_call
 
 
 def _call(name: str, args: dict[str, object]) -> ToolCall:
@@ -112,3 +112,54 @@ def test_non_dict_args_default_to_empty() -> None:
     action = {"tool_calls": [{"tool_name": "plva_tool", "name": "echo", "args": "hi"}]}
     call = find_tool_call(_completion(json.dumps(action)))
     assert call is not None and call.args == {}
+
+
+def test_loop_execute_returns_result_and_records_memory() -> None:
+    loop = ToolLoop(ToolRegistry())
+    result = loop.execute(_call("add", {"a": 17, "b": 25}))
+    assert result == "42"
+    assert loop.memory() == ("add: 42",)
+
+
+def test_loop_execute_folds_tool_errors_into_result() -> None:
+    loop = ToolLoop(ToolRegistry())
+    result = loop.execute(_call("nope", {}))
+    assert result.startswith("error: ")
+    assert "unknown tool" in result
+
+
+def test_loop_memory_is_bounded() -> None:
+    loop = ToolLoop(ToolRegistry(), memory_capacity=2)
+    for value in ("a", "b", "c"):
+        loop.execute(_call("echo", {"text": value}))
+    assert loop.memory() == ("echo: b", "echo: c")
+
+
+def test_continuation_appends_turns_and_disables_streaming() -> None:
+    loop = ToolLoop(ToolRegistry())
+    request = {
+        "model": "m",
+        "stream": True,
+        "temperature": 0.1,
+        "messages": [{"role": "user", "content": "task"}],
+    }
+    completion = _completion('{"tool_calls": [{"tool_name": "plva_tool", "name": "add"}]}')
+    call = _call("add", {"a": 17, "b": 25})
+    follow = loop.continuation(request, completion, call, "42")
+    assert request["messages"] == [{"role": "user", "content": "task"}]  # original untouched
+    assert follow["stream"] is False
+    assert follow["temperature"] == 0.1  # unknown keys preserved verbatim
+    assert follow["messages"][1]["role"] == "assistant"
+    choices = completion["choices"]
+    assert isinstance(choices, list) and choices
+    message = choices[0]
+    assert isinstance(message, dict)
+    assert follow["messages"][1]["content"] == message["message"]["content"]
+    assert follow["messages"][2]["role"] == "user"
+    assert follow["messages"][2]["content"].startswith("[PLVA_TOOL_RESULT] add returned: 42")
+
+
+def test_continuation_without_assistant_content_fails_closed() -> None:
+    loop = ToolLoop(ToolRegistry())
+    with pytest.raises(ToolError):
+        loop.continuation({"messages": []}, {"choices": []}, _call("echo", {"text": "x"}), "x")

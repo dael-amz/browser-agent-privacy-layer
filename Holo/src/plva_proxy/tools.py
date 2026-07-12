@@ -10,9 +10,12 @@ carry tool names, channels, and argument *keys* only — never values (§8.5).
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
+import threading
+from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
@@ -167,3 +170,76 @@ def find_tool_call(completion: dict[str, Any]) -> ToolCall | None:
         if marker is not None:
             return marker
     return None
+
+
+class ToolLoop:
+    """Bounded local execution loop shared by the relay and the live probe.
+
+    Holds no vault data: spike tools are synthetic and non-sensitive. The
+    memory list re-teaches results across runtime steps (the runtime rebuilds
+    history from its own record, so inner-loop turns otherwise vanish).
+    Step 13 must gate this memory through its token-only contract before any
+    tool can touch a real value.
+    """
+
+    def __init__(
+        self, registry: ToolRegistry, *, max_rounds: int = 4, memory_capacity: int = 8
+    ) -> None:
+        self._registry = registry
+        self.max_rounds = max_rounds
+        self._memory: deque[str] = deque(maxlen=memory_capacity)
+        self._lock = threading.Lock()
+
+    def detect(self, completion: dict[str, Any]) -> ToolCall | None:
+        return find_tool_call(completion)
+
+    def execute(self, call: ToolCall) -> str:
+        try:
+            result = self._registry.execute(call)
+        except ToolError as exc:
+            result = f"error: {exc}"
+        with self._lock:
+            self._memory.append(f"{call.name}: {result}")
+        _LOGGER.info(
+            "tool executed: name=%s channel=%s arg_keys=%s",
+            call.name,
+            call.channel,
+            sorted(call.args),
+        )
+        return result
+
+    def memory(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._memory)
+
+    def continuation(
+        self,
+        request_document: dict[str, Any],
+        completion: dict[str, Any],
+        call: ToolCall,
+        result: str,
+    ) -> dict[str, Any]:
+        content: str | None = None
+        choices = completion.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            message = choices[0].get("message")
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                content = message["content"]
+        if content is None:
+            raise ToolError("tool continuation has no assistant content")
+        document = copy.deepcopy(request_document)
+        document["stream"] = False
+        messages = document.get("messages")
+        if not isinstance(messages, list):
+            raise ToolError("tool continuation has no message history")
+        messages.append({"role": "assistant", "content": content})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"{TOOL_RESULT_PREFIX} {call.name} returned: {result}\n"
+                    "Use this result to continue the task. Do not repeat the same tool call."
+                ),
+            }
+        )
+        return document
