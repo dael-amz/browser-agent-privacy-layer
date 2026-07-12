@@ -98,9 +98,12 @@ finding supplies the recognized value and bounding box to the in-memory vault an
 `«CLASS_N_nonce»` chip. Executed action fields resolve locally; reasoning remains placeholdered;
 outbound history is scrubbed first by exact vault match and then by the warm Core ML Rampart
 backstop. Each model request also receives the placeholder scheme plus an exact token/class
-manifest beside the current frame; stale manifests are removed. A per-class policy additionally
-teaches Holo which tokens are usable, approval-gated, or blocked. The matching native Holo skill
-is kept at `holo-skills/plva-placeholders/SKILL.md` and installed under `~/.holo/skills/`. Set
+manifest beside the current frame. Old injected manifests are removed, while the new manifest
+separately lists value-free tokens still active for the private session so multi-step form flows
+can reuse an issued token after it leaves the screen. Forged or non-session tokens fail closed. A
+per-class policy additionally teaches Holo which tokens are usable, approval-gated, or blocked.
+The matching native Holo skill is kept at `holo-skills/plva-placeholders/SKILL.md` and refreshed
+under `~/.holo/skills/` for each privacy-enabled run. Set
 `PLVA_PRIVACY=0` only for comparison testing.
 
 Edit `config/privacy-policy.json` to change defaults, set `PLVA_POLICY_FILE` to select another
@@ -149,8 +152,48 @@ cd ..
 
 `PLVA_REDACT=1 ./run_step1.sh` enables redaction; `PLVA_REDACT=0` (the default) explicitly disables
 it. Adaptive mode starts the models on the first CUA screenshot, reuses them across the active
-burst, and releases the roughly 1.6 GiB worker after 60 idle seconds. Set
+burst, and releases the roughly 1.6 GiB worker after 60 idle seconds. The hot frame cache retains
+32 redacted frames, and the privacy wrapper caches final painted frames so growing histories do
+not thrash the detector or repeatedly repaint identical screenshots. History classification is
+cached per unchanged safe text instead of per whole growing message tuple. Set
 `PLVA_REDACT_LIFECYCLE=eager` for frequent CUA calls, `cold` for minimum idle footprint, or adjust
 `PLVA_REDACT_IDLE_SECONDS`. Use `PLVA_REDACT_BACKEND=wasm` when WebGPU is unavailable;
 `PLVA_REDACT_ENGINE=baseline` retains the slow one-process-per-frame comparison path. Redacted
 frames remain available in the memory-only viewer at `http://127.0.0.1:18081/viewer`.
+
+Longer tasks can raise the closed runtime's default budget with `PLVA_MAX_STEPS` and
+`PLVA_MAX_TIME_S` (defaults: `20` and `300`). Both must be positive integers. A larger budget gives
+the CUA room to recover, but exit code `0` still reflects runtime termination rather than an
+independent UI-postcondition proof.
+
+## CUA privacy benchmark and completion gate
+
+Run the deterministic, provider-free PLVA-off/on comparison before every CUA change:
+
+```bash
+$HOME/.local/bin/uv run plva-benchmark
+```
+
+The benchmark drives a synthetic account form through the real request redaction, placeholder
+manifest, response resolution, and local action-execution seams. It reports task completion,
+private-frame/text exposures, action execution, placeholder resolutions, and interception latency
+as JSON. The two-step fixture removes the private source value before the destination field is
+shown, so PLVA-on must reuse the prior active-session token. Completion comes from assertions over
+the final local form state; simulated runtime
+success is recorded separately and cannot make the benchmark pass.
+
+The live acceptance mode serves the same kind of form only on loopback, asks the real CUA to fill
+and submit it, and considers the task complete only when the local server receives the exact
+expected submission. It can call a paid provider, so both flags are mandatory:
+
+```bash
+$HOME/.local/bin/uv run plva-benchmark \
+  --live --allow-provider-spend --mode on --runner ./run_step1.sh \
+  --output verification/cua-live-plva-on.json
+```
+
+Use `--mode both` only when an explicit PLVA-off exposure comparison is intended. Live results use
+`-1` for metrics that the closed runtime does not expose and report total wall time separately;
+they never infer action success or frame
+privacy from process exit status. The fixture contains synthetic data only, prompts never contain
+the fixture value, and the loopback server does not log request bodies.

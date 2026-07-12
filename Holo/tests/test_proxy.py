@@ -77,6 +77,24 @@ async def test_health_endpoints_answer_locally_without_upstream_traffic() -> Non
     assert seen == []
 
 
+async def test_health_echoes_only_the_current_launcher_instance_token() -> None:
+    upstream_app, seen = make_recording_upstream()
+    config = ProxyConfig(
+        upstream_base_url=CONFIG.upstream_base_url,
+        api_key=CONFIG.api_key,
+        instance_token="launcher-instance-123",
+    )
+    app = create_app(config, transport=httpx.ASGITransport(app=upstream_app))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://proxy.test"
+    ) as client:
+        response = await client.get("/health")
+
+    assert response.json() == {"status": "ok", "instance": "launcher-instance-123"}
+    assert seen == []
+
+
 async def test_lifespan_runs_worker_startup_and_cleanup_callbacks() -> None:
     events: list[str] = []
     transport = httpx.MockTransport(lambda request: httpx.Response(500))

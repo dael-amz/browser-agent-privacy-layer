@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command Step 1 run: proxy + key preflight + holo task + egress observation + cleanup.
+# One-command Step 1 run: proxy + key preflight + holo task + enforced egress monitor + cleanup.
 #
 #   ./run_step1.sh                          # default terminal task
 #   ./run_step1.sh "your own task prompt"   # custom task for the agent
@@ -21,6 +21,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "  default task: $DEFAULT_TASK"
   echo "  provider: PLVA_PROVIDER=overshoot (default) or hcompany"
   echo "  PLVA_AUDIT=1 keeps the redacted sent-frame viewer alive until Ctrl-C"
+  echo "  PLVA_EGRESS_STATUS_FILE=/safe/path.json retains privacy-safe verifier evidence"
   echo "  during the run: press Esc twice to abort"
   exit 0
 fi
@@ -30,6 +31,13 @@ UV="${UV:-$HOME/.local/bin/uv}"
 TASK="${1:-$DEFAULT_TASK}"
 PROVIDER="${PLVA_PROVIDER:-overshoot}"
 REDACT_ENGINE="${PLVA_REDACT_ENGINE:-accelerated}"
+INSTANCE_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+MAX_STEPS="${PLVA_MAX_STEPS:-20}"
+MAX_TIME_S="${PLVA_MAX_TIME_S:-300}"
+if [[ ! "$MAX_STEPS" =~ ^[1-9][0-9]*$ || ! "$MAX_TIME_S" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: PLVA_MAX_STEPS and PLVA_MAX_TIME_S must be positive integers" >&2
+  exit 1
+fi
 case "${PLVA_AUDIT:-0}" in
   1|true|TRUE|yes|YES|on|ON) AUDIT_MODE=1 ;;
   0|false|FALSE|no|NO|off|OFF|"") AUDIT_MODE=0 ;;
@@ -72,14 +80,20 @@ case "$PROVIDER" in
     ;;
 esac
 
+# Report the optional host-level PF boundary without requesting elevation. The
+# per-run process-group guard below is mandatory regardless of PF status.
+PF_STATUS_JSON=$(.venv/bin/python -m plva_proxy.egress_preflight)
+echo "PLVA_PF_STATUS_JSON=$PF_STATUS_JSON"
+
 # 1) Start the loopback proxy (the sole provider egress; reads ./.env).
 #    PLVA_HOOK=test enables the Step 3 test hooks for the hook-mode verify.
 #    PLVA_HOOK_IMAGE=/path/to.png replaces every outbound screenshot with that
 #    static image (no real desktop pixels egress; fails closed if no frame).
 #    PLVA_REDACT=1 redacts every outbound screenshot through plva-v2-baseline
 #    and serves the obscured frames at http://127.0.0.1:$PORT/viewer.
-PROXY_LOG=/tmp/plva-proxy-step1.log
-HOOK_ARGS=(--provider "$PROVIDER" --hook "${PLVA_HOOK:-none}")
+PROXY_LOG=$(mktemp /tmp/plva-proxy-step1.XXXXXX)
+chmod 600 "$PROXY_LOG"
+HOOK_ARGS=(--provider "$PROVIDER" --hook "${PLVA_HOOK:-none}" --instance-token "$INSTANCE_TOKEN")
 if [[ -n "${PLVA_UPSTREAM:-}" ]]; then
   HOOK_ARGS+=(--upstream "$PLVA_UPSTREAM")
 fi
@@ -166,32 +180,56 @@ fi
 parse_on_off PRIVACY_SKILL "${PLVA_PRIVACY_SKILL:-$PRIVACY_ENABLED}" PLVA_PRIVACY_SKILL
 .venv/bin/plva-proxy --port "$PORT" "${HOOK_ARGS[@]}" >"$PROXY_LOG" 2>&1 &
 PROXY_PID=$!
-OBS_FILE=$(mktemp /tmp/plva-step1-egress.XXXXXX)
 RUNS_DIR=""
 SKILL_DISABLED_FILE=""
+EGRESS_READY_FILE=$(mktemp /tmp/plva-step1-egress-ready.XXXXXX)
+if [[ -n "${PLVA_EGRESS_STATUS_FILE:-}" ]]; then
+  EGRESS_STATUS_FILE="$PLVA_EGRESS_STATUS_FILE"
+  EGRESS_STATUS_EPHEMERAL=0
+else
+  EGRESS_STATUS_FILE=$(mktemp /tmp/plva-step1-egress-status.XXXXXX)
+  EGRESS_STATUS_EPHEMERAL=1
+fi
 cleanup() {
-  kill "$PROXY_PID" "${OBS_PID:-}" 2>/dev/null || true
-  # Frame-bearing artifacts must never survive, even on an aborted run.
+  set +e
+  [[ -n "${HOLO_PID:-}" ]] && kill -- -"$HOLO_PID" 2>/dev/null
+  kill "$PROXY_PID" "${EGRESS_PID:-}" 2>/dev/null
+  wait "$PROXY_PID" "${EGRESS_PID:-}" 2>/dev/null
+  # Frame-bearing artifacts must never survive, including on signals and failed preflights.
   [[ -n "$RUNS_DIR" ]] && rm -rf "$RUNS_DIR"
+  rm -f "$EGRESS_READY_FILE" "$PROXY_LOG"
+  [[ "$EGRESS_STATUS_EPHEMERAL" == 1 ]] && rm -f "$EGRESS_STATUS_FILE"
   if [[ -n "$SKILL_DISABLED_FILE" && -f "$SKILL_DISABLED_FILE" ]]; then
     mv "$SKILL_DISABLED_FILE" "$HOME/.holo/skills/plva-placeholders/SKILL.md"
   fi
 }
 trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
 if [[ "$PRIVACY_SKILL" == 0 && -f "$HOME/.holo/skills/plva-placeholders/SKILL.md" ]]; then
   SKILL_DISABLED_FILE="$HOME/.holo/skills/plva-placeholders/SKILL.md.disabled.$$"
   mv "$HOME/.holo/skills/plva-placeholders/SKILL.md" "$SKILL_DISABLED_FILE"
   echo "--- native placeholder skill disabled for this diagnostic run"
 elif [[ "$PRIVACY_SKILL" == 1 ]]; then
+  mkdir -p "$HOME/.holo/skills/plva-placeholders"
+  cp "holo-skills/plva-placeholders/SKILL.md" "$HOME/.holo/skills/plva-placeholders/SKILL.md"
   echo "--- native placeholder skill enabled"
 fi
 PROXY_UP=""
 for _ in $(seq 1 240); do
-  if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+  if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+    break
+  fi
+  if curl -sf "http://127.0.0.1:$PORT/health" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    payload = json.load(sys.stdin)
+except (ValueError, OSError):
+    raise SystemExit(1)
+raise SystemExit(0 if payload.get("instance") == sys.argv[1] else 1)
+' "$INSTANCE_TOKEN"; then
     PROXY_UP=1
     break
   fi
-  kill -0 "$PROXY_PID" 2>/dev/null || break
   sleep 0.25
 done
 if [[ -z "$PROXY_UP" ]]; then
@@ -219,27 +257,48 @@ raise SystemExit(0 if ok else 1)
   exit 1
 fi
 
-# 3) Observe egress while the run is live: the runtime must only talk to loopback.
-(
-  while :; do
-    lsof -nP -iTCP -sTCP:ESTABLISHED 2>/dev/null | grep -iE 'hai[-_]?agent|holo' >>"$OBS_FILE" || true
-    sleep 10
-  done
-) &
-OBS_PID=$!
-
-# 4) The Step 1 task. Frame-bearing run artifacts go to ephemeral /tmp only.
+# 3) The Step 1 task. Frame-bearing run artifacts go to a private ephemeral directory.
 RUNS_DIR=$(mktemp -d /tmp/holo-step1-runs.XXXXXX)
-echo "--- task: $TASK"
-echo "--- press Esc twice to abort; runs dir (shredded afterward): $RUNS_DIR"
+chmod 700 "$RUNS_DIR"
+echo "--- task received (${#TASK} characters; content omitted from logs)"
+echo "--- press Esc twice to abort; ephemeral runs dir will be removed afterward"
 set -m  # own process group for the holo job so an abort kills the runtime too
-"$UV" tool run --from holo-desktop-cli holo run "$TASK" \
+# Stop before exec so the verifier is ready before uv or the runtime can open a socket.
+UV_OFFLINE=1 .venv/bin/python -m plva_proxy.stopped_exec \
+  "$UV" tool run --from holo-desktop-cli holo run "$TASK" \
   --base-url "http://127.0.0.1:$PORT/v1" \
   --model "$MODEL" \
-  --max-steps 20 --max-time-s 300 \
+  --max-steps "$MAX_STEPS" --max-time-s "$MAX_TIME_S" \
   --runs-dir "$RUNS_DIR" &
 HOLO_PID=$!
 set +m
+
+# 4) Prove non-privileged socket visibility, then enforce the sole allowed remote endpoint.
+# The monitor records only pid/process/endpoint metadata and kills the runtime group on violation.
+.venv/bin/python -m plva_proxy.egress_verify \
+  --pgid "$HOLO_PID" --allowed-port "$PORT" \
+  --ready-file "$EGRESS_READY_FILE" --status-file "$EGRESS_STATUS_FILE" &
+EGRESS_PID=$!
+EGRESS_READY=""
+for _ in $(seq 1 100); do
+  if [[ -s "$EGRESS_READY_FILE" ]]; then
+    EGRESS_READY=1
+    break
+  fi
+  if ! kill -0 "$EGRESS_PID" 2>/dev/null; then
+    break
+  fi
+  sleep 0.05
+done
+if [[ -z "$EGRESS_READY" ]]; then
+  kill -- -"$HOLO_PID" 2>/dev/null || true
+  wait "$HOLO_PID" 2>/dev/null || true
+  echo "ERROR: egress verifier could not establish socket visibility; runtime was not resumed" >&2
+  [[ -s "$EGRESS_STATUS_FILE" ]] && sed 's/^/PLVA_EGRESS_STATUS_JSON=/' "$EGRESS_STATUS_FILE" >&2
+  exit 1
+fi
+echo "--- egress guard ready: runtime may connect only to 127.0.0.1:$PORT"
+kill -CONT -- -"$HOLO_PID"
 
 ABORTED=""
 if [[ -t 0 && -r /dev/tty ]]; then
@@ -253,7 +312,6 @@ if [[ -t 0 && -r /dev/tty ]]; then
         echo
         echo "--- Esc Esc: aborting the run"
         kill -- -"$HOLO_PID" 2>/dev/null || kill "$HOLO_PID" 2>/dev/null || true
-        pkill -f 'hai-agent-runtime' 2>/dev/null || true
         ABORTED=1
         break
       fi
@@ -267,16 +325,27 @@ fi
 HOLO_EXIT=0
 wait "$HOLO_PID" 2>/dev/null || HOLO_EXIT=$?
 [[ -n "$ABORTED" ]] && HOLO_EXIT=130
-kill "$OBS_PID" 2>/dev/null || true
+EGRESS_EXIT=0
+wait "$EGRESS_PID" 2>/dev/null || EGRESS_EXIT=$?
 
-# 5) Shred frame-bearing artifacts immediately; report privacy-safe evidence.
+# 5) Remove frame-bearing artifacts immediately; report privacy-safe evidence.
 rm -rf "$RUNS_DIR"
 RUNS_DIR=""
-echo "--- runs dir shredded"
-echo "--- runtime egress observed during the run (expect only ->127.0.0.1:$PORT):"
-sort -u "$OBS_FILE" 2>/dev/null || echo "(no runtime connections captured)"
-rm -f "$OBS_FILE"
-echo "--- proxy relay timings (privacy-safe; seeds Step 2 latency): $PROXY_LOG"
+echo "--- ephemeral runs dir removed"
+if [[ ! -s "$EGRESS_STATUS_FILE" ]]; then
+  echo "ERROR: egress verifier produced no status evidence" >&2
+  exit 1
+fi
+EGRESS_VERDICT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("verdict", "error"))' "$EGRESS_STATUS_FILE")
+sed 's/^/PLVA_EGRESS_STATUS_JSON=/' "$EGRESS_STATUS_FILE"
+if [[ "$EGRESS_EXIT" != 0 || "$EGRESS_VERDICT" != passed ]]; then
+  echo "ERROR: loopback-only runtime egress was not verified; see status JSON above" >&2
+  exit 1
+fi
+if [[ "$EGRESS_STATUS_EPHEMERAL" == 0 ]]; then
+  echo "--- privacy-safe egress evidence retained at: $EGRESS_STATUS_FILE"
+fi
+echo "--- proxy relay timings (privacy-safe):"
 grep -o 'relay .*' "$PROXY_LOG" | tail -5 || true
 if [[ -n "$ABORTED" ]]; then
   echo "--- run aborted by Esc Esc"
