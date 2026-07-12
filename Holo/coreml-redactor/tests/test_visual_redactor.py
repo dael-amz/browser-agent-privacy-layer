@@ -5,6 +5,7 @@ import io
 import numpy as np
 from PIL import Image
 
+from plva_coreml.visual_ane import visual_model_cache_key
 from plva_coreml.visual_redactor import (
     REDACTION_RGB,
     Region,
@@ -12,6 +13,16 @@ from plva_coreml.visual_redactor import (
     prepare_tensor,
     render_masks,
 )
+
+
+def test_visual_cache_key_changes_with_checkpoint_content(tmp_path) -> None:
+    model = tmp_path / "detector.onnx"
+    model.write_bytes(b"v2 checkpoint")
+    first = visual_model_cache_key(model)
+
+    model.write_bytes(b"v3 checkpoint")
+
+    assert visual_model_cache_key(model) != first
 
 
 def test_prepare_tensor_letterboxes_to_fixed_nchw_shape() -> None:

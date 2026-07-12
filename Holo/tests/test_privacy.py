@@ -196,6 +196,35 @@ def test_vault_redactor_remasks_clipped_suffix_of_previously_vaulted_value() -> 
         assert after.getpixel((25, 25)) != before.getpixel((25, 25))
 
 
+def test_vault_observed_text_ignores_short_name_fragments_and_substrings() -> None:
+    vault = SessionVault(nonce="a3f9")
+    for value in ("e", "st", "int", "Alice Smith"):
+        vault.store("NAME", value)
+
+    matches = vault.match_observed_text("File Edit View History Profiles Alice Smith")
+
+    assert [match["token"] for match in matches] == ["NAME_4_a3f9"]
+
+
+def test_vault_name_scrub_never_corrupts_browseruse_protocol_words() -> None:
+    vault = SessionVault(nonce="a3f9")
+    for value in ("odel", "con", "key"):
+        vault.store("NAME", value)
+
+    text = "Model integer continue hotkey_desktop"
+
+    assert vault.scrub_plain(text) == text
+
+
+def test_vault_observed_text_keeps_structured_clipped_value_guard() -> None:
+    vault = SessionVault(nonce="a3f9")
+    token = vault.store("EMAIL", "alice.benchmark@example.com")
+
+    assert vault.match_observed_text("benchmark@example.com") == (
+        {"token": token, "class": "EMAIL", "safety_level": "hide_use"},
+    )
+
+
 def test_stub_and_vault_redactor_lifecycle_and_invalid_inputs() -> None:
     value = "a@example.com"
     stub = StubRedactor((StubSpan("EMAIL", value, (0, 0, 20, 20)),))
@@ -386,6 +415,30 @@ def test_request_hook_merges_all_system_messages_for_hcompany_compatibility() ->
     repeated, _ = privacy_request_hook(scrubber)(document, {})
     serialized = json.dumps(repeated)
     assert serialized.count("[PLVA_PLACEHOLDERS_BEGIN]") == 1
+
+
+def test_request_hook_never_semantically_classifies_browseruse_control_plane_text() -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def classify(texts: tuple[str, ...]) -> list[dict[str, object]]:
+        calls.append(texts)
+        return [{"sensitive": False, "values": []} for _ in texts]
+
+    document, _ = privacy_request_hook(HistoryScrubber(SessionVault(nonce="a3f9"), classify))(
+        {
+            "messages": [
+                {"role": "system", "content": "Model integer hotkey_desktop schema"},
+                {"role": "assistant", "content": "continue"},
+                {"role": "user", "content": "Open the account page"},
+                {"role": "tool", "content": "Local result"},
+            ]
+        },
+        {},
+    )
+
+    assert calls == [("Open the account page", "Local result")]
+    assert document["messages"][0]["content"].startswith("Model integer hotkey_desktop schema")
+    assert document["messages"][1]["content"] == "continue"
 
 
 def test_request_prompt_reports_approval_without_egressing_context_details() -> None:

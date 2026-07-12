@@ -8,6 +8,7 @@ from plva_coreml.semantics import (
     SemanticPipeline,
     Span,
     _aggregate_tokens,
+    _credible_person_hit,
     _detect_heuristics,
     _detect_sensitive_cues,
     _filter_contextual_hits,
@@ -70,6 +71,17 @@ def test_semantic_findings_emit_exact_sensitive_value_for_vault() -> None:
     assert [(value.label, value.value) for value in result.findings[0].values] == [
         ("EMAIL", "alice@example.com")
     ]
+
+
+def test_public_navigation_url_is_not_treated_as_private_data() -> None:
+    pipeline = object.__new__(SemanticPipeline)
+    pipeline._detect_ner = lambda *args: []
+    finding = OCRFinding(0, 0, 200, 20, "Open https://example.com", 0.9, 0.95)
+
+    result = pipeline.classify((finding,))
+
+    assert result.findings[0].sensitive is False
+    assert result.findings[0].values == ()
 
 
 def test_name_filter_rejects_isolated_low_confidence_word_fragments() -> None:
@@ -137,3 +149,20 @@ def test_aggregate_tokens_does_not_continue_entity_across_ocr_findings() -> None
         ("Alice", "GIVEN_NAME"),
         ("Margulis", "GIVEN_NAME"),
     ]
+
+
+@pytest.mark.parametrize("value", ["e", "st", "int", "odel", "eger", "NAME"])
+def test_person_ner_rejects_short_low_information_fragments(value: str) -> None:
+    assert not _credible_person_hit(Span(0, len(value), "GIVEN_NAME", 0.99, "ner", value))
+
+
+def test_person_ner_keeps_credible_names_and_does_not_filter_rules() -> None:
+    assert _credible_person_hit(Span(0, 5, "GIVEN_NAME", 0.8, "ner", "Alice"))
+    assert not _credible_person_hit(Span(0, 5, "GIVEN_NAME", 0.69, "ner", "Alice"))
+    assert _credible_person_hit(Span(0, 3, "GIVEN_NAME", 0.2, "heuristic", "Amy"))
+
+
+def test_person_ner_requires_full_word_boundaries_and_supports_short_name_context() -> None:
+    model = "Model"
+    assert not _credible_person_hit(Span(1, 5, "SURNAME", 0.99, "ner", "odel"), model)
+    assert _credible_person_hit(Span(6, 8, "GIVEN_NAME", 0.8, "ner", "Li"), "Name: Li")

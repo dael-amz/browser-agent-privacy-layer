@@ -7,7 +7,7 @@ import re
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 import numpy as np
 from tokenizers import Tokenizer
@@ -21,7 +21,7 @@ RAMPART_MIN_SCORE: Final = 0.4
 COMPLETE_NAME_MIN_SCORE: Final = RAMPART_MIN_SCORE
 CONTEXTUAL_NAME_MIN_SCORE: Final = 0.5
 MULTIWORD_NAME_MIN_SCORE: Final = 0.72
-KEEP_LABELS: Final = frozenset({"CITY", "STATE", "ZIP_CODE"})
+KEEP_LABELS: Final = frozenset({"CITY", "STATE", "ZIP_CODE", "URL"})
 SEMANTIC_ENGINES: Final = ("rampart", "gliner2", "openai-pf", "openai-pf-4bit")
 # Alternative engines load frozen local copies only; no runtime downloads.
 SEMANTIC_MODELS_ROOT: Final = Path(__file__).resolve().parents[2] / "models" / "semantic"
@@ -68,15 +68,10 @@ _GLINER2_LABELS: Final = {
     "access_token": "AUTH_TOKEN",
     "recovery_code": "SECRET",
 }
+# The complete openai/privacy-filter taxonomy (8 categories, from id2label).
 _OPENAI_PF_LABELS: Final = {
-    "private_person": "GIVEN_NAME",
-    "private_name": "GIVEN_NAME",
-    "private_email": "EMAIL",
-    "private_phone": "PHONE",
+    "account_number": "BANK_ACCOUNT",
     "private_address": "STREET_NAME",
-    "private_id": "GOVERNMENT_ID",
-    "private_financial": "BANK_ACCOUNT",
-    "private_credential": "SECRET",
     "private_date": "DATE_OF_BIRTH",
     # Bare BIOES category names used by the mlx-community 4-bit export.
     "person": "GIVEN_NAME",
@@ -86,11 +81,14 @@ _OPENAI_PF_LABELS: Final = {
     "url": "URL",
     "address": "STREET_NAME",
     "date": "DATE_OF_BIRTH",
-    "account_number": "BANK_ACCOUNT",
     "account": "BANK_ACCOUNT",
     "financial": "BANK_ACCOUNT",
     "id": "GOVERNMENT_ID",
     "credential": "SECRET",
+    "private_email": "EMAIL",
+    "private_person": "GIVEN_NAME",
+    "private_phone": "PHONE",
+    "private_url": "URL",
     "secret": "SECRET",
 }
 NAME_LABELS: Final = frozenset({"GIVEN_NAME", "SURNAME"})
@@ -274,17 +272,19 @@ class SemanticPipeline:
                     alternative_spans.append(
                         Span(raw_start, raw_end, label, score, "ner", raw[raw_start:raw_end])
                     )
-            return _merge_spans(alternative_spans)
+            return _merge_spans(
+                [span for span in alternative_spans if _credible_person_hit(span, raw)]
+            )
         encoding = self._tokenizer.encode(masked)
         encodings = [encoding, *encoding.overflowing]
-        spans: list[Span] = []
+        detected_spans: list[Span] = []
         for window in encodings:
             ids = np.asarray(window.ids, dtype=np.int64)[None]
             attention = np.asarray(window.attention_mask, dtype=np.int64)[None]
             type_ids = np.asarray(window.type_ids, dtype=np.int64)[None]
             logits = self._run_rampart(ids, attention, type_ids)[0]
             probabilities = _softmax(logits)
-            spans.extend(
+            detected_spans.extend(
                 _aggregate_tokens(
                     probabilities,
                     window.offsets,
@@ -294,7 +294,9 @@ class SemanticPipeline:
                     raw_ends,
                 )
             )
-        return _merge_spans(spans)
+        return _merge_spans(
+            [span for span in detected_spans if _credible_person_hit(span, raw)]
+        )
 
     def _run_rampart(
         self, ids: np.ndarray, attention: np.ndarray, type_ids: np.ndarray
@@ -522,6 +524,40 @@ def _filter_contextual_hits(hits: list[Span], text: str) -> list[Span]:
     ]
 
 
+def _credible_person_hit(hit: Span, document: str | None = None) -> bool:
+    """Reject low-information person fragments emitted by screenshot NER.
+
+    Rampart is useful as a recall backstop, but on OCR-heavy developer UIs it
+    can label subword fragments such as ``e``, ``st`` or ``int`` as names.
+    Those fragments are not actionable PII and become especially damaging
+    when placed in the cross-frame vault.  Other PII classes and deterministic
+    rules are unchanged.
+    """
+
+    if hit.label not in {"GIVEN_NAME", "SURNAME"} or hit.source != "ner":
+        return True
+    exact = hit.text.strip()
+    letters = re.findall(r"[^\W\d_]", exact, re.UNICODE)
+    if document is not None:
+        if hit.start > 0 and document[hit.start - 1].isalnum():
+            return False
+        if hit.end < len(document) and document[hit.end].isalnum():
+            return False
+        prefix = document[max(0, hit.start - 40) : hit.start]
+        explicit_context = re.search(
+            r"\b(?:name|user|contact|recipient|customer|employee)\s*[:=]?\s*$",
+            prefix,
+            re.IGNORECASE,
+        ) is not None
+        return len(letters) >= (2 if explicit_context else 3)
+    if hit.score < 0.70:
+        return False
+    if len(letters) < 3:
+        return False
+    title_cased = exact[:1].isupper() and not exact.isupper()
+    return title_cased
+
+
 def _detect_sensitive_cues(text: str) -> list[str]:
     rules = (
         ("CVC", r"\b(?:cvv2?|cvc2?|security\s+c[o0]de)\b\s*(?:[:=]|is)\s*\d{3,4}\b"),
@@ -643,35 +679,26 @@ class _Gliner2NER:
             include_confidence=True,
             include_spans=True,
         )
+        # Result shape: {"entities": {"<label>": [{"text","confidence","start","end"}]}}
         spans: list[tuple[int, int, str, float]] = []
-        for entity in _walk_entities(result):
-            label = str(entity.get("label") or entity.get("type") or "")
-            if not label:
+        entities = result.get("entities") if isinstance(result, dict) else None
+        if not isinstance(entities, dict):
+            return spans
+        for label, hits in entities.items():
+            if not isinstance(hits, list):
                 continue
-            try:
-                start = int(entity["start"])
-                end = int(entity["end"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            score = float(entity.get("confidence") or entity.get("score") or 1.0)
-            spans.append((start, end, _GLINER2_LABELS.get(label.lower(), label.upper()), score))
+            mapped = _GLINER2_LABELS.get(str(label).lower(), str(label).upper())
+            for entity in hits:
+                if not isinstance(entity, dict):
+                    continue
+                try:
+                    start = int(entity["start"])
+                    end = int(entity["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                score = float(entity.get("confidence") or entity.get("score") or 1.0)
+                spans.append((start, end, mapped, score))
         return spans
-
-
-def _walk_entities(node: object) -> list[dict[str, Any]]:
-    """Collect span dicts from the nested gliner2 result shape defensively."""
-
-    found: list[dict[str, Any]] = []
-    if isinstance(node, dict):
-        if "start" in node and "end" in node:
-            found.append(node)
-        else:
-            for value in node.values():
-                found.extend(_walk_entities(value))
-    elif isinstance(node, (list, tuple)):
-        for item in node:
-            found.extend(_walk_entities(item))
-    return found
 
 
 class _OpenAIPrivacyFilterNER:
@@ -702,7 +729,7 @@ class _OpenAIPrivacyFilterNER:
         self.detect("My name is Alice Smith")
 
     def detect(self, text: str) -> list[tuple[int, int, str, float]]:
-        spans: list[tuple[int, int, str, float]] = []
+        raw: list[list] = []
         for entity in self._classifier(text):
             group = str(entity.get("entity_group") or entity.get("entity") or "")
             start = entity.get("start")
@@ -710,9 +737,27 @@ class _OpenAIPrivacyFilterNER:
             if not group or start is None or end is None:
                 continue
             score = float(entity.get("score", 0.0))
-            spans.append(
-                (int(start), int(end), _OPENAI_PF_LABELS.get(group.lower(), group.upper()), score)
+            raw.append(
+                [int(start), int(end), _OPENAI_PF_LABELS.get(group.lower(), group.upper()), score]
             )
+        # The BPE tokenizer has no word boundaries, so the pipeline emits one
+        # group per token run; contiguous same-label groups are one entity.
+        raw.sort(key=lambda item: item[0])
+        merged: list[list] = []
+        for span in raw:
+            if merged and merged[-1][2] == span[2] and span[0] <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], span[1])
+                merged[-1][3] = max(merged[-1][3], span[3])
+            else:
+                merged.append(span)
+        spans: list[tuple[int, int, str, float]] = []
+        for start, end, label, score in merged:
+            while start < end and text[start].isspace():
+                start += 1
+            while end > start and text[end - 1].isspace():
+                end -= 1
+            if end > start:
+                spans.append((start, end, label, score))
         return spans
 
 

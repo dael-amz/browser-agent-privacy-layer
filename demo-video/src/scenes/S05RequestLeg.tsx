@@ -14,7 +14,7 @@ const ARRIVE = [0, 70, 140, 210, 280, 350];
 
 const STATIONS = [
   { n: "1", title: "FRAME", sub: "the screenshot, intercepted" },
-  { n: "2", title: "DETECT", sub: "Apple Vision OCR + Core ML — on-device" },
+  { n: "2", title: "DETECT", sub: "Apple Vision OCR + Core ML, on-device" },
   { n: "3", title: "PAINT", sub: "chips cover the real pixels" },
   { n: "4", title: "VAULT", sub: "memory-only · no disk · no logs" },
   { n: "5", title: "SCRUB", sub: "history: vault match + Rampart backstop" },
@@ -37,7 +37,7 @@ const VaultCard: React.FC<{ active: boolean; at: number }> = ({ active, at }) =>
         background: C.inverse,
         borderRadius: 16,
         padding: "26px 30px",
-        boxShadow: "0 24px 60px rgba(12,12,12,.25)",
+        boxShadow: "0 12px 32px rgba(12,12,12,.1)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
@@ -45,7 +45,7 @@ const VaultCard: React.FC<{ active: boolean; at: number }> = ({ active, at }) =>
           <rect x="3" y="14" width="24" height="17" rx="4" fill={C.green} />
           <path d="M8 14 v-4 a7 7 0 0 1 14 0 v4" stroke={C.green} strokeWidth="4" fill="none" />
         </svg>
-        <span style={{ fontFamily: FONT, fontSize: 26, fontWeight: 700, color: C.white }}>VAULT</span>
+        <span style={{ fontFamily: FONT, fontSize: 26, fontWeight: 500, color: C.white }}>VAULT</span>
         <span style={{ fontFamily: FONT, fontSize: 19, color: C.whiteDim, marginLeft: "auto" }}>session-scoped RAM</span>
       </div>
       {rows.map((r, i) => {
@@ -98,7 +98,7 @@ const ScrubCard: React.FC<{ active: boolean; at: number }> = ({ active, at }) =>
               fontFamily: MONO,
               fontSize: 21,
               color: C.ink,
-              boxShadow: "0 10px 30px rgba(12,12,12,.08)",
+              boxShadow: "0 1px 2px rgba(12,12,12,.03)",
             }}
           >
             <span style={{ color: C.gray, fontSize: 17, display: "block", marginBottom: 4 }}>
@@ -121,11 +121,10 @@ const ScrubCard: React.FC<{ active: boolean; at: number }> = ({ active, at }) =>
             ) : (
               <span
                 style={{
-                  color: C.white,
-                  background: C.inverse,
-                  borderRadius: 5,
+                  color: C.ink,
+                  background: C.paperAlt,
+                  borderRadius: 6,
                   padding: "1px 8px",
-                  boxShadow: `inset 0 0 0 2px ${C.green}`,
                   opacity: (t - 0.5) * 2,
                 }}
               >
@@ -136,8 +135,18 @@ const ScrubCard: React.FC<{ active: boolean; at: number }> = ({ active, at }) =>
           </div>
         );
       })}
-      <div style={{ fontFamily: FONT, fontSize: 20, color: C.gray, textAlign: "center" }}>
-        the runtime remembers what it typed — the scrub makes sure the model doesn't
+      <div
+        style={{
+          fontFamily: FONT,
+          fontSize: 20,
+          color: C.gray,
+          textAlign: "center",
+          background: C.paper,
+          borderRadius: 10,
+          padding: "10px 14px",
+        }}
+      >
+        the runtime remembers what it typed. the scrub makes sure the model doesn't
       </div>
     </div>
   );
@@ -155,21 +164,21 @@ const ShipCard: React.FC<{ active: boolean; at: number }> = ({ active, at }) => 
   const p = active ? pop(frame, fps, at) : 0;
   return (
     <div style={{ position: "relative", width: 900, height: 560 }}>
-      {/* dotted trust boundary */}
+      {/* dotted trust boundary — ends above the progress-dot row */}
       <div
         style={{
           position: "absolute",
           left: 560,
           top: -40,
-          bottom: -20,
+          bottom: 60,
           borderLeft: `4px dashed ${C.green}`,
           opacity: p,
         }}
       />
-      <div style={{ position: "absolute", left: 380, top: -34, fontFamily: FONT, fontSize: 20, fontWeight: 700, color: C.green, opacity: p }}>
+      <div style={{ position: "absolute", left: 380, top: -34, fontFamily: FONT, fontSize: 20, fontWeight: 500, color: C.green, opacity: p }}>
         STAYS LOCAL
       </div>
-      <div style={{ position: "absolute", left: 590, top: -34, fontFamily: FONT, fontSize: 20, fontWeight: 700, color: C.gray, opacity: p }}>
+      <div style={{ position: "absolute", left: 590, top: -34, fontFamily: FONT, fontSize: 20, fontWeight: 500, color: C.gray, opacity: p }}>
         → UPSTREAM
       </div>
 
@@ -182,17 +191,20 @@ const ShipCard: React.FC<{ active: boolean; at: number }> = ({ active, at }) => 
             marginLeft: 320,
             width: 300,
             background: C.white,
-            border: `2px solid ${C.green}`,
-            borderRadius: 12,
+            border: `1px solid ${C.borderFade}`,
+            borderRadius: 16,
             padding: "14px 18px",
             fontFamily: MONO,
             fontSize: 17,
             color: C.ink,
-            boxShadow: "0 14px 36px rgba(12,12,12,.14)",
+            boxShadow: "0 12px 32px rgba(12,12,12,.1)",
             transform: "rotate(3deg)",
           }}
         >
-          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16, color: C.green, marginBottom: 6 }}>TOKEN MANIFEST</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: C.green, display: "inline-block" }} />
+            <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, letterSpacing: "0.08em", color: C.gray }}>TOKEN MANIFEST</span>
+          </div>
           «EMAIL_1_a3f9» email
           <br />
           «PHONE_1_a3f9» phone
@@ -208,13 +220,13 @@ const ShipCard: React.FC<{ active: boolean; at: number }> = ({ active, at }) => 
           right: 0,
           top: 130,
           background: C.inverse,
-          borderRadius: 18,
+          borderRadius: 16,
           padding: "30px 38px",
           textAlign: "center",
           opacity: p,
         }}
       >
-        <div style={{ fontFamily: FONT, fontSize: 30, fontWeight: 700, color: C.white }}>Holo3-35B</div>
+        <div style={{ fontFamily: FONT, fontSize: 30, fontWeight: 500, color: C.white }}>Holo3-35B</div>
         <div style={{ fontFamily: MONO, fontSize: 18, color: C.whiteDim, marginTop: 6 }}>H COMPANY</div>
       </div>
     </div>
@@ -244,16 +256,16 @@ export const S05RequestLeg: React.FC = () => {
   });
 
   const activeStation = ARRIVE.reduce((acc, a, i) => (frame >= a ? i : acc), 0);
-  const scan = ramp(frame, ARRIVE[1] + 4, 34); // beam at DETECT
+  const scan = ramp(frame, ARRIVE[1] + 6, 48); // beam sweeps for most of the DETECT dwell
 
   return (
     <SceneBg>
       {/* fixed header */}
       <div style={{ position: "absolute", top: 96, left: 160, right: 160, zIndex: 10 }}>
-        <Eyebrow text="Request leg — before anything leaves this machine" color={C.green} />
+        <Eyebrow text="Request leg · before anything leaves this machine" color={C.green} />
         <div style={{ ...T.h2, marginTop: 20 }}>
           {STATIONS[activeStation].n} · {STATIONS[activeStation].title}
-          <span style={{ color: C.gray, fontWeight: 450, fontSize: 38, marginLeft: 26 }}>{STATIONS[activeStation].sub}</span>
+          <span style={{ color: C.gray, fontWeight: 400, fontSize: 38, marginLeft: 26 }}>{STATIONS[activeStation].sub}</span>
         </div>
       </div>
 

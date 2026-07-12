@@ -41,7 +41,7 @@ const SponsorTag: React.FC = () => (
       left: 44,
       fontFamily: FONT,
       fontSize: 20,
-      fontWeight: 600,
+      fontWeight: 500,
       color: C.gray,
       opacity: 0.6,
       zIndex: 100,

@@ -82,7 +82,7 @@ export const S01ColdOpen: React.FC = () => {
           gap: 18,
         }}
       >
-        <span style={{ fontFamily: MONO, fontSize: 30, fontWeight: 700, color: C.white, background: C.red, padding: "12px 26px", borderRadius: 12 }}>
+        <span style={{ fontFamily: MONO, fontSize: 30, fontWeight: 500, color: C.white, background: C.red, padding: "12px 26px", borderRadius: 12 }}>
           POST → api.provider.com
         </span>
         <svg width="120" height="48" viewBox="0 0 120 48">

@@ -12,7 +12,8 @@ export const Shot: React.FC<{
   style?: React.CSSProperties;
   delay?: number;
   dark?: boolean;
-}> = ({ id, style, delay, dark }) => {
+  dimAfter?: number;
+}> = ({ id, style, delay, dark, dimAfter }) => {
   const def: import("../shots").ShotDef = SHOTS[id];
   if (def.src) {
     const media =
@@ -45,6 +46,7 @@ export const Shot: React.FC<{
       style={style}
       delay={delay}
       dark={dark}
+      dimAfter={dimAfter}
     />
   );
 };

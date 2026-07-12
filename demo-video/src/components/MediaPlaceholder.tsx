@@ -22,11 +22,22 @@ export const MediaPlaceholder: React.FC<{
   style?: React.CSSProperties;
   delay?: number;
   dark?: boolean;
-}> = ({ id, kind, title, description, seconds, style, delay = 0, dark = false }) => {
+  /** frame after which the slot's inner text fades, so scene overlays can sit on top */
+  dimAfter?: number;
+}> = ({ id, kind, title, description, seconds, style, delay = 0, dark = false, dimAfter }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const p = pop(frame, fps, delay);
   const shimmer = interpolate(frame % 90, [0, 90], [-30, 130]);
+  const contentOpacity =
+    dimAfter === undefined
+      ? 1
+      : 1 -
+        0.88 *
+          interpolate(frame, [dimAfter, dimAfter + 12], [0, 1], {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+          });
 
   const ink = dark ? C.white : C.ink;
   const sub = dark ? C.whiteDim : C.gray;
@@ -61,7 +72,7 @@ export const MediaPlaceholder: React.FC<{
           background: `linear-gradient(90deg, transparent, ${dark ? "rgba(255,255,255,.06)" : "rgba(12,12,12,.04)"}, transparent)`,
         }}
       />
-      <div style={{ textAlign: "center", padding: "0 60px", maxWidth: "92%" }}>
+      <div style={{ textAlign: "center", padding: "0 60px", maxWidth: "92%", opacity: contentOpacity }}>
         <div
           style={{
             display: "inline-flex",
@@ -74,7 +85,7 @@ export const MediaPlaceholder: React.FC<{
             style={{
               fontFamily: MONO,
               fontSize: 30,
-              fontWeight: 700,
+              fontWeight: 500,
               color: dark ? C.inverseDeep : C.white,
               background: dark ? C.white : C.ink,
               borderRadius: 10,
@@ -87,7 +98,7 @@ export const MediaPlaceholder: React.FC<{
             style={{
               fontFamily: FONT,
               fontSize: 20,
-              fontWeight: 650,
+              fontWeight: 500,
               letterSpacing: "0.12em",
               color: sub,
               border: `2px solid ${border}`,
@@ -99,10 +110,10 @@ export const MediaPlaceholder: React.FC<{
             {seconds ? ` · ~${seconds}s` : ""}
           </span>
         </div>
-        <div style={{ fontFamily: FONT, fontSize: 34, fontWeight: 650, color: ink, letterSpacing: "-0.02em", marginBottom: 10 }}>
+        <div style={{ fontFamily: FONT, fontSize: 34, fontWeight: 500, color: ink, letterSpacing: "-0.02em", marginBottom: 10 }}>
           {title}
         </div>
-        <div style={{ fontFamily: FONT, fontSize: 22, fontWeight: 450, color: sub, lineHeight: 1.35 }}>{description}</div>
+        <div style={{ fontFamily: FONT, fontSize: 22, fontWeight: 400, color: sub, lineHeight: 1.35 }}>{description}</div>
       </div>
     </div>
   );

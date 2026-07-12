@@ -100,7 +100,10 @@
     .modelpill svg{color:var(--fore-secondary)}
     .modelmenu{position:absolute;top:calc(100% + 6px);left:50%;width:240px;margin-left:-120px;
       background:var(--back-primary);border:1px solid var(--border-fade);border-radius:var(--radius-card);
-      box-shadow:0 12px 32px rgba(12,12,12,.1);padding:6px;z-index:5}
+      box-shadow:0 12px 32px rgba(12,12,12,.1);padding:6px;z-index:5;
+      max-height:min(56vh,420px);overflow-y:auto;overscroll-behavior:contain}
+    .labselect{min-height:32px;max-width:340px;padding:6px 10px;border:1px solid var(--border-soft);
+      border-radius:10px;background:var(--back-primary);color:var(--fore-primary);font-size:14px;line-height:20px}
     /* transitions-dev: 05-menu-dropdown */
     .t-dropdown {
       transform-origin: top left;
@@ -506,10 +509,22 @@
     const labels={NAME:"Name",DOB:"Date of birth",GOV_ID:"Government ID",SSN:"Social Security number",EMAIL:"Email",PHONE:"Phone",ADDRESS:"Postal address",BANK_ACCOUNT:"Bank account",CARD_NUMBER:"Card number",CVC:"Card security code",PASSWORD:"Password",API_KEY:"API key",AUTH_TOKEN:"Authentication token",PRIVATE_KEY:"Private key",SECRET:"Other secret"};
     const levelLabels={hide_use:"Use",approval:"Ask",blocked:"Block"};
     const providerLabels={hcompany:"H Company",overshoot:"Overshoot"};
-    const modelCatalog={
-      hcompany:[["holo3-1-35b-a3b","Holo3-1 35B"]],
-      overshoot:[["Hcompany/Holo3-35B-A3B","Holo3 35B"],["Hcompany/Holo-3.1-35B-A3B-FP8","Holo3-1 35B FP8"],["Holo3-122B-A10B","Holo3 122B"]]
+    /* Static fallback; replaced by the provider's live /models list on load. */
+    let modelCatalog={
+      hcompany:[["holo3-1-35b-a3b","Holo3-1 35B"],["holo3-122b-a10b","Holo3 122B"]],
+      overshoot:[["Hcompany/Holo3-35B-A3B","Holo3 35B"]]
     };
+    async function loadModelCatalog(){
+      let d;try{d=await api("/api/models")}catch{return}
+      const next={};
+      for(const [p,info] of Object.entries(d.providers||{})){
+        if(info&&Array.isArray(info.models)&&info.models.length)next[p]=info.models.map(m=>[m.id,m.label||m.id]);
+      }
+      if(!Object.keys(next).length)return;
+      const changed=JSON.stringify(next)!==JSON.stringify(modelCatalog);
+      modelCatalog=next;
+      if(changed&&state)render(true);
+    }
     function modelLabel(id){for(const models of Object.values(modelCatalog)){const hit=models.find(([v])=>v===id);if(hit)return hit[1]}return id}
     const credentialSourceLabels={auto:"Auto",holo_cli:"Holo Desktop CLI",project:"Project .env",environment:"Shell only"};
     const credentialResolvedLabels={environment:"shell environment",holo_cli:"Holo Desktop CLI",project:"project .env"};
@@ -654,7 +669,7 @@
       }catch(e){applyPolicySelection(cls,previous);toast(e.message)}
     }
     async function saveSettings(patch,selection){if(!state)return;if(state.running){render(true);return toast("Stop the task before changing settings")}
-      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,credential_source:s.credential_source||"auto",vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,features:{...s.features},...patch};
+      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,credential_source:s.credential_source||"auto",vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,tools:s.tools||"off",features:{...s.features},...patch};
       if(patch&&patch.features)settings.features={...s.features,...patch.features};
       try{
         const r=await api("/api/settings",{method:"PUT",body:JSON.stringify(settings)});
@@ -1110,7 +1125,14 @@
       const x=cols===4?selectedIndex%2:selectedIndex,y=cols===4?Math.floor(selectedIndex/2):0;
       return `<div class="connrow"><div class="connname">${title}<small>${detail}</small></div><div class="seg settingsseg animatedseg${klass}" style="--seg-x:${x};--seg-y:${y}"><span class="segindicator" aria-hidden="true"></span>${options.map(([v,l])=>`<button data-setting="${key}" data-value="${v}" class="${current===v?'active':''}" aria-pressed="${String(current===v)}" title="${esc(l)}">${esc(l)}</button>`).join("")}</div></div>`;
     }
-    function segCols(count){return count>=4?4:count===3?3:2}
+    function modelSelectRow(models){
+      const current=state.settings.model||"";
+      const list=(current&&!models.some(([v])=>v===current))?[[current,modelLabel(current)],...models]:models;
+      const body=list.length
+        ?`<select class="labselect" id="lab-model-select">${list.map(([v,l])=>`<option value="${esc(v)}"${v===current?" selected":""}>${esc(l)}</option>`).join("")}</select>`
+        :`<small>No models reported for this provider yet.</small>`;
+      return `<div class="connrow"><div class="connname">Model<small>Holo variant for the selected provider</small></div>${body}</div>`;
+    }
     function renderLab(){
       const cred=credentialSummary();
       const models=modelCatalog[state.settings.provider]||[];
@@ -1119,7 +1141,7 @@
           <div class="connrow credentialrow"><div class="connname">API key status<small>${esc(cred)}</small></div><span class="cred ${credentialStatusClass()}">${credentialStatusLabel()}</span>${credentialActions()}</div>
           ${segRow("API key source","Auto checks shell, Holo Desktop CLI, then project .env","credential_source",Object.entries(credentialSourceLabels),4)}
           ${segRow("Provider","Inference endpoint","provider",[["hcompany","H Company"],["overshoot","Overshoot"]],2)}
-          ${segRow("Model","Holo variant for the selected provider","model",models,segCols(models.length))}
+          ${modelSelectRow(models)}
         </section>`;
       $("#lab-pipeline").innerHTML=
         `<section class="policygroup"><h3>Redaction pipeline</h3>
@@ -1128,6 +1150,7 @@
           ${segRow("Visual detector","Off (default) detects PII from OCR + text filter only","visual_detector",[["off","Off"],["on","On"]],2)}
           ${segRow("Detector version","Only used when the visual detector is on; v3 needs an exported ONNX detector","detector_version",[["v2","v2 baseline"],["v3","v3"]],2)}
           ${segRow("Text filter","Alternatives need a local frozen model copy","semantic_engine",[["rampart","Rampart"],["gliner2","GLiNER2 PII"],["openai-pf","OpenAI PF"],["openai-pf-4bit","OpenAI PF 4-bit"]],2)}
+          ${segRow("Tool calls","Local tool channel: teaching, detection, bounded loop","tools",[["on","On"],["off","Off"]],2)}
           ${segRow("Worker lifecycle","Startup versus idle memory","lifecycle",[["eager","Eager"],["adaptive","Adaptive"],["cold","Cold"]],3)}
         </section>`;
       document.querySelectorAll("[data-setting]").forEach(b=>b.onclick=()=>{
@@ -1135,6 +1158,8 @@
         applySegmentSelection(b);
         saveSettings({[key]:value},{key,startedAt:performance.now()});
       });
+      const modelSelect=$("#lab-model-select");
+      if(modelSelect)modelSelect.onchange=()=>saveSettings({model:modelSelect.value});
       const connect=$("#connect-holo-cli");if(connect)connect.onclick=connectHoloCli;
       const copy=$("#copy-holo-login");if(copy)copy.onclick=()=>navigator.clipboard.writeText("holo login").then(()=>toast("Copied holo login"));
       const f=state.settings.features;
@@ -1168,6 +1193,7 @@
     document.addEventListener("click",e=>{const m=$("#model-menu");if(m&&!e.target.closest(".modelwrap"))closeDropdown(m)});
     document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="Enter")run()});
     refresh();setInterval(refresh,900);
+    loadModelCatalog();setInterval(loadModelCatalog,300000);
   </script>
 </body>
 </html>

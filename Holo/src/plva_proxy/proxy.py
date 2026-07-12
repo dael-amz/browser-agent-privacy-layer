@@ -1097,6 +1097,10 @@ def create_app(
         ) and upstream.status_code == 200
 
         async def _run_tool_loop(loop: ToolLoop, completion: dict[str, Any]) -> dict[str, Any]:
+            # The original request may have asked for text/event-stream; tool
+            # continuations are always plain JSON, so force that explicitly
+            # rather than reusing the caller's Accept header verbatim.
+            follow_headers = {**headers, "accept": "application/json"}
             request_document = json.loads(body)
             if not isinstance(request_document, dict):
                 raise HookError("request body is not a JSON object")
@@ -1110,7 +1114,7 @@ def create_app(
                 request_document = loop.continuation(request_document, completion, call, result)
                 continuation_body = json.dumps(request_document, separators=(",", ":")).encode()
                 follow_request = client.build_request(
-                    "POST", path, content=continuation_body, headers=headers
+                    "POST", path, content=continuation_body, headers=follow_headers
                 )
                 try:
                     follow = await client.send(follow_request)
@@ -1152,12 +1156,15 @@ def create_app(
                 document = _assemble_sse_completion(payload) if is_sse else json.loads(payload)
                 if not isinstance(document, dict):
                     raise HookError("completion body is not a JSON object")
-                # Pre-resolution: the model's own output still carries
-                # placeholders, never the restored local values.
-                record_call(200, document, "sent")
-                recorded = True
                 if active_tool_loop is not None:
                     document = await _run_tool_loop(active_tool_loop, document)
+                # Pre-resolution: the model's own output still carries
+                # placeholders, never the restored local values. Recorded
+                # after the tool loop so the history viewer holds the final
+                # completion actually forwarded to the runtime, not an
+                # intermediate plva_tool call.
+                record_call(200, document, "sent")
+                recorded = True
                 mutated = response_hook(document) if response_hook is not None else document
             except (HookError, PrivacyError, ToolError, ValueError) as exc:
                 if not recorded:
@@ -1642,7 +1649,13 @@ def main() -> None:
         "--tools",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="enable synthetic local tool teaching and the bounded execution loop",
+        help="enable the Step 6.5 local tool channel: teaching, detection, bounded tool loop",
+    )
+    parser.add_argument(
+        "--tools-max-rounds",
+        type=int,
+        default=int(os.environ.get("PLVA_TOOLS_MAX_ROUNDS", "4")),
+        help="maximum model-tool exchanges per runtime step (default: 4)",
     )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
@@ -1661,6 +1674,8 @@ def main() -> None:
         parser.error("--privacy-approval-ttl-seconds must be between 0 and 3600")
     if not 1 <= args.privacy_approval_use_count <= 100:
         parser.error("--privacy-approval-use-count must be between 1 and 100")
+    if not 1 <= args.tools_max_rounds <= 8:
+        parser.error("--tools-max-rounds must be between 1 and 8")
     if args.privacy and (args.redact is None or args.redact_engine != "vision"):
         parser.error("--privacy requires --redact with --redact-engine vision")
     try:
@@ -1841,13 +1856,13 @@ def main() -> None:
     for extra_hook in (image_hook, redact_hook):
         if extra_hook is not None:
             hooks = _combine_hooks(hooks, Hooks(on_request=extra_hook))
-    tool_loop = ToolLoop(ToolRegistry()) if args.tools else None
-    if tool_loop is not None:
-        hooks = _combine_hooks(
-            hooks,
-            Hooks(on_request=tool_teaching_request_hook(tool_loop)),
-        )
     hooks = _combine_hooks(hooks, privacy_hooks)
+    tool_loop_instance: ToolLoop | None = None
+    if args.tools:
+        tool_loop_instance = ToolLoop(ToolRegistry(), max_rounds=args.tools_max_rounds)
+        hooks = _combine_hooks(
+            hooks, Hooks(on_request=tool_teaching_request_hook(tool_loop_instance))
+        )
     if args.capture_grammar is not None:
         hooks = _combine_hooks(Hooks(on_request=grammar_capture_hook(args.capture_grammar)), hooks)
 
@@ -1877,8 +1892,8 @@ def main() -> None:
         app_options["vault"] = vault_store
     if history_scrubber is not None:
         app_options["scrubber"] = history_scrubber
-    if tool_loop is not None:
-        app_options["tool_loop"] = tool_loop
+    if tool_loop_instance is not None:
+        app_options["tool_loop"] = tool_loop_instance
     if tool_channel is not None:
         app_options["tool_channel"] = tool_channel
     uvicorn.run(

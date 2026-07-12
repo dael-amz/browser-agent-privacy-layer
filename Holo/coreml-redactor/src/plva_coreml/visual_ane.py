@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from pathlib import Path
 from typing import Final
 
@@ -11,6 +12,7 @@ from plva_coreml.coreml_session import CoreMLSessionError, create_ane_session
 from plva_coreml.model_cache import prepare_fixed_model
 
 INPUT_SHAPE: Final = (1, 3, 640, 640)
+VISUAL_CACHE_SCHEMA: Final = "visual-fixed-v1"
 
 
 class ANEError(RuntimeError):
@@ -28,6 +30,24 @@ def prepare_fixed_visual_model(source: Path, destination: Path) -> Path:
         return prepare_fixed_model(source, destination, {"images": INPUT_SHAPE})
     except (OSError, ValueError) as exc:
         raise ANEError(f"could not prepare fixed visual model: {type(exc).__name__}") from exc
+
+
+def visual_model_cache_key(source: Path) -> str:
+    """Return a stable key that isolates compiled artifacts per checkpoint."""
+
+    source = source.resolve()
+    if not source.is_file():
+        raise ANEError(f"visual model not found: {source}")
+    digest = sha256()
+    digest.update(VISUAL_CACHE_SCHEMA.encode("ascii"))
+    digest.update(repr(INPUT_SHAPE).encode("ascii"))
+    try:
+        with source.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise ANEError(f"could not fingerprint visual model: {type(exc).__name__}") from exc
+    return digest.hexdigest()[:16]
 
 
 class VisualANESession:

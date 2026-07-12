@@ -145,8 +145,11 @@ Watch exactly what the model receives at `http://127.0.0.1:18081/viewer`. The bu
 sent-frame history and delivery metadata are available there. The latest memory-only OCR
 candidates are at `/viewer/findings`, the local vault is at `/viewer/vault`, and privacy-safe
 history-filter counters are at `/viewer/filter`. The findings and vault endpoints contain
-sensitive cleartext and are never persisted or logged. `PLVA_VISION_MODE=cascade` is the default:
-it runs fast OCR over the frame and accurate OCR only over sensitive or uncertain regions.
+sensitive cleartext and are never persisted or logged. `PLVA_VISION_MODE=fast` with
+`PLVA_VISUAL_DETECTOR=0` is the BrowserUse-safe default: it keeps ordinary controls readable while
+OCR, deterministic rules, Rampart, and the local vault protect recognized text. The current visual
+checkpoint remains available as an explicit evaluation option with `PLVA_VISUAL_DETECTOR=1`;
+`PLVA_VISION_MODE=cascade` reruns accurate OCR only over sensitive or uncertain regions.
 
 The default redaction engine is an adaptive worker that runs visual and OCR detection concurrently
 and uses WebGPU for the visual detector when available. Build its generated local assets after

@@ -353,9 +353,7 @@ def test_privacy_response_hook_approval_denial_resolves_on_retry_when_approved()
     assert action["tool_call"]["text"] == "sk-synthetic-secret"
 
 
-def test_privacy_response_hook_approval_denial_raises_and_records_event_with_a_denying_mediator() -> (
-    None
-):
+def test_privacy_response_hook_approval_denial_raises_and_records_event_when_denied() -> None:
     vault = SessionVault(nonce="a3f9", policy=SafetyPolicy({"API_KEY": "approval"}))
     token = vault.store("API_KEY", "sk-synthetic-secret")
     scrubber = _scrubber(vault)

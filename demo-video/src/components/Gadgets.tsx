@@ -10,7 +10,7 @@ export const Odometer: React.FC<{
   color?: string;
   size?: number;
 }> = ({ value, label, color = C.red, size = 30 }) => (
-  <span style={{ fontFamily: MONO, fontSize: size, fontWeight: 700, color }}>
+  <span style={{ fontFamily: MONO, fontSize: size, fontWeight: 500, color }}>
     {label}
     <span
       style={{
@@ -42,7 +42,7 @@ export const Ticker: React.FC<{
     <div style={{ overflow: "hidden", whiteSpace: "nowrap", background, padding: "10px 0" }}>
       <div style={{ transform: `translateX(${-shift}px)`, display: "inline-block" }}>
         {[0, 1, 2, 3].map((i) => (
-          <span key={i} style={{ fontFamily: MONO, fontSize, fontWeight: 600, color, paddingRight: 60 }}>
+          <span key={i} style={{ fontFamily: MONO, fontSize, fontWeight: 500, color, paddingRight: 60 }}>
             {text}
           </span>
         ))}
@@ -114,8 +114,8 @@ export const TaskBar: React.FC<{
   const { fps } = useVideoConfig();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-      <span style={{ fontFamily: FONT, fontSize: 22, fontWeight: 600, color: C.ink, width: 170 }}>{label}</span>
-      <div style={{ flex: 1, height: 14, background: "rgba(12,12,12,.08)", borderRadius: 999, overflow: "hidden" }}>
+      <span style={{ fontFamily: FONT, fontSize: 22, fontWeight: 500, color: C.ink, width: 170 }}>{label}</span>
+      <div style={{ flex: 1, height: 14, background: C.paperAlt, borderRadius: 999, overflow: "hidden" }}>
         <div
           style={{
             width: `${Math.min(1, Math.max(0, progress)) * 100}%`,
@@ -189,15 +189,19 @@ export const Callout: React.FC<{
           transformOrigin: dx < 0 ? "right center" : "left center",
           fontFamily: FONT,
           fontSize: 24,
-          fontWeight: 650,
+          fontWeight: 500,
           color: C.white,
-          background: color,
+          background: C.inverse,
           borderRadius: 999,
           padding: "10px 24px",
           whiteSpace: "nowrap",
-          boxShadow: "0 8px 30px rgba(12,12,12,.18)",
+          boxShadow: "0 12px 32px rgba(12,12,12,.1)",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 12,
         }}
       >
+        <span style={{ width: 11, height: 11, borderRadius: "50%", background: color, display: "inline-block" }} />
         {text}
       </div>
     </div>
@@ -221,7 +225,7 @@ export const MagnifierRing: React.FC<{
       height: r * 2,
       borderRadius: 999,
       border: `6px solid ${color}`,
-      boxShadow: "0 18px 50px rgba(12,12,12,.25), inset 0 0 0 2px rgba(255,255,255,.6)",
+      boxShadow: "0 12px 32px rgba(12,12,12,.1), inset 0 0 0 2px rgba(255,255,255,.6)",
       opacity,
     }}
   >
@@ -252,7 +256,7 @@ export const RecBadge: React.FC<{ text?: string; style?: React.CSSProperties }> 
         gap: 12,
         fontFamily: MONO,
         fontSize: 28,
-        fontWeight: 700,
+        fontWeight: 500,
         color: C.red,
         letterSpacing: "0.08em",
         ...style,

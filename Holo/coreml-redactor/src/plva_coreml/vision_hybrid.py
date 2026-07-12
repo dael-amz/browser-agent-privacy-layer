@@ -14,7 +14,11 @@ from plva_coreml.hybrid import HybridRegion, HybridResult, _fuse_regions, _ocr_r
 from plva_coreml.ocr import OCRFinding
 from plva_coreml.semantics import SemanticPipeline
 from plva_coreml.vision import VisionOCRClient, VisionResult, VisionROI
-from plva_coreml.visual_ane import VisualANESession, prepare_fixed_visual_model
+from plva_coreml.visual_ane import (
+    VisualANESession,
+    prepare_fixed_visual_model,
+    visual_model_cache_key,
+)
 from plva_coreml.visual_redactor import Region, detect_regions, render_masks
 
 VISION_PIPELINE_MODES: Final = ("fast", "cascade", "accurate")
@@ -40,12 +44,15 @@ class HybridVisionRedactor:
         self._mode = mode
         self._visual: VisualANESession | None = None
         if visual_enabled:
+            source_visual_model = visual_model or baseline / "dist/visual/detector.onnx"
+            visual_key = visual_model_cache_key(source_visual_model)
             prepared_visual_model = prepare_fixed_visual_model(
-                visual_model or baseline / "dist/visual/detector.onnx",
-                cache / "models/visual-fixed.onnx",
+                source_visual_model,
+                cache / "models" / f"visual-fixed-{visual_key}.onnx",
             )
             self._visual = VisualANESession(
-                prepared_visual_model, cache_directory=cache / "compiled/visual"
+                prepared_visual_model,
+                cache_directory=cache / "compiled/visual" / visual_key,
             )
         self._vision = VisionOCRClient(cache)
         self._semantic = SemanticPipeline(baseline, cache, engine=semantic_engine)

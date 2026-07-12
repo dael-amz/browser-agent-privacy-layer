@@ -5,9 +5,9 @@ import { bounce, pop, ramp } from "../anim";
 import { PiiMode } from "./MockScreen";
 
 const FIELDS = [
-  { label: "Email", value: "alex.rivera@example.com", token: "EMAIL_1_a3f9", level: "hide" as const },
-  { label: "Password", value: "hunter2!x", token: "PASSWORD_1", level: "blocked" as const },
-  { label: "Card", value: "4929 1188 3407 2216", token: "CARD_1", level: "blocked" as const },
+  { label: "Email", value: "alex.rivera@example.com", token: "EMAIL_1_a3f9", level: "hide" as const, mask: "" },
+  { label: "Password", value: "hunter2!x", token: "PASSWORD_1", level: "blocked" as const, mask: "▮▮▮▮▮▮▮▮▮" },
+  { label: "Card", value: "4929 1188 3407 2216", token: "CARD_1", level: "blocked" as const, mask: "▮▮▮▮ ▮▮▮▮ ▮▮▮▮ ▮▮▮▮" },
 ];
 
 /**
@@ -30,9 +30,9 @@ export const MiniFrame: React.FC<{
         width,
         height: h,
         background: C.white,
-        borderRadius: 14,
-        border: `1.5px solid ${C.borderSoft}`,
-        boxShadow: "0 24px 60px rgba(12,12,12,.14)",
+        borderRadius: 16,
+        border: `1px solid ${C.borderFade}`,
+        boxShadow: "0 16px 48px rgba(12,12,12,.06)",
         overflow: "hidden",
         position: "relative",
         ...style,
@@ -42,8 +42,8 @@ export const MiniFrame: React.FC<{
         {["#ff5f57", "#febc2e", "#28c840"].map((c) => (
           <span key={c} style={{ width: 10, height: 10, borderRadius: 999, background: c }} />
         ))}
-        <span style={{ fontFamily: FONT, fontSize: width * 0.026, color: C.gray, marginLeft: 8, fontWeight: 550 }}>
-          checkout — aurora utilities
+        <span style={{ fontFamily: FONT, fontSize: width * 0.026, color: C.gray, marginLeft: 8, fontWeight: 500 }}>
+          checkout · aurora utilities
         </span>
       </div>
       <div style={{ padding: `${width * 0.04}px ${width * 0.055}px`, display: "flex", flexDirection: "column", gap: width * 0.028 }}>
@@ -52,14 +52,14 @@ export const MiniFrame: React.FC<{
           const fs = width * 0.037;
           let valueEl: React.ReactNode;
           if (mode === "raw") {
-            valueEl = <span style={{ color: C.ink, fontWeight: 550 }}>{f.value}</span>;
+            valueEl = <span style={{ color: C.ink, fontWeight: 500 }}>{f.value}</span>;
           } else if (mode === "detected") {
             const p = pop(frame, fps, delay);
             valueEl = (
               <span
                 style={{
                   color: C.ink,
-                  fontWeight: 550,
+                  fontWeight: 500,
                   boxShadow: `0 0 0 ${3 * p}px ${C.amber}`,
                   background: `rgba(185,126,15,${0.12 * p})`,
                   borderRadius: 4,
@@ -70,24 +70,26 @@ export const MiniFrame: React.FC<{
             );
           } else {
             const p = bounce(frame, fps, delay);
-            const edge = f.level === "blocked" ? C.red : C.green;
+            const dot = f.level === "blocked" ? C.red : C.green;
             valueEl = (
               <span
                 style={{
                   fontFamily: MONO,
                   fontSize: fs * 0.9,
-                  fontWeight: 600,
+                  fontWeight: 400,
                   color: C.white,
                   background: C.inverse,
                   borderRadius: 6,
                   padding: `${fs * 0.14}px ${fs * 0.4}px`,
-                  boxShadow: `inset 0 0 0 2px ${edge}`,
                   transform: `scale(${Math.max(p, 0.001)})`,
-                  display: "inline-block",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: fs * 0.3,
                   whiteSpace: "nowrap",
                 }}
               >
-                {f.level === "blocked" ? "▮▮▮▮▮" : `«${f.token}»`}
+                <span style={{ width: fs * 0.26, height: fs * 0.26, borderRadius: "50%", background: dot, display: "inline-block" }} />
+                {f.level === "blocked" ? f.mask : `«${f.token}»`}
               </span>
             );
           }

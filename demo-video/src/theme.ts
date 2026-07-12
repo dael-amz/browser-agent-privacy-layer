@@ -1,32 +1,41 @@
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { loadFont as loadMono } from "@remotion/google-fonts/JetBrainsMono";
 
 const inter = loadInter();
-const mono = loadMono();
 
-export const FONT = inter.fontFamily;
-export const MONO = mono.fontFamily;
+// Exact font stacks from the Holo frontend (Holo/src/plva_proxy/demo_ui.html).
+// ABC Diatype is used when installed locally; Inter (loaded) is the site's fallback.
+export const FONT = `"ABC Diatype","ABC Diatype Variable",Diatype,${inter.fontFamily},-apple-system,"SF Pro Text","Helvetica Neue","Segoe UI",Arial,sans-serif`;
+export const MONO = `ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace`;
 
-// Matches the Holo app's design tokens (Holo/src/plva_proxy/demo_ui.html)
+// Design tokens copied 1:1 from the site's :root
 export const C = {
-  paper: "#ffffff",
-  paperAlt: "#f3f3f3",
-  inverse: "#181818",
-  inverseDeep: "#0c0c0c",
-  ink: "#0c0c0c",
-  gray: "#868686",
+  paper: "#ffffff", // --back-primary
+  paperAlt: "#f3f3f3", // --back-secondary
+  inverse: "#181818", // --back-inverse
+  inverseDeep: "#181818",
+  ink: "#0c0c0c", // --fore-primary
+  gray: "#868686", // --fore-secondary
   grayLight: "#b4b4b4",
-  borderSoft: "rgba(12,12,12,.1)",
-  borderFade: "rgba(12,12,12,.05)",
-  green: "#0a8a4f",
-  greenSoft: "rgba(10,138,79,.12)",
-  red: "#d13438",
-  redSoft: "rgba(209,52,56,.12)",
-  amber: "#b97e0f",
+  borderSoft: "rgba(12,12,12,.1)", // --border-soft
+  borderFade: "rgba(12,12,12,.05)", // --border-fade
+  green: "#0a8a4f", // --ok
+  greenSoft: "rgba(10,138,79,.1)",
+  red: "#d13438", // --bad
+  redSoft: "rgba(209,52,56,.1)",
+  amber: "#b97e0f", // --warn
   white: "#ffffff",
-  whiteDim: "rgba(255,255,255,.64)",
+  whiteDim: "rgba(255,255,255,.6)", // .runcard.active small
   whiteFaint: "rgba(255,255,255,.28)",
 } as const;
+
+// Shadow tiers copied from the site
+export const SHADOW = {
+  card: "0 1px 2px rgba(12,12,12,.03)", // .card
+  float: "0 16px 48px rgba(12,12,12,.06)", // .composer
+  menu: "0 12px 32px rgba(12,12,12,.1)", // .modelmenu
+} as const;
+
+export const RADIUS = { card: 16, full: 999, well: 12, token: 6 } as const;
 
 export const VIDEO = {
   width: 1920,
@@ -37,14 +46,15 @@ export const VIDEO = {
 
 export const MARGIN = 120;
 
-// Type scale
+// Type scale: the site sets display text at weight 400 with tight negative
+// tracking (h1: -.03em) and reserves 500 for emphasis/labels. Nothing heavier.
 export const T = {
-  hero: { fontFamily: FONT, fontSize: 118, fontWeight: 700, letterSpacing: "-0.035em", lineHeight: 1.04 },
-  h1: { fontFamily: FONT, fontSize: 84, fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.06 },
-  h2: { fontFamily: FONT, fontSize: 56, fontWeight: 650, letterSpacing: "-0.025em", lineHeight: 1.1 },
-  h3: { fontFamily: FONT, fontSize: 40, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.15 },
-  body: { fontFamily: FONT, fontSize: 32, fontWeight: 450, letterSpacing: "-0.01em", lineHeight: 1.35 },
-  small: { fontFamily: FONT, fontSize: 24, fontWeight: 500, letterSpacing: "0em", lineHeight: 1.3 },
-  label: { fontFamily: FONT, fontSize: 21, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase" as const },
-  mono: { fontFamily: MONO, fontSize: 26, fontWeight: 500, letterSpacing: "-0.01em" },
+  hero: { fontFamily: FONT, fontSize: 112, fontWeight: 400, letterSpacing: "-0.03em", lineHeight: 1.06 },
+  h1: { fontFamily: FONT, fontSize: 82, fontWeight: 400, letterSpacing: "-0.03em", lineHeight: 1.06 },
+  h2: { fontFamily: FONT, fontSize: 56, fontWeight: 400, letterSpacing: "-0.0275em", lineHeight: 1.1 },
+  h3: { fontFamily: FONT, fontSize: 40, fontWeight: 400, letterSpacing: "-0.02em", lineHeight: 1.2 },
+  body: { fontFamily: FONT, fontSize: 32, fontWeight: 400, letterSpacing: "-0.006em", lineHeight: 1.5 },
+  small: { fontFamily: FONT, fontSize: 24, fontWeight: 400, letterSpacing: "0em", lineHeight: 1.4 },
+  label: { fontFamily: FONT, fontSize: 22, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase" as const },
+  mono: { fontFamily: MONO, fontSize: 26, fontWeight: 400, letterSpacing: "0em" },
 } as const;

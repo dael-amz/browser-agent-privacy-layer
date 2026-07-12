@@ -188,7 +188,7 @@ class SessionVault:
         self._lock = threading.RLock()
         self._by_key: dict[tuple[str, str], VaultEntry] = {}
         self._by_placeholder: dict[str, VaultEntry] = {}
-        self._variants: dict[str, str] = {}
+        self._variants: dict[str, tuple[str, str]] = {}
         self._counters: dict[str, int] = {}
         self._clock = clock
         if approval_ttl_seconds <= 0 or approval_ttl_seconds > 3600:
@@ -216,7 +216,7 @@ class SessionVault:
             existing = self._by_key.get(key)
             if existing is not None:
                 if len(re.sub(r"[^\w]", "", exact, flags=re.UNICODE)) >= 3:
-                    self._variants[exact] = existing.placeholder
+                    self._variants[exact] = (existing.placeholder, normalized_class)
                 return existing.placeholder
             counter = self._counters.get(normalized_class, 0) + 1
             self._counters[normalized_class] = counter
@@ -227,7 +227,7 @@ class SessionVault:
             self._by_key[key] = entry
             self._by_placeholder[placeholder] = entry
             if len(re.sub(r"[^\w]", "", exact, flags=re.UNICODE)) >= 3:
-                self._variants[exact] = placeholder
+                self._variants[exact] = (placeholder, normalized_class)
             return placeholder
 
     def resolve(self, placeholder: str) -> str:
@@ -446,13 +446,7 @@ class SessionVault:
         matches: list[dict[str, str]] = []
         with self._lock:
             for entry in self._by_placeholder.values():
-                if entry.pii_class in _CREDENTIAL_CLASSES:
-                    candidate = observed
-                    vaulted = entry.value
-                else:
-                    candidate = " ".join(observed.split()).casefold()
-                    vaulted = entry.canonical
-                if candidate in vaulted or vaulted in candidate:
+                if _observed_value_matches(entry, observed):
                     matches.append(
                         {
                             "token": entry.placeholder,
@@ -739,9 +733,16 @@ class HistoryScrubber:
     def approval_prompt(self) -> str | None:
         return self._vault.approval_prompt()
 
-    def scrub(self, texts: tuple[str, ...]) -> tuple[str, ...]:
+    def scrub(
+        self, texts: tuple[str, ...], *, semantic_mask: tuple[bool, ...] | None = None
+    ) -> tuple[str, ...]:
         if not texts:
             return ()
+        selected: tuple[bool, ...] = (
+            semantic_mask if semantic_mask is not None else tuple(True for _ in texts)
+        )
+        if len(selected) != len(texts):
+            raise ValueError("semantic mask must match history text count")
         plain = tuple(self._vault.scrub_plain(text) for text in texts)
         plain_hits = sum(
             max(0, len(_PLACEHOLDER_SHAPE.findall(after)) - len(_PLACEHOLDER_SHAPE.findall(before)))
@@ -751,15 +752,23 @@ class HistoryScrubber:
             _PLACEHOLDER_SHAPE.sub(lambda match: " " * len(match.group(0)), text) for text in plain
         )
         try:
-            classifications, cache_hits = self._classify_incremental(classifier_inputs)
+            selected_inputs = tuple(
+                text for text, enabled in zip(classifier_inputs, selected, strict=True) if enabled
+            )
+            selected_classifications, cache_hits = self._classify_incremental(selected_inputs)
         except Exception as exc:
             self._set_diagnostics("failed", len(texts), plain_hits, 0, 0, 0, "classifier_failed")
             raise PrivacyError("history classifier failed") from exc
-        if len(classifications) != len(plain):
+        if len(selected_classifications) != sum(1 for enabled in selected if enabled):
             self._set_diagnostics(
                 "failed", len(texts), plain_hits, 0, cache_hits, 0, "result_count"
             )
             raise PrivacyError("history classifier returned the wrong result count")
+        classified_iter = iter(selected_classifications)
+        classifications: list[dict[str, Any]] = [
+            next(classified_iter) if enabled else {"sensitive": False, "values": []}
+            for enabled in selected
+        ]
         semantic_hits = sum(
             len(classification.get("values", []))
             for classification in classifications
@@ -952,20 +961,24 @@ def privacy_request_hook(
             _manifest_target(messages, raw_manifest) if inject_manifest else (None, ())
         )
         messages[:] = _remove_old_placeholder_teaching(messages)
-        locations: list[tuple[dict[str, Any], str]] = []
+        locations: list[tuple[dict[str, Any], str, bool]] = []
         for message in messages:
             if not isinstance(message, dict):
                 continue
+            semantic = message.get("role") in {"user", "tool"}
             content = message.get("content")
             if isinstance(content, str):
-                locations.append((message, "content"))
+                locations.append((message, "content", semantic))
             elif isinstance(content, list):
                 for part in content:
                     if isinstance(part, dict) and isinstance(part.get("text"), str):
-                        locations.append((part, "text"))
-        texts = tuple(container[key] for container, key in locations)
-        scrubbed = scrubber.scrub(texts) if texts and history_scrub else texts
-        for (container, key), value in zip(locations, scrubbed, strict=True):
+                        locations.append((part, "text", semantic))
+        texts = tuple(container[key] for container, key, _ in locations)
+        semantic_mask = tuple(semantic for _, _, semantic in locations)
+        scrubbed = (
+            scrubber.scrub(texts, semantic_mask=semantic_mask) if texts and history_scrub else texts
+        )
+        for (container, key, _), value in zip(locations, scrubbed, strict=True):
             container[key] = value
         if tool_channel is not None:
             tool_channel.task_context = _first_user_text(messages)
@@ -1510,10 +1523,47 @@ def _canonical_value(pii_class: str, value: str) -> str:
     return " ".join(value.split()).casefold()
 
 
-def _replace_variants(text: str, variants: list[tuple[str, str]]) -> str:
+def _observed_value_matches(entry: VaultEntry, observed: str) -> bool:
+    """Return whether one OCR line safely re-observes a vaulted value.
+
+    The vault can contain imperfect semantic detections.  Repainting a whole
+    OCR line for a one- or two-character NAME fragment makes that error spread
+    across every later frame.  Names therefore require a complete, bounded
+    occurrence.  Structured identifiers may still match a clipped prefix or
+    suffix, but only when the visible fragment carries enough information to
+    avoid matching ordinary UI text.
+    """
+
+    if entry.pii_class in _CREDENTIAL_CLASSES:
+        candidate = observed
+        vaulted = entry.value
+    else:
+        candidate = " ".join(observed.split()).casefold()
+        vaulted = entry.canonical
+    vaulted_word = re.sub(r"[^\w]", "", vaulted, flags=re.UNICODE)
+    if entry.pii_class == "NAME":
+        if len(vaulted_word) < 3 or len(re.findall(r"[^\W\d_]", vaulted, re.UNICODE)) < 3:
+            return False
+        return re.search(rf"(?<!\w){re.escape(vaulted)}(?!\w)", candidate) is not None
+    if len(vaulted_word) < 4:
+        return False
+    if vaulted in candidate:
+        return True
+    candidate_word = re.sub(r"[^\w]", "", candidate, flags=re.UNICODE)
+    return len(candidate_word) >= 6 and candidate in vaulted
+
+
+def _replace_variants(text: str, variants: list[tuple[str, tuple[str, str]]]) -> str:
     scrubbed = text
-    for value, placeholder in variants:
-        scrubbed = scrubbed.replace(value, placeholder)
+    for value, (placeholder, pii_class) in variants:
+        if pii_class == "NAME":
+            # A person value must be replayed as a complete lexical value.
+            # Raw substring replacement corrupts BrowserUse protocol words
+            # when a noisy detector ever emits fragments such as "odel",
+            # "con", or "key".
+            scrubbed = re.sub(rf"(?<!\w){re.escape(value)}(?!\w)", placeholder, scrubbed)
+        else:
+            scrubbed = scrubbed.replace(value, placeholder)
     return scrubbed
 
 
