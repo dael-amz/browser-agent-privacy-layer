@@ -6,7 +6,16 @@ import json
 
 import pytest
 
-from plva_proxy.tools import ToolCall, ToolError, ToolLoop, ToolRegistry, find_tool_call
+from plva_proxy.tools import (
+    TOOL_SYSTEM_BEGIN,
+    TOOL_SYSTEM_END,
+    ToolCall,
+    ToolError,
+    ToolLoop,
+    ToolRegistry,
+    find_tool_call,
+    tool_teaching_request_hook,
+)
 
 
 def _call(name: str, args: dict[str, object]) -> ToolCall:
@@ -157,6 +166,55 @@ def test_continuation_appends_turns_and_disables_streaming() -> None:
     assert follow["messages"][1]["content"] == message["message"]["content"]
     assert follow["messages"][2]["role"] == "user"
     assert follow["messages"][2]["content"].startswith("[PLVA_TOOL_RESULT] add returned: 42")
+
+
+def test_teaching_merges_into_existing_system_message() -> None:
+    hook = tool_teaching_request_hook()
+    document = {
+        "messages": [
+            {"role": "system", "content": "You are Holo."},
+            {"role": "user", "content": "task"},
+        ]
+    }
+    rewritten, _ = hook(document, {})
+    system_messages = [m for m in rewritten["messages"] if m["role"] == "system"]
+    assert len(system_messages) == 1
+    assert system_messages[0]["content"].startswith("You are Holo.")
+    assert TOOL_SYSTEM_BEGIN in system_messages[0]["content"]
+    assert "plva_tool" in system_messages[0]["content"]
+    assert document["messages"][0]["content"] == "You are Holo."  # input untouched
+
+
+def test_teaching_falls_back_to_last_user_message() -> None:
+    hook = tool_teaching_request_hook()
+    document = {"messages": [{"role": "user", "content": [{"type": "text", "text": "task"}]}]}
+    rewritten, _ = hook(document, {})
+    parts = rewritten["messages"][0]["content"]
+    assert any(TOOL_SYSTEM_BEGIN in p["text"] for p in parts if isinstance(p, dict))
+
+
+def test_teaching_replaces_stale_blocks() -> None:
+    hook = tool_teaching_request_hook()
+    stale = f"You are Holo.\n\n{TOOL_SYSTEM_BEGIN}\nold teaching\n{TOOL_SYSTEM_END}"
+    document = {"messages": [{"role": "system", "content": stale}]}
+    rewritten, _ = hook(document, {})
+    content = rewritten["messages"][0]["content"]
+    assert "old teaching" not in content
+    assert content.count(TOOL_SYSTEM_BEGIN) == 1
+
+
+def test_teaching_includes_session_memory() -> None:
+    loop = ToolLoop(ToolRegistry())
+    loop.execute(_call("add", {"a": 17, "b": 25}))
+    hook = tool_teaching_request_hook(loop)
+    document = {"messages": [{"role": "system", "content": "You are Holo."}]}
+    rewritten, _ = hook(document, {})
+    assert "add: 42" in rewritten["messages"][0]["content"]
+
+
+def test_teaching_without_messages_fails_closed() -> None:
+    with pytest.raises(ToolError):
+        tool_teaching_request_hook()({"model": "m"}, {})
 
 
 def test_continuation_without_assistant_content_fails_closed() -> None:
