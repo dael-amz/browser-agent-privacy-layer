@@ -35,7 +35,7 @@ export const S08LiveProof: React.FC = () => {
   return (
     <SceneBg>
       {/* headline (clears out before the recording) */}
-      <div style={{ position: "absolute", top: 300, left: 0, right: 0, textAlign: "center", opacity: headOut, zIndex: 5 }}>
+      <div style={{ position: "absolute", top: 400, left: 0, right: 0, textAlign: "center", opacity: headOut, zIndex: 5 }}>
         <div style={{ ...T.hero, fontSize: 110, opacity: head1, transform: `translateY(${(1 - head1) * 40}px)` }}>
           Don't trust us.
         </div>
@@ -64,11 +64,11 @@ export const S08LiveProof: React.FC = () => {
             >
               <span style={{ color: "#5fdc9a" }}>$</span>
               PLVA_REDACT=1 PLVA_REDACT_ENGINE=vision ./run_step1.sh
-              <span style={{ marginLeft: "auto", fontSize: 20, color: C.whiteDim, fontFamily: FONT, fontWeight: 600 }}>
-                not a mockup — a live run
+              <span style={{ marginLeft: "auto", fontSize: 20, color: C.whiteDim, fontFamily: FONT, fontWeight: 500 }}>
+                not a mockup. a live run
               </span>
             </div>
-            <Shot id="SHOT-03" style={{ width: "100%", height: 700, borderRadius: "0 0 16px 16px" }} />
+            <Shot id="SHOT-03" style={{ width: "100%", height: 700, borderRadius: "0 0 16px 16px" }} dimAfter={190} />
           </div>
 
           {/* callout 1: the env var */}
@@ -79,7 +79,7 @@ export const S08LiveProof: React.FC = () => {
           {/* callout 2: magnifier parks on a chip in the viewer */}
           {frame >= 196 && (
             <>
-              <MagnifierRing x={magX} y={magY} r={95} color={C.green} opacity={magIn} />
+              <MagnifierRing x={magX} y={magY} r={95} color={C.ink} opacity={magIn} />
               <div
                 style={{
                   position: "absolute",
@@ -89,14 +89,14 @@ export const S08LiveProof: React.FC = () => {
                   textAlign: "center",
                   fontFamily: FONT,
                   fontSize: 26,
-                  fontWeight: 650,
+                  fontWeight: 500,
                   color: C.white,
-                  background: C.green,
+                  background: C.inverse,
                   borderRadius: 999,
                   padding: "12px 10px",
                   opacity: parkLabel,
                   transform: `translateY(${(1 - parkLabel) * 16}px)`,
-                  boxShadow: "0 14px 40px rgba(12,12,12,.22)",
+                  boxShadow: "0 12px 32px rgba(12,12,12,.1)",
                 }}
               >
                 the only version that ever left
@@ -117,7 +117,7 @@ export const S08LiveProof: React.FC = () => {
             }}
           >
             <span style={{ width: 16, height: 16, borderRadius: 999, background: C.red, boxShadow: `0 0 14px 2px ${C.red}77` }} />
-            <span style={{ fontFamily: FONT, fontSize: 28, fontWeight: 750, color: C.ink }}>LIVE RUN</span>
+            <span style={{ fontFamily: FONT, fontSize: 28, fontWeight: 500, color: C.ink }}>LIVE RUN</span>
             <span style={{ fontFamily: MONO, fontSize: 24, color: C.gray }}>Holo3-35B-A3B · H Company · end-to-end</span>
           </div>
 
@@ -129,17 +129,20 @@ export const S08LiveProof: React.FC = () => {
                   style={{
                     fontFamily: FONT,
                     fontSize: 30,
-                    fontWeight: 750,
+                    fontWeight: 500,
                     color: C.white,
-                    background: C.green,
-                    borderRadius: 14,
+                    background: C.inverse,
+                    borderRadius: 999,
                     padding: "16px 32px",
-                    display: "inline-block",
-                    boxShadow: `0 16px 50px ${C.green}55`,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 14,
+                    boxShadow: "0 12px 32px rgba(12,12,12,.1)",
                     opacity: badge,
                   }}
                 >
-                  ✓ task completed — 0 values upstream
+                  <span style={{ width: 13, height: 13, borderRadius: "50%", background: C.green, display: "inline-block" }} />
+                  task completed · 0 values upstream
                 </span>
               </Stamp>
             </div>

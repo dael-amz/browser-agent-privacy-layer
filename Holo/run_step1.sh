@@ -150,7 +150,7 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
     --redact-profile "$REDACT_PROFILE"
     --redact-backend "${PLVA_REDACT_BACKEND:-auto}"
     --vision-worker "${PLVA_VISION_WORKER:-coreml-redactor}"
-    --vision-mode "${PLVA_VISION_MODE:-cascade}"
+    --vision-mode "${PLVA_VISION_MODE:-fast}"
     --redact-lifecycle "${PLVA_REDACT_LIFECYCLE:-adaptive}"
     --redact-idle-seconds "${PLVA_REDACT_IDLE_SECONDS:-60}"
     --audit-capacity "${PLVA_AUDIT_CAPACITY:-32}"
@@ -187,14 +187,14 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
         ;;
     esac
     HOOK_ARGS+=(--semantic-engine "$SEMANTIC_ENGINE")
-    parse_on_off VISUAL_DETECTOR "${PLVA_VISUAL_DETECTOR:-1}" PLVA_VISUAL_DETECTOR
+    parse_on_off VISUAL_DETECTOR "${PLVA_VISUAL_DETECTOR:-0}" PLVA_VISUAL_DETECTOR
     if [[ "$VISUAL_DETECTOR" == 0 ]]; then
       HOOK_ARGS+=(--no-visual-detector)
     else
       DETECTOR_VERSION="${PLVA_DETECTOR_VERSION:-v2}"
       case "$DETECTOR_VERSION" in
         v2) DEFAULT_VISUAL_MODEL="plva-v2-baseline/runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx" ;;
-        v3) DEFAULT_VISUAL_MODEL="plvas-v3/models/visual/webredact/detector.onnx" ;;
+        v3) DEFAULT_VISUAL_MODEL="plva-v3/dist/visual/detector.onnx" ;;
         *)
           echo "ERROR: PLVA_DETECTOR_VERSION must be v2 or v3" >&2
           exit 1
@@ -204,8 +204,7 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
       if [[ ! -f "$VISUAL_MODEL" ]]; then
         echo "ERROR: visual detector not found: $VISUAL_MODEL" >&2
         if [[ "$DETECTOR_VERSION" == "v3" && -z "${PLVA_VISUAL_MODEL:-}" ]]; then
-          echo "       The pinned v3 release ships OpenVINO IR only (nano640.bin/xml)." >&2
-          echo "       Export an ONNX detector to that path (plvas-v3/training/visual/export_detector_onnx.py) or select v2." >&2
+          echo "       Extract the frozen plva-v3 bundle to Holo/plva-v3 or select v2." >&2
         fi
         exit 1
       fi
@@ -244,6 +243,10 @@ parse_on_off PRIVACY_SKILL "${PLVA_PRIVACY_SKILL:-$PRIVACY_ENABLED}" PLVA_PRIVAC
 # Tools do not require redaction, so this toggle lives outside the PLVA_REDACT block above.
 parse_on_off TOOLS_ENABLED "${PLVA_TOOLS:-0}" PLVA_TOOLS
 parse_on_off TOOLS_SKILL "${PLVA_TOOLS_SKILL:-$TOOLS_ENABLED}" PLVA_TOOLS_SKILL
+if [[ "$TOOLS_SKILL" == 1 && "$TOOLS_ENABLED" == 0 ]]; then
+  echo "ERROR: PLVA_TOOLS_SKILL=1 requires PLVA_TOOLS=1 (the proxy must detect tool calls the skill teaches)" >&2
+  exit 1
+fi
 [[ "$TOOLS_ENABLED" == 1 ]] && HOOK_ARGS+=(--tools)
 if [[ -n "${PLVA_CAPTURE_GRAMMAR:-}" ]]; then
   HOOK_ARGS+=(--capture-grammar "$PLVA_CAPTURE_GRAMMAR")
@@ -352,6 +355,20 @@ raise SystemExit(0 if ok else 1)
   echo "ERROR: preflight failed — wrong key (401) or provider unreachable. See $PROXY_LOG" >&2
   exit 1
 fi
+# Advertised is not usable: promotion-listed models can still 402 at call time.
+# A one-token text probe through the proxy surfaces tier/credit gating up front.
+PROBE_RESPONSE=$(curl -s -m 30 "http://127.0.0.1:$PORT/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
+  -w $'\n%{http_code}')
+PROBE_CODE="${PROBE_RESPONSE##*$'\n'}"
+if [[ "$PROBE_CODE" != 200 ]]; then
+  echo "ERROR: model $MODEL is advertised but rejected a 1-token probe (HTTP $PROBE_CODE)" >&2
+  printf '%s' "${PROBE_RESPONSE%$'\n'*}" | head -c 400 >&2
+  echo >&2
+  exit 1
+fi
+echo "--- preflight: $MODEL answered a 1-token probe"
 
 # 3) The Step 1 task. Frame-bearing run artifacts go to a private ephemeral directory.
 RUNS_DIR=$(mktemp -d /tmp/holo-step1-runs.XXXXXX)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -221,3 +222,52 @@ def test_continuation_without_assistant_content_fails_closed() -> None:
     loop = ToolLoop(ToolRegistry())
     with pytest.raises(ToolError):
         loop.continuation({"messages": []}, {"choices": []}, _call("echo", {"text": "x"}), "x")
+
+
+def test_teaching_ignores_assistant_echoed_sentinel() -> None:
+    hook = tool_teaching_request_hook()
+    document = {
+        "messages": [
+            {"role": "system", "content": "You are Holo."},
+            {"role": "assistant", "content": f"I saw {TOOL_SYSTEM_BEGIN} in my instructions"},
+            {"role": "user", "content": "continue"},
+        ]
+    }
+    rewritten, _ = hook(document, {})
+    assert rewritten["messages"][1]["content"] == f"I saw {TOOL_SYSTEM_BEGIN} in my instructions"
+
+
+def test_teaching_still_fails_closed_on_corrupt_system_block() -> None:
+    document = {"messages": [{"role": "system", "content": f"x {TOOL_SYSTEM_BEGIN} truncated"}]}
+    with pytest.raises(ToolError):
+        tool_teaching_request_hook()(document, {})
+
+
+def test_teaching_does_not_mutate_untouched_text() -> None:
+    hook = tool_teaching_request_hook()
+    document = {
+        "messages": [
+            {"role": "system", "content": "You are Holo."},
+            {"role": "user", "content": "task with trailing space   "},
+        ]
+    }
+    rewritten, _ = hook(document, {})
+    assert rewritten["messages"][1]["content"] == "task with trailing space   "
+
+
+def test_loop_logs_unknown_tool_names_as_placeholder() -> None:
+    loop = ToolLoop(ToolRegistry())
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append  # type: ignore[assignment]
+    logger = logging.getLogger("plva_proxy.tools")
+    logger.addHandler(handler)
+    previous_level = logger.level
+    logger.setLevel(logging.INFO)  # module logs at INFO; ensure it isn't filtered here
+    try:
+        loop.execute(_call("evil</script>", {}))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+    assert records and "evil" not in records[-1].getMessage()
+    assert "<unknown>" in records[-1].getMessage()

@@ -40,7 +40,7 @@ export const S10OneLine: React.FC = () => {
           transform: `translateX(${(1 - cardIn) * -80}px)`,
         }}
       >
-        <div style={{ background: C.inverse, borderRadius: 18, padding: "30px 36px", boxShadow: "0 30px 80px rgba(12,12,12,.25)" }}>
+        <div style={{ background: C.inverse, borderRadius: 16, padding: "30px 36px", boxShadow: "0 12px 32px rgba(12,12,12,.1)" }}>
           <div style={{ fontFamily: MONO, fontSize: 21, color: C.whiteDim, marginBottom: 18 }}>agent.config · 🔒 read-only, still</div>
           <div style={{ fontFamily: MONO, fontSize: 26, lineHeight: 2 }}>
             <div style={{ color: C.whiteFaint, textDecoration: "line-through" }}>runtime: hai-agent-runtime</div>
@@ -67,17 +67,19 @@ export const S10OneLine: React.FC = () => {
               <span
                 style={{
                   fontFamily: FONT,
-                  fontSize: 27,
-                  fontWeight: 700,
+                  fontSize: 26,
+                  fontWeight: 500,
                   color: C.green,
-                  border: `3px solid ${C.green}`,
-                  background: C.greenSoft,
+                  border: `1.5px solid currentColor`,
                   borderRadius: 999,
                   padding: "12px 28px",
-                  display: "inline-block",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 12,
                 }}
               >
-                {c} ✓
+                <span style={{ width: 12, height: 12, borderRadius: "50%", background: C.green, display: "inline-block" }} />
+                {c}
               </span>
             </Stamp>
           ))}
@@ -97,7 +99,7 @@ export const S10OneLine: React.FC = () => {
       >
         <Shot id="SHOT-04" style={{ width: 860, height: 540 }} />
         <div style={{ fontFamily: FONT, fontSize: 24, color: C.gray, textAlign: "center", marginTop: 20, opacity: ramp(frame, 70, 14) }}>
-          local control panel · <span style={{ fontFamily: MONO, color: C.ink }}>127.0.0.1:18080</span> — flip privacy per class, live
+          local control panel · <span style={{ fontFamily: MONO, color: C.ink }}>127.0.0.1:18080</span> · flip privacy per class, live
         </div>
       </div>
     </SceneBg>

@@ -69,25 +69,27 @@ export const S02Problem: React.FC = () => {
       {/* desktop node (real capture goes here) */}
       <div style={{ position: "absolute", left: 160, top: 480, width: 640 }}>
         <Shot id="SHOT-01" style={{ width: 640, height: 400 }} delay={8} />
-        <div style={{ fontFamily: FONT, fontSize: 24, fontWeight: 600, color: C.ink, marginTop: 16, textAlign: "center" }}>
+        <div style={{ fontFamily: FONT, fontSize: 24, fontWeight: 500, color: C.ink, marginTop: 16, textAlign: "center" }}>
           your desktop
         </div>
       </div>
 
       {/* wires */}
       <svg width="1920" height="1080" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-        {/* request wire (top) */}
+        {/* request wire (top) — endpoints anchored to the card edge and cloud */}
         <path
-          d={`M ${x0 + 20} ${yTop} C ${x0 + 240} ${yTop - 70}, ${x1 - 240} ${yTop - 70}, ${x1} ${yTop}`}
+          d={`M ${x0} ${yTop} C ${x0 + 240} ${yTop - 70}, ${x1 - 240} ${yTop - 70}, ${x1 + 58} ${yTop}`}
           stroke={C.ink}
           strokeWidth="3.5"
           fill="none"
-          strokeDasharray="700"
-          strokeDashoffset={700 * (1 - wireDraw)}
+          strokeDasharray="780"
+          strokeDashoffset={780 * (1 - wireDraw)}
         />
+        <circle cx={x0} cy={yTop} r="7" fill={C.ink} opacity={wireDraw} />
+        <circle cx={x1 + 58} cy={yTop} r="7" fill={C.ink} opacity={wireDraw >= 1 ? 1 : 0} />
         {/* action wire (bottom, returning) */}
         <path
-          d={`M ${x1} ${yTop + 160} C ${x1 - 240} ${yTop + 230}, ${x0 + 240} ${yTop + 230}, ${x0 + 20} ${yTop + 160}`}
+          d={`M ${x1 + 58} ${yTop + 160} C ${x1 - 240} ${yTop + 230}, ${x0 + 240} ${yTop + 230}, ${x0} ${yTop + 160}`}
           stroke={C.grayLight}
           strokeWidth="3"
           fill="none"
@@ -100,7 +102,7 @@ export const S02Problem: React.FC = () => {
         {/* flying raw-frame thumbnails */}
         {flights.map((t, i) =>
           t === null ? null : (
-            <g key={i} transform={`translate(${x0 + 20 + (x1 - x0 - 20) * t}, ${yTop - 52 * Math.sin(t * Math.PI)})`}>
+            <g key={i} transform={`translate(${x0 + (x1 + 58 - x0) * t}, ${yTop - 52 * Math.sin(t * Math.PI)})`}>
               <rect x="-34" y="-24" width="68" height="48" rx="6" fill={C.white} stroke={C.red} strokeWidth="3" />
               <rect x="-24" y="-14" width="48" height="6" rx="2" fill={C.redSoft} stroke="none" />
               <rect x="-24" y="-3" width="34" height="6" rx="2" fill={C.red} stroke="none" />
@@ -120,17 +122,17 @@ export const S02Problem: React.FC = () => {
         <Odometer label="frames sent:" value={sent} />
         <div style={{ display: "flex", gap: 18 }}>
           {CLASSES.map((c, i) => (
-            <Stamp key={c} delay={120 + i * 12} rotate={i % 2 === 0 ? -3 : 2}>
+            <Stamp key={c} delay={120 + i * 12} rotate={i % 2 === 0 ? -2 : 1.5}>
               <span
                 style={{
-                  fontFamily: MONO,
-                  fontSize: 26,
-                  fontWeight: 700,
+                  fontFamily: FONT,
+                  fontSize: 24,
+                  fontWeight: 500,
                   color: C.red,
-                  border: `3px solid ${C.red}`,
-                  borderRadius: 10,
-                  padding: "8px 20px",
-                  background: C.redSoft,
+                  border: `1.5px solid currentColor`,
+                  borderRadius: 999,
+                  padding: "8px 22px",
+                  display: "inline-block",
                 }}
               >
                 {c}

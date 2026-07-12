@@ -4,3 +4,6 @@
 .venv/
 *.onnx
 __pycache__/
+
+# Frozen local copies of alternative semantic filter models (multi-GB)
+models/semantic/

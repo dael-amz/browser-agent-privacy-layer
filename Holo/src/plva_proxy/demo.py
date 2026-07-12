@@ -35,7 +35,7 @@ from plva_proxy.credentials import (
     inject_provider_keys,
 )
 from plva_proxy.privacy import SafetyPolicy
-from plva_proxy.providers import PROVIDERS
+from plva_proxy.providers import PROVIDERS, ProviderSpec
 from plva_proxy.runtime_capture import LOOPBACK_HOST
 
 ROOT: Final = Path(__file__).resolve().parents[2]
@@ -45,6 +45,53 @@ HISTORY_ROOT: Final = ROOT / "history"
 _RUN_ID: Final = re.compile(r"^run-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
 _IMAGE_SUFFIXES: Final = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 DEFAULT_POLICY_PATH: Final = ROOT / "config" / "privacy-policy.json"
+MODEL_LIST_TTL: Final = 300.0
+
+
+def _provider_api_key(spec: ProviderSpec) -> str | None:
+    for name in spec.key_names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    try:
+        for line in (ROOT / ".env").read_text("utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() in spec.key_names and value.strip():
+                return value.strip()
+    except OSError:
+        pass
+    return None
+
+
+def _fetch_provider_models(spec: ProviderSpec) -> list[dict[str, str]]:
+    """Query the provider's live /models list; raises when unreachable or empty."""
+
+    headers: dict[str, str] = {}
+    key = _provider_api_key(spec)
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    request = urllib.request.Request(spec.base_url.rstrip("/") + "/models", headers=headers)
+    with urllib.request.urlopen(request, timeout=8.0) as response:
+        payload = json.loads(response.read())
+    models: list[dict[str, str]] = []
+    entries = payload.get("data") if isinstance(payload, dict) else None
+    for item in entries if isinstance(entries, list) else []:
+        if not isinstance(item, dict):
+            continue
+        model_id = item.get("id")
+        if not isinstance(model_id, str) or not model_id:
+            continue
+        if item.get("is_ready") is False or item.get("is_active") is False:
+            continue
+        name = item.get("name")
+        models.append(
+            {"id": model_id, "label": name if isinstance(name, str) and name else model_id}
+        )
+    if not models:
+        raise ValueError("provider returned no models")
+    return models
+
+
 PROXY_BASE: Final = "http://127.0.0.1:18081"
 _ANSI_ESCAPE: Final = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _INLINE_SECRET: Final = re.compile(
@@ -263,18 +310,23 @@ class DemoController:
             else HISTORY_ROOT
         )
         self._run_id: str | None = None
+        self._model_lists: dict[str, tuple[float, list[dict[str, str]], bool]] = {}
         self._policy = _load_policy().snapshot()
         self._settings: dict[str, Any] = {
             "plva_enabled": True,
             "provider": "hcompany",
             "model": PROVIDERS["hcompany"].model,
             "credential_source": "auto",
-            "vision_mode": "cascade",
+            "vision_mode": "fast",
             "lifecycle": "eager",
             "detector_version": "v2",
             "ocr_engine": "apple",
-            "visual_detector": "on",
+            # The current visual checkpoint over-masks ordinary BrowserUse UI.
+            # OCR + semantic rules are the calibrated default; the visual lab
+            # path remains opt-in for detector evaluation.
+            "visual_detector": "off",
             "semantic_engine": "rampart",
+            "tools": "off",
             "features": {name: True for name in FEATURE_ENV},
         }
 
@@ -355,7 +407,11 @@ class DemoController:
             raise ValueError("model is invalid")
         # A model from another provider falls back to the new provider's default
         # so switching providers never strands an incompatible model id.
-        if model not in PROVIDERS[provider].allowed_models():
+        allowed = set(PROVIDERS[provider].allowed_models())
+        cached = self._model_lists.get(provider)
+        if cached is not None:
+            allowed.update(entry["id"] for entry in cached[1])
+        if model not in allowed:
             model = PROVIDERS[provider].model
         if vision_mode not in {"fast", "cascade", "accurate"}:
             raise ValueError("vision mode is invalid")
@@ -364,9 +420,15 @@ class DemoController:
         # Absent keys fall back to defaults so older clients keep working.
         detector_version = raw.get("detector_version") or "v2"
         ocr_engine = raw.get("ocr_engine") or "apple"
-        visual_detector = raw.get("visual_detector") or "on"
+        visual_detector = raw.get("visual_detector") or "off"
         if detector_version not in {"v2", "v3"}:
             raise ValueError("detector version is invalid")
+        v3_detector = ROOT / "plva-v3" / "dist" / "visual" / "detector.onnx"
+        if detector_version == "v3" and visual_detector == "on" and not v3_detector.is_file():
+            raise ValueError(
+                "the v3 detector is not installed; extract the frozen plva-v3 "
+                "bundle to Holo/plva-v3 or keep v2"
+            )
         if ocr_engine not in {"apple", "rapidocr"}:
             raise ValueError("OCR engine is invalid")
         if visual_detector not in {"on", "off"}:
@@ -377,6 +439,9 @@ class DemoController:
         credential_source = raw.get("credential_source") or "auto"
         if credential_source not in CREDENTIAL_SOURCES:
             raise ValueError("credential source is invalid")
+        tools = raw.get("tools") or "off"
+        if tools not in {"on", "off"}:
+            raise ValueError("tools setting is invalid")
         if not isinstance(plva_enabled, bool) or not isinstance(features, dict):
             raise ValueError("settings are invalid")
         selected_features: dict[str, bool] = {}
@@ -398,6 +463,7 @@ class DemoController:
                 "ocr_engine": ocr_engine,
                 "visual_detector": visual_detector,
                 "semantic_engine": semantic_engine,
+                "tools": tools,
                 "features": selected_features,
             }
             return copy.deepcopy(self._settings)
@@ -565,6 +631,27 @@ class DemoController:
     def history_image(self, run_id: str, call_id: int, index: int) -> tuple[str, bytes] | None:
         return self._history.image(run_id, call_id, index)
 
+    def model_catalog(self) -> dict[str, Any]:
+        """Per-provider model lists from the live /models endpoints.
+
+        Results (including failures) are cached for MODEL_LIST_TTL; on failure
+        the frozen presets from providers.py answer instead, marked live=false.
+        """
+
+        catalog: dict[str, Any] = {}
+        for name, spec in PROVIDERS.items():
+            cached = self._model_lists.get(name)
+            if cached is None or time.time() - cached[0] >= MODEL_LIST_TTL:
+                try:
+                    models, live = _fetch_provider_models(spec), True
+                except (OSError, ValueError, urllib.error.URLError):
+                    models = [{"id": m, "label": m} for m in spec.allowed_models()]
+                    live = False
+                cached = (time.time(), models, live)
+                self._model_lists[name] = cached
+            catalog[name] = {"models": cached[1], "live": cached[2]}
+        return catalog
+
     def _require_idle(self) -> None:
         if self._process is not None and self._process.poll() is None:
             raise RuntimeError("stop the active task before changing this setting")
@@ -584,6 +671,7 @@ class DemoController:
                 "PLVA_OCR_ENGINE": str(self._settings["ocr_engine"]),
                 "PLVA_VISUAL_DETECTOR": "1" if self._settings["visual_detector"] == "on" else "0",
                 "PLVA_SEMANTIC_ENGINE": str(self._settings["semantic_engine"]),
+                "PLVA_TOOLS": "1" if self._settings["tools"] == "on" else "0",
                 "PLVA_PRIVACY": "1" if enabled else "0",
                 "PLVA_POLICY_JSON": json.dumps(self._policy, separators=(",", ":")),
             }
@@ -836,6 +924,12 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
     async def state() -> Response:
         return _json_response(active.snapshot())
 
+    @app.get("/api/models")
+    def models() -> Response:
+        # Sync handler on purpose: FastAPI runs it in a worker thread, keeping
+        # the upstream /models fetch off the event loop.
+        return _json_response({"providers": active.model_catalog()})
+
     @app.put("/api/policy")
     async def policy(request: Request) -> Response:
         try:
@@ -850,9 +944,7 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
             selected = active.set_settings(await request.json())
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return _json_response(
-            {"settings": selected, "credentials": active._credentials_snapshot()}
-        )
+        return _json_response({"settings": selected, "credentials": active._credentials_snapshot()})
 
     @app.post("/api/credentials/connect-holo-cli")
     async def connect_holo_cli() -> Response:

@@ -30,20 +30,23 @@ def test_resolve_provider_key_prefers_environment_then_holo_cli_then_project(
     monkeypatch.setattr(credentials, "HOLO_USER_ENV", holo_env)
     monkeypatch.delenv("HAI_API_KEY", raising=False)
 
-    assert credentials.resolve_provider_key(
-        provider="hcompany", project_root=project_root
-    ) == ("from-holo-cli", "holo_cli")
+    assert credentials.resolve_provider_key(provider="hcompany", project_root=project_root) == (
+        "from-holo-cli",
+        "holo_cli",
+    )
 
     monkeypatch.setenv("HAI_API_KEY", "from-shell")
-    assert credentials.resolve_provider_key(
-        provider="hcompany", project_root=project_root
-    ) == ("from-shell", "environment")
+    assert credentials.resolve_provider_key(provider="hcompany", project_root=project_root) == (
+        "from-shell",
+        "environment",
+    )
 
     monkeypatch.delenv("HAI_API_KEY", raising=False)
     holo_env.write_text("\n", encoding="utf-8")
-    assert credentials.resolve_provider_key(
-        provider="hcompany", project_root=project_root
-    ) == ("from-project", "project")
+    assert credentials.resolve_provider_key(provider="hcompany", project_root=project_root) == (
+        "from-project",
+        "project",
+    )
 
 
 def test_credential_source_preference_limits_lookup(
@@ -99,12 +102,12 @@ def test_credential_status_reports_holo_cli_label(
     assert "from-holo-cli" not in str(status)
 
 
-def test_inject_provider_keys_sets_canonical_name(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_inject_provider_keys_sets_canonical_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     holo_env = tmp_path / "holo.env"
     holo_env.write_text("HAI_API_KEY=from-holo-cli\n", encoding="utf-8")
     monkeypatch.setattr(credentials, "HOLO_USER_ENV", holo_env)
     environment: dict[str, str] = {}
-    credentials.inject_provider_keys(
-        environment, provider="hcompany", project_root=tmp_path
-    )
+    credentials.inject_provider_keys(environment, provider="hcompany", project_root=tmp_path)
     assert environment["HAI_API_KEY"] == "from-holo-cli"

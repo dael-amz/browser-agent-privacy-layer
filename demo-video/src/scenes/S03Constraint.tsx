@@ -67,7 +67,7 @@ export const S03Constraint: React.FC = () => {
           style={{
             fontFamily: MONO,
             fontSize: 58,
-            fontWeight: 700,
+            fontWeight: 500,
             marginTop: 30,
             color: C.ink,
             opacity: pop(frame, fps, 80),
@@ -90,9 +90,9 @@ export const S03Constraint: React.FC = () => {
         <div
           style={{
             background: C.inverse,
-            borderRadius: 18,
+            borderRadius: 16,
             padding: "34px 40px",
-            boxShadow: `0 40px 90px rgba(12,12,12,.28)${commitPulse > 0 ? `, 0 0 0 ${6 * (1 - commitPulse)}px ${C.green}55` : ""}`,
+            boxShadow: `0 12px 32px rgba(12,12,12,.1)${commitPulse > 0 ? `, 0 0 0 ${6 * (1 - commitPulse)}px ${C.green}55` : ""}`,
             opacity: ramp(frame, 14, 12),
             transform: `translateY(${(1 - ramp(frame, 14, 12)) * 40}px)`,
           }}
@@ -104,7 +104,7 @@ export const S03Constraint: React.FC = () => {
                 marginLeft: "auto",
                 fontFamily: FONT,
                 fontSize: 18,
-                fontWeight: 650,
+                fontWeight: 500,
                 letterSpacing: "0.1em",
                 color: C.whiteDim,
                 border: `2px solid rgba(255,255,255,.25)`,
@@ -137,16 +137,17 @@ export const S03Constraint: React.FC = () => {
             <span style={{ color: done ? "#5fdc9a" : C.white }}>{url}</span>
             {caretOn && <span style={{ borderLeft: `3px solid ${C.white}`, marginLeft: 2 }} />}
             <span style={{ color: C.whiteDim }}>"</span>
-            <span
-              style={{
-                marginLeft: 18,
-                fontSize: 20,
-                color: "#5fdc9a",
-                opacity: done ? ramp(frame, 220, 10) : 0,
-              }}
-            >
-              ✓ the only line you control
-            </span>
+          </div>
+          <div
+            style={{
+              fontFamily: MONO,
+              fontSize: 22,
+              color: "#5fdc9a",
+              opacity: done ? ramp(frame, 222, 10) : 0,
+              marginTop: 2,
+            }}
+          >
+            # ↑ the only line you control
           </div>
         </div>
 
@@ -155,7 +156,13 @@ export const S03Constraint: React.FC = () => {
           <svg width="830" height="120" style={{ position: "absolute", inset: 0 }}>
             <line x1="90" y1="60" x2="740" y2="60" stroke={C.grayLight} strokeWidth="3" />
             {done && (
-              <circle cx={interpolate((frame - 226) % 40, [0, 40], [420, 740])} cy="60" r="7" fill={C.green} opacity={dock} />
+              <circle
+                cx={interpolate((frame - 226) % 40, [0, 40], [575, 720])}
+                cy="60"
+                r="7"
+                fill={C.green}
+                opacity={dock * Math.sin((((frame - 226) % 40) / 40) * Math.PI)}
+              />
             )}
           </svg>
           {["runtime", "cloud"].map((label, i) => (
@@ -167,9 +174,9 @@ export const S03Constraint: React.FC = () => {
                 top: 28,
                 fontFamily: FONT,
                 fontSize: 21,
-                fontWeight: 600,
+                fontWeight: 500,
                 color: C.gray,
-                border: `2px solid ${C.borderSoft}`,
+                border: `1px solid ${C.borderSoft}`,
                 background: C.white,
                 borderRadius: 12,
                 padding: "14px 20px",
@@ -187,12 +194,12 @@ export const S03Constraint: React.FC = () => {
               opacity: dock,
               fontFamily: FONT,
               fontSize: 24,
-              fontWeight: 700,
+              fontWeight: 500,
               color: C.white,
               background: C.green,
-              borderRadius: 14,
+              borderRadius: 16,
               padding: "20px 28px",
-              boxShadow: `0 14px 40px ${C.green}55`,
+              boxShadow: "0 12px 32px rgba(12,12,12,.1)",
             }}
           >
             PLVA PROXY

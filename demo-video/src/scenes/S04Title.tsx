@@ -2,7 +2,7 @@ import React from "react";
 import { useCurrentFrame, useVideoConfig, interpolate } from "remotion";
 import { C, T, FONT, MONO } from "../theme";
 import { pop, ramp } from "../anim";
-import { SceneBg } from "../components/Blocks";
+import { SceneBg, Wordmark } from "../components/Blocks";
 
 const Node: React.FC<{
   title: string;
@@ -17,20 +17,43 @@ const Node: React.FC<{
       opacity: p,
       transform: `translateX(${(1 - p) * fromX}px)`,
       background: highlight ? C.inverse : C.white,
-      border: `2px solid ${highlight ? C.inverse : C.borderSoft}`,
-      borderRadius: 18,
+      border: `1px solid ${highlight ? C.inverse : C.borderSoft}`,
+      borderRadius: 16,
       padding: "30px 44px",
       textAlign: "center",
-      boxShadow: highlight ? "0 24px 70px rgba(12,12,12,.3)" : "0 14px 40px rgba(12,12,12,.08)",
+      boxShadow: highlight ? "0 12px 32px rgba(12,12,12,.1)" : "0 1px 2px rgba(12,12,12,.03)",
       minWidth: 330,
     }}
   >
-    <div style={{ fontFamily: FONT, fontSize: 32, fontWeight: 700, color: highlight ? C.white : C.ink, letterSpacing: "-0.02em" }}>
+    <div style={{ fontFamily: FONT, fontSize: 32, fontWeight: 500, color: highlight ? C.white : C.ink, letterSpacing: "-0.02em" }}>
       {title}
     </div>
-    <div style={{ fontFamily: MONO, fontSize: 20, color: highlight ? C.whiteDim : accent, marginTop: 8, fontWeight: 600 }}>
+    <div style={{ fontFamily: MONO, fontSize: 20, color: highlight ? C.whiteDim : accent, marginTop: 8, fontWeight: 500 }}>
       {sub}
     </div>
+  </div>
+);
+
+/** Connector that lives IN the flex row, so its endpoints always touch its neighbors. */
+const Wire: React.FC<{ label: string; draw: number; labelIn: number }> = ({ label, draw, labelIn }) => (
+  <div style={{ width: 150, position: "relative", flexShrink: 0 }}>
+    <div style={{ borderTop: `2px solid ${C.ink}`, transform: `scaleX(${draw})` }} />
+    <span
+      style={{
+        position: "absolute",
+        left: "50%",
+        top: -46,
+        transform: "translateX(-50%)",
+        fontFamily: MONO,
+        fontSize: 23,
+        fontWeight: 500,
+        color: C.green,
+        whiteSpace: "nowrap",
+        opacity: labelIn,
+      }}
+    >
+      {label}
+    </span>
   </div>
 );
 
@@ -43,7 +66,6 @@ export const S04Title: React.FC = () => {
   const { fps } = useVideoConfig();
 
   const wm = pop(frame, fps, 4);
-  const cursorOn = Math.floor(frame / 12) % 2 === 0;
   const sub = pop(frame, fps, 22);
   const nodeL = pop(frame, fps, 70);
   const nodeC = pop(frame, fps, 92);
@@ -53,22 +75,19 @@ export const S04Title: React.FC = () => {
 
   return (
     <SceneBg>
-      <div style={{ position: "absolute", top: 200, left: 0, right: 0, textAlign: "center" }}>
-        <div style={{ display: "inline-flex", alignItems: "baseline", gap: 20, opacity: wm, transform: `translateY(${(1 - wm) * 40}px)` }}>
-          <span style={{ fontFamily: FONT, fontSize: 150, fontWeight: 700, letterSpacing: "-0.04em", color: C.ink }}>
-            Holo
-          </span>
-          <span style={{ width: 26, height: 100, background: C.green, opacity: cursorOn ? 1 : 0.15, borderRadius: 4, display: "inline-block" }} />
+      <div style={{ position: "absolute", top: 200, left: 0, right: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ opacity: wm, transform: `translateY(${(1 - wm) * 24}px)`, filter: `blur(${(1 - wm) * 3}px)` }}>
+          <Wordmark size={140} sub="Beta" />
         </div>
-        <div style={{ ...T.h3, color: C.ink, marginTop: 4, opacity: sub, transform: `translateY(${(1 - sub) * 24}px)` }}>
+        <div style={{ ...T.h3, color: C.ink, marginTop: 20, opacity: sub, transform: `translateY(${(1 - sub) * 16}px)`, filter: `blur(${(1 - sub) * 3}px)` }}>
           Private computer use
         </div>
-        <div style={{ ...T.body, color: C.gray, marginTop: 14, opacity: pop(frame, fps, 40) }}>
-          PLVA — a local, fail-closed privacy proxy between the agent runtime and the model
+        <div style={{ ...T.body, color: C.gray, marginTop: 14, opacity: pop(frame, fps, 40), filter: `blur(${(1 - pop(frame, fps, 40)) * 3}px)` }}>
+          PLVA: a local, fail-closed privacy proxy between the agent runtime and the model
         </div>
       </div>
 
-      {/* architecture lockup */}
+      {/* architecture lockup — wires are flex children so they always meet the cards */}
       <div
         style={{
           position: "absolute",
@@ -78,23 +97,13 @@ export const S04Title: React.FC = () => {
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          gap: 100,
         }}
       >
         <Node title="AGENT RUNTIME" sub="closed binary" p={nodeL} fromX={-420} />
+        <Wire label="→ redact" draw={wires} labelIn={legs} />
         <Node title="PLVA" sub="127.0.0.1:18081" p={nodeC} fromX={0} highlight accent={C.green} />
+        <Wire label="← resolve" draw={wires} labelIn={legs} />
         <Node title="Holo3-35B" sub="H COMPANY" p={nodeR} fromX={420} />
-      </div>
-
-      {/* wires + leg labels */}
-      <svg width="1920" height="1080" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-        {/* left wire */}
-        <line x1={960 - 245} y1={710} x2={960 - 245 - 130 * wires} y2={710} stroke={C.ink} strokeWidth="3.5" />
-        <line x1={960 + 245} y1={710} x2={960 + 245 + 130 * wires} y2={710} stroke={C.ink} strokeWidth="3.5" />
-      </svg>
-      <div style={{ position: "absolute", top: 594, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 320, opacity: legs }}>
-        <span style={{ fontFamily: MONO, fontSize: 23, fontWeight: 700, color: C.green }}>→ redact</span>
-        <span style={{ fontFamily: MONO, fontSize: 23, fontWeight: 700, color: C.green }}>← resolve</span>
       </div>
 
       <div
@@ -106,12 +115,12 @@ export const S04Title: React.FC = () => {
           textAlign: "center",
           fontFamily: FONT,
           fontSize: 26,
-          fontWeight: 550,
+          fontWeight: 500,
           color: C.gray,
           opacity: pop(frame, fps, 160),
         }}
       >
-        intercepts <span style={{ color: C.ink, fontWeight: 700 }}>both directions</span> of model traffic
+        intercepts <span style={{ color: C.ink, fontWeight: 500 }}>both directions</span> of model traffic
       </div>
     </SceneBg>
   );

@@ -33,28 +33,56 @@ export const S07Compare: React.FC = () => {
   const leftW = (1 - claim) * 100;
   const verdict = pop(frame, fps, 352);
 
+  // once overlays (pill/verdict) land, veil the shot areas so no text garbles through
+  const veil = ramp(frame, 282, 10) * 0.9;
+  // the collapsed red world dims out instead of squeezing into garbage
+  const leftDim = interpolate(claim, [0.5, 0.72], [1, 0.12], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
   const Side: React.FC<{ which: "without" | "with" }> = ({ which }) => {
     const red = which === "without";
     return (
       <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
         <div
           style={{
-            background: red ? C.red : C.green,
-            color: C.white,
+            background: C.white,
+            borderBottom: `1px solid ${C.borderFade}`,
+            borderTop: `3px solid ${red ? C.red : C.green}`,
+            color: red ? C.red : C.green,
             fontFamily: FONT,
-            fontSize: 34,
-            fontWeight: 750,
-            letterSpacing: "0.04em",
+            fontSize: 32,
+            fontWeight: 500,
             textAlign: "center",
             padding: "20px 0",
             flexShrink: 0,
+            whiteSpace: "nowrap",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 14,
           }}
         >
+          <span style={{ width: 13, height: 13, borderRadius: "50%", background: red ? C.red : C.green, display: "inline-block", flexShrink: 0 }} />
           {red ? "WITHOUT PLVA" : "WITH PLVA"}
-          <span style={{ fontWeight: 500, fontSize: 24, opacity: 0.85, marginLeft: 20 }}>the provider receives this</span>
+          <span style={{ fontWeight: 400, fontSize: 24, color: C.gray, marginLeft: 8 }}>the provider receives this</span>
         </div>
-        <div style={{ flex: 1, padding: 34, display: "flex", flexDirection: "column", gap: 24, minHeight: 0 }}>
-          <Shot id={red ? "SHOT-02A" : "SHOT-02B"} style={{ flex: 1, minHeight: 0 }} delay={10} />
+        <div
+          style={{
+            flex: 1,
+            padding: 34,
+            display: "flex",
+            flexDirection: "column",
+            gap: 24,
+            minHeight: 0,
+            opacity: red ? leftDim : 1,
+          }}
+        >
+          <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+            <Shot id={red ? "SHOT-02A" : "SHOT-02B"} style={{ width: "100%", height: "100%" }} delay={10} />
+            <div style={{ position: "absolute", inset: 0, background: C.white, opacity: veil, borderRadius: 16 }} />
+          </div>
           <div style={{ opacity: ramp(frame, 200, 12) }}>
             <TaskBar
               progress={progress}
@@ -64,7 +92,7 @@ export const S07Compare: React.FC = () => {
             />
           </div>
         </div>
-        <div style={{ flexShrink: 0, background: red ? C.redSoft : C.greenSoft }}>
+        <div style={{ flexShrink: 0, background: C.paperAlt, borderTop: `1px solid ${C.borderFade}` }}>
           <Ticker
             fontSize={22}
             color={red ? C.red : C.green}
@@ -83,7 +111,7 @@ export const S07Compare: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: C.white }}>
       <div style={{ position: "absolute", inset: 0, display: "flex", transform: `scale(${settle})` }}>
-        <div style={{ width: `${leftW}%`, borderRight: `3px solid ${C.ink}`, transition: "none" }}>
+        <div style={{ width: `${leftW}%`, borderRight: `1.5px solid ${C.borderSoft}`, transition: "none" }}>
           <Side which="without" />
         </div>
         <div style={{ width: `${100 - leftW}%` }}>
@@ -102,14 +130,15 @@ export const S07Compare: React.FC = () => {
             textAlign: "center",
             fontFamily: FONT,
             fontSize: 46,
-            fontWeight: 750,
+            fontWeight: 500,
             color: C.ink,
             opacity: pop(frame, fps, 296),
             textShadow: "0 2px 30px rgba(255,255,255,.9)",
           }}
         >
-          <span style={{ background: "rgba(255,255,255,.92)", borderRadius: 18, padding: "18px 44px", border: `2px solid ${C.borderSoft}` }}>
-            ✓ both tasks completed — simultaneously
+          <span style={{ background: C.white, borderRadius: 999, padding: "18px 44px", border: `1px solid ${C.borderFade}`, boxShadow: "0 12px 32px rgba(12,12,12,.1)", display: "inline-flex", alignItems: "center", gap: 14 }}>
+            <span style={{ width: 13, height: 13, borderRadius: "50%", background: C.green, display: "inline-block" }} />
+            both tasks completed, at the same instant
           </span>
         </div>
       )}
@@ -128,7 +157,7 @@ export const S07Compare: React.FC = () => {
           }}
         >
           <div style={{ ...T.h1, fontSize: 64, color: C.ink }}>
-            <span style={{ background: "rgba(255,255,255,.95)", borderRadius: 20, padding: "22px 40px", boxShadow: "0 20px 60px rgba(12,12,12,.12)", display: "inline-block", lineHeight: 1.25 }}>
+            <span style={{ background: C.white, border: `1px solid ${C.borderFade}`, borderRadius: 24, padding: "26px 44px", boxShadow: "0 16px 48px rgba(12,12,12,.06)", display: "inline-block", lineHeight: 1.25 }}>
               Same task. Same result.
               <br />
               Only one of them <span style={{ color: C.red }}>leaked.</span>

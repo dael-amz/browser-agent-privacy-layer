@@ -506,10 +506,22 @@
     const labels={NAME:"Name",DOB:"Date of birth",GOV_ID:"Government ID",SSN:"Social Security number",EMAIL:"Email",PHONE:"Phone",ADDRESS:"Postal address",BANK_ACCOUNT:"Bank account",CARD_NUMBER:"Card number",CVC:"Card security code",PASSWORD:"Password",API_KEY:"API key",AUTH_TOKEN:"Authentication token",PRIVATE_KEY:"Private key",SECRET:"Other secret"};
     const levelLabels={hide_use:"Use",approval:"Ask",blocked:"Block"};
     const providerLabels={hcompany:"H Company",overshoot:"Overshoot"};
-    const modelCatalog={
-      hcompany:[["holo3-1-35b-a3b","Holo3-1 35B"]],
-      overshoot:[["Hcompany/Holo3-35B-A3B","Holo3 35B"],["Hcompany/Holo-3.1-35B-A3B-FP8","Holo3-1 35B FP8"],["Holo3-122B-A10B","Holo3 122B"]]
+    /* Static fallback; replaced by the provider's live /models list on load. */
+    let modelCatalog={
+      hcompany:[["holo3-1-35b-a3b","Holo3-1 35B"],["holo3-122b-a10b","Holo3 122B"]],
+      overshoot:[["Hcompany/Holo3-35B-A3B","Holo3 35B"]]
     };
+    async function loadModelCatalog(){
+      let d;try{d=await api("/api/models")}catch{return}
+      const next={};
+      for(const [p,info] of Object.entries(d.providers||{})){
+        if(info&&Array.isArray(info.models)&&info.models.length)next[p]=info.models.map(m=>[m.id,m.label||m.id]);
+      }
+      if(!Object.keys(next).length)return;
+      const changed=JSON.stringify(next)!==JSON.stringify(modelCatalog);
+      modelCatalog=next;
+      if(changed&&state)render(true);
+    }
     function modelLabel(id){for(const models of Object.values(modelCatalog)){const hit=models.find(([v])=>v===id);if(hit)return hit[1]}return id}
     const credentialSourceLabels={auto:"Auto",holo_cli:"Holo Desktop CLI",project:"Project .env",environment:"Shell only"};
     const credentialResolvedLabels={environment:"shell environment",holo_cli:"Holo Desktop CLI",project:"project .env"};
@@ -654,7 +666,7 @@
       }catch(e){applyPolicySelection(cls,previous);toast(e.message)}
     }
     async function saveSettings(patch,selection){if(!state)return;if(state.running){render(true);return toast("Stop the task before changing settings")}
-      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,credential_source:s.credential_source||"auto",vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,features:{...s.features},...patch};
+      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,credential_source:s.credential_source||"auto",vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,tools:s.tools||"off",features:{...s.features},...patch};
       if(patch&&patch.features)settings.features={...s.features,...patch.features};
       try{
         const r=await api("/api/settings",{method:"PUT",body:JSON.stringify(settings)});
@@ -1125,9 +1137,10 @@
         `<section class="policygroup"><h3>Redaction pipeline</h3>
           ${segRow("Vision mode","OCR quality / latency","vision_mode",[["fast","Fast"],["cascade","Cascade"],["accurate","Accurate"]],3)}
           ${segRow("OCR engine","Apple Vision or Core ML RapidOCR","ocr_engine",[["apple","Apple OCR"],["rapidocr","RapidOCR"]],2)}
-          ${segRow("Visual detector","Off isolates the OCR pipeline and the text filter","visual_detector",[["on","On"],["off","Off"]],2)}
+          ${segRow("Visual detector","Off is calibrated for BrowserUse; On evaluates the visual checkpoint","visual_detector",[["on","On"],["off","Off"]],2)}
           ${segRow("Detector version","v3 needs an exported ONNX detector","detector_version",[["v2","v2 baseline"],["v3","v3"]],2)}
           ${segRow("Text filter","Alternatives need a local frozen model copy","semantic_engine",[["rampart","Rampart"],["gliner2","GLiNER2 PII"],["openai-pf","OpenAI PF"]],3)}
+          ${segRow("Tool calls","Local tool channel: teaching, detection, bounded loop","tools",[["on","On"],["off","Off"]],2)}
           ${segRow("Worker lifecycle","Startup versus idle memory","lifecycle",[["eager","Eager"],["adaptive","Adaptive"],["cold","Cold"]],3)}
         </section>`;
       document.querySelectorAll("[data-setting]").forEach(b=>b.onclick=()=>{
@@ -1168,6 +1181,7 @@
     document.addEventListener("click",e=>{const m=$("#model-menu");if(m&&!e.target.closest(".modelwrap"))closeDropdown(m)});
     document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="Enter")run()});
     refresh();setInterval(refresh,900);
+    loadModelCatalog();setInterval(loadModelCatalog,300000);
   </script>
 </body>
 </html>

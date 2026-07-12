@@ -378,3 +378,67 @@ def test_demo_ui_file_is_packaged() -> None:
     assert demo.LANDING_PATH.is_file()
     assert 'href="/app"' in demo.LANDING_PATH.read_text("utf-8")
     assert Path(demo.ROOT / "run_demo.sh").is_file()
+
+
+def test_model_catalog_falls_back_to_frozen_presets(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = demo.DemoController()
+
+    def offline(spec: object) -> list[dict[str, str]]:
+        raise OSError("offline")
+
+    monkeypatch.setattr(demo, "_fetch_provider_models", offline)
+    catalog = controller.model_catalog()
+    for name, spec in demo.PROVIDERS.items():
+        assert catalog[name]["live"] is False
+        assert {entry["id"] for entry in catalog[name]["models"]} == set(spec.allowed_models())
+
+
+def test_settings_accept_models_from_the_live_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = demo.DemoController()
+    monkeypatch.setattr(
+        demo,
+        "_fetch_provider_models",
+        lambda spec: [{"id": "holo9-preview", "label": "Holo9 Preview"}],
+    )
+    controller.model_catalog()
+    settings = controller.set_settings(
+        {
+            "plva_enabled": True,
+            "provider": "hcompany",
+            "model": "holo9-preview",
+            "vision_mode": "cascade",
+            "lifecycle": "eager",
+            "features": {name: True for name in demo.FEATURE_ENV},
+        }
+    )
+    assert settings["model"] == "holo9-preview"
+    settings = controller.set_settings({**settings, "model": "made-up"})
+    assert settings["model"] == demo.PROVIDERS["hcompany"].model
+
+
+def test_settings_gate_v3_detector_on_the_installed_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    controller = demo.DemoController()
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+    base = {
+        "plva_enabled": True,
+        "provider": "hcompany",
+        "vision_mode": "cascade",
+        "lifecycle": "eager",
+        "features": {name: True for name in demo.FEATURE_ENV},
+    }
+    with pytest.raises(ValueError, match="not installed"):
+        controller.set_settings({**base, "detector_version": "v3"})
+    # With the visual stage off the missing model is irrelevant.
+    settings = controller.set_settings(
+        {**base, "detector_version": "v3", "visual_detector": "off"}
+    )
+    assert settings["detector_version"] == "v3"
+    exported = tmp_path / "plva-v3" / "dist" / "visual" / "detector.onnx"
+    exported.parent.mkdir(parents=True)
+    exported.write_bytes(b"onnx")
+    settings = controller.set_settings({**base, "detector_version": "v3"})
+    assert settings["detector_version"] == "v3"

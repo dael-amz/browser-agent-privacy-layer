@@ -1,46 +1,30 @@
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate } from "remotion";
-import { C, FONT, T } from "../theme";
+import { C, FONT, SHADOW, T } from "../theme";
 import { pop } from "../anim";
 
-/** Full-frame background: light | dark, with an optional near-invisible dot grid. */
+/** Full-frame background. The site is plain white (light scheme, no texture). */
 export const SceneBg: React.FC<{
   dark?: boolean;
   grid?: boolean;
   children?: React.ReactNode;
-}> = ({ dark = false, grid = true, children }) => (
-  <AbsoluteFill
-    style={{
-      background: dark
-        ? `radial-gradient(1200px 800px at 50% 30%, #232323, ${C.inverseDeep})`
-        : C.paper,
-    }}
-  >
-    {grid && (
-      <AbsoluteFill
-        style={{
-          backgroundImage: `radial-gradient(${dark ? "rgba(255,255,255,.06)" : "rgba(12,12,12,.05)"} 1.5px, transparent 1.5px)`,
-          backgroundSize: "44px 44px",
-        }}
-      />
-    )}
-    {children}
-  </AbsoluteFill>
+}> = ({ dark = false, children }) => (
+  <AbsoluteFill style={{ background: dark ? C.inverse : C.paper }}>{children}</AbsoluteFill>
 );
 
-/** The Holo wordmark + beta chip, matching the app header. */
+/** The Holo brand lockup, copied from the site's .brand: wordmark 500 + outline beta chip. */
 export const Wordmark: React.FC<{ size?: number; dark?: boolean; sub?: string }> = ({
   size = 64,
   dark = false,
   sub,
 }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: size * 0.28 }}>
+  <div style={{ display: "flex", alignItems: "center", gap: size * 0.24 }}>
     <span
       style={{
         fontFamily: FONT,
         fontSize: size,
-        fontWeight: 700,
-        letterSpacing: "-0.03em",
+        fontWeight: 500,
+        letterSpacing: "-0.011em",
         color: dark ? C.white : C.ink,
       }}
     >
@@ -49,13 +33,11 @@ export const Wordmark: React.FC<{ size?: number; dark?: boolean; sub?: string }>
     <span
       style={{
         fontFamily: FONT,
-        fontSize: size * 0.30,
-        fontWeight: 650,
-        letterSpacing: "0.1em",
-        textTransform: "uppercase",
-        color: dark ? C.inverseDeep : C.white,
-        background: dark ? C.white : C.ink,
-        padding: `${size * 0.10}px ${size * 0.22}px`,
+        fontSize: size * 0.26,
+        fontWeight: 400,
+        color: dark ? C.whiteDim : C.gray,
+        border: `1.5px solid ${dark ? "rgba(255,255,255,.25)" : C.borderSoft}`,
+        padding: `${size * 0.05}px ${size * 0.18}px`,
         borderRadius: 999,
       }}
     >
@@ -64,13 +46,12 @@ export const Wordmark: React.FC<{ size?: number; dark?: boolean; sub?: string }>
   </div>
 );
 
-/** Word-staggered kinetic headline. */
+/** Word-staggered headline with the site's stagger-line reveal (rise + blur clear). */
 export const KineticText: React.FC<{
   text: string;
   style?: React.CSSProperties;
   delay?: number;
   per?: number;
-  as?: React.CSSProperties;
 }> = ({ text, style, delay = 0, per = 3 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -85,7 +66,8 @@ export const KineticText: React.FC<{
             style={{
               display: "inline-block",
               opacity: p,
-              transform: `translateY(${(1 - p) * 42}px)`,
+              transform: `translateY(${(1 - p) * 24}px)`,
+              filter: `blur(${(1 - p) * 3}px)`,
               marginRight: "0.26em",
             }}
           >
@@ -97,36 +79,41 @@ export const KineticText: React.FC<{
   );
 };
 
-/** Small uppercase section label with a leading tick. */
+/** Section label copied from the landing page's .eyebrow: outline pill + 7px status dot. */
 export const Eyebrow: React.FC<{ text: string; color?: string; delay?: number; dark?: boolean }> = ({
   text,
-  color,
+  color = C.green,
   delay = 0,
   dark = false,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const p = pop(frame, fps, delay);
-  const c = color ?? (dark ? C.whiteDim : C.gray);
   return (
     <div
       style={{
-        ...T.label,
-        color: c,
-        display: "flex",
+        display: "inline-flex",
         alignItems: "center",
-        gap: 16,
+        gap: 13,
+        padding: "11px 26px",
+        border: `1.5px solid ${dark ? "rgba(255,255,255,.25)" : C.borderSoft}`,
+        borderRadius: 999,
+        fontFamily: FONT,
+        fontSize: 24,
+        fontWeight: 400,
+        color: dark ? C.whiteDim : C.gray,
         opacity: p,
-        transform: `translateY(${(1 - p) * 20}px)`,
+        transform: `translateY(${(1 - p) * 16}px)`,
+        filter: `blur(${(1 - p) * 3}px)`,
       }}
     >
-      <span style={{ width: 34, height: 3, background: c, display: "inline-block" }} />
+      <span style={{ width: 13, height: 13, borderRadius: "50%", background: color, display: "inline-block" }} />
       {text}
     </div>
   );
 };
 
-/** macOS-ish window chrome to host mock screens or placeholder slots. */
+/** macOS-ish window chrome, surfaced like the site's cards (.card / .composer). */
 export const WindowFrame: React.FC<{
   title?: string;
   url?: string;
@@ -140,10 +127,10 @@ export const WindowFrame: React.FC<{
     style={{
       width,
       height,
-      borderRadius: 18,
+      borderRadius: 16,
       background: dark ? "#242424" : C.white,
-      boxShadow: "0 40px 90px rgba(12,12,12,.22), 0 4px 18px rgba(12,12,12,.10)",
-      border: `1px solid ${dark ? "rgba(255,255,255,.12)" : C.borderSoft}`,
+      boxShadow: SHADOW.float,
+      border: `1px solid ${dark ? "rgba(255,255,255,.12)" : C.borderFade}`,
       overflow: "hidden",
       display: "flex",
       flexDirection: "column",
@@ -171,7 +158,7 @@ export const WindowFrame: React.FC<{
             marginLeft: 16,
             fontFamily: FONT,
             fontSize: 19,
-            fontWeight: 500,
+            fontWeight: 400,
             color: dark ? C.whiteDim : C.gray,
             background: dark ? "rgba(255,255,255,.08)" : C.white,
             border: `1px solid ${dark ? "transparent" : C.borderFade}`,
@@ -182,7 +169,7 @@ export const WindowFrame: React.FC<{
           {url}
         </span>
       ) : (
-        <span style={{ marginLeft: 12, fontFamily: FONT, fontSize: 19, fontWeight: 550, color: dark ? C.whiteDim : C.gray }}>
+        <span style={{ marginLeft: 12, fontFamily: FONT, fontSize: 19, fontWeight: 500, color: dark ? C.whiteDim : C.gray }}>
           {title}
         </span>
       )}
@@ -191,7 +178,7 @@ export const WindowFrame: React.FC<{
   </div>
 );
 
-/** Animated scanning line + expanding red boxes, used for "detection" moments. */
+/** Animated scanning line, used for "detection" moments. */
 export const ScanLine: React.FC<{ progress: number; color?: string }> = ({ progress, color = C.red }) => (
   <div
     style={{
@@ -208,7 +195,7 @@ export const ScanLine: React.FC<{ progress: number; color?: string }> = ({ progr
 );
 
 /** Bottom-corner watermark shown through most scenes. */
-export const CornerBadge: React.FC<{ dark?: boolean; text?: string }> = ({ dark = false, text = "Holo · PLVA — The Computer Use Hackathon" }) => {
+export const CornerBadge: React.FC<{ dark?: boolean; text?: string }> = ({ dark = false, text = "Holo · PLVA · The Computer Use Hackathon" }) => {
   const frame = useCurrentFrame();
   const o = interpolate(frame, [0, 20], [0, 1], { extrapolateRight: "clamp" });
   return (
@@ -219,7 +206,7 @@ export const CornerBadge: React.FC<{ dark?: boolean; text?: string }> = ({ dark 
         right: 48,
         fontFamily: FONT,
         fontSize: 20,
-        fontWeight: 550,
+        fontWeight: 400,
         color: dark ? C.whiteFaint : C.grayLight,
         opacity: o,
       }}

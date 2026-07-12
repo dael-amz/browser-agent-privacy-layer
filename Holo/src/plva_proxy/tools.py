@@ -200,9 +200,12 @@ class ToolLoop:
             result = f"error: {exc}"
         with self._lock:
             self._memory.append(f"{call.name}: {result}")
+        # call.name is model-controlled; only log it verbatim when it names a
+        # known tool, otherwise arbitrary model output would reach the logs.
+        logged = call.name if call.name in self._registry.names() else "<unknown>"
         _LOGGER.info(
             "tool executed: name=%s channel=%s arg_keys=%s",
-            call.name,
+            logged,
             call.channel,
             sorted(call.args),
         )
@@ -260,6 +263,8 @@ TOOL_TEACHING: Final = (
 
 
 def _strip_tool_teaching(text: str) -> str:
+    if TOOL_SYSTEM_BEGIN not in text:
+        return text
     while TOOL_SYSTEM_BEGIN in text:
         start = text.find(TOOL_SYSTEM_BEGIN)
         end = text.find(TOOL_SYSTEM_END, start)
@@ -270,8 +275,14 @@ def _strip_tool_teaching(text: str) -> str:
 
 
 def _remove_old_tool_teaching(messages: list[Any]) -> None:
+    # Teaching is only ever injected into system/user messages (see
+    # _merge_teaching below), so only those roles are stripped. An assistant
+    # turn that merely echoes the sentinel text back (e.g. because the model
+    # quoted its instructions) must not be treated as a proxy-injected block:
+    # mutating or rejecting it here would let one malformed echo corrupt
+    # every later request that carries that turn in history.
     for message in messages:
-        if not isinstance(message, dict):
+        if not isinstance(message, dict) or message.get("role") not in ("system", "user"):
             continue
         content = message.get("content")
         if isinstance(content, str):

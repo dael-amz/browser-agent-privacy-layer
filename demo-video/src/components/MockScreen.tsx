@@ -19,7 +19,7 @@ const Pii: React.FC<{
   const edge = level === "blocked" ? C.red : level === "approval" ? C.amber : C.green;
 
   if (mode === "raw") {
-    return <span style={{ color: C.ink, fontWeight: 550 }}>{value}</span>;
+    return <span style={{ color: C.ink, fontWeight: 500 }}>{value}</span>;
   }
   if (mode === "detected") {
     const p = pop(frame, fps, delay);
@@ -28,7 +28,7 @@ const Pii: React.FC<{
         style={{
           position: "relative",
           color: C.ink,
-          fontWeight: 550,
+          fontWeight: 500,
           boxShadow: `0 0 0 ${3 * p}px ${C.red}`,
           background: `rgba(209,52,56,${0.10 * p})`,
           borderRadius: 4,
@@ -44,19 +44,21 @@ const Pii: React.FC<{
     <span
       style={{
         display: "inline-flex",
+        alignItems: "center",
+        gap: size * 0.3,
         fontFamily: MONO,
         fontSize: size * 0.92,
-        fontWeight: 600,
+        fontWeight: 400,
         color: C.white,
         background: C.inverse,
-        borderRadius: 7,
+        borderRadius: 6,
         padding: "3px 12px",
-        boxShadow: `inset 0 0 0 2px ${edge}`,
         transform: `scale(${Math.max(p, 0.001)})`,
         whiteSpace: "nowrap",
       }}
     >
-      {level === "blocked" ? "▮▮▮▮▮▮" : `«${token}»`}
+      <span style={{ width: size * 0.27, height: size * 0.27, borderRadius: "50%", background: edge, display: "inline-block" }} />
+      {level === "blocked" ? "▮▮▮▮▮▮▮▮" : `«${token}»`}
     </span>
   );
 };
@@ -95,8 +97,8 @@ export const MockScreen: React.FC<{ mode: PiiMode; staggerFrom?: number }> = ({
   const d = (i: number) => staggerFrom + i * 4;
   return (
     <div style={{ padding: "34px 44px", display: "flex", flexDirection: "column", gap: 10, background: C.white, height: "100%" }}>
-      <div style={{ fontFamily: FONT, fontSize: 30, fontWeight: 700, letterSpacing: "-0.02em", color: C.ink, marginBottom: 6 }}>
-        Checkout — Aurora Utilities
+      <div style={{ fontFamily: FONT, fontSize: 30, fontWeight: 500, letterSpacing: "-0.02em", color: C.ink, marginBottom: 6 }}>
+        Checkout · Aurora Utilities
       </div>
       <Row label="Full name">
         <Pii mode={mode} value="Camille Fontaine" token="NAME_1_a3f9" delay={d(0)} />
