@@ -385,17 +385,17 @@ visible token into `write`; the proxy resolved it locally while leaving reasonin
      > **verbatim** (exact spelling, including the suffix) in the action field. Never invent, guess,
      > describe, or alter the underlying value. If a value you need is not shown as a token, do not
      > fabricate it."
-  2. **On-screen manifest (dynamic — rebuilt each frame).** The proxy reads the vault's
-     active-placeholder manifest for the *current* redacted frame and lists only the tokens actually
-     present this step, with their class:
+  2. **On-screen + active-session manifest (dynamic — rebuilt each frame).** The proxy reads the
+     vault's manifest for the *current* redacted frame and separately lists issued tokens that
+     remain active for the private session, with their class:
      > "Placeholders visible now: «EMAIL_1» (email), «PHONE_1» (phone), «ADDRESS_1» (postal
      > address)."
-     Listing only current tokens (never stale ones) keeps the model from referencing a token that
-     is not on screen; the class hints help it choose the right field.
-  3. **Duplicate warning (static).** Per §6 (duplicates tolerated this build):
-     > "Occasionally the same real value may appear under more than one token across steps
-     > (e.g. «EMAIL_1» and «EMAIL_2» may be the same email); this is rare. Treat each token
-     > independently and use whichever token labels the field you are acting on."
+     Current tokens preserve visual grounding. The value-free active-session list lets a normal
+     multi-step task discover a value, navigate or focus another field, then reuse that exact
+     issued token after it leaves the latest screenshot. Tokens not issued by the local session
+     fail closed.
+  3. **Stable-token warning (static).** Assignment is stable within a session. When several tokens
+     share a class, the model must preserve the exact token associated with the earlier value/field.
 - **Placement / cadence:** append the **scheme** and **duplicate warning** to the runtime's existing
   system-role message without overwriting its content. H Company's Holo chat template rejects two
   consecutive system messages, so never add a second one; if no system message exists, attach the
@@ -408,20 +408,20 @@ visible token into `write`; the proxy resolved it locally while leaving reasonin
   injection. The runtime loads the skill into context as a first-class capability doc, reinforcing
   the injection. Keep the proxy injection as the source of truth (guaranteed present, carries the
   dynamic parts); treat the skill as belt-and-suspenders.
-- **Verify:** the manifest lists exactly the tokens in the current frame (no stale, none missing);
-  in a crafted duplicate case (one value under two tokens) the model still acts correctly using the
-  shown token; injection is input-only and never appears in model *output* fields; logs carry tokens
-  + class only, never values. (Basic token-cooperation is already confirmed by Step 5.)
+- **Verify:** the manifest distinguishes exactly-current tokens from issued active-session tokens;
+  forged tokens fail closed; a token can leave the current frame and still resolve in a later
+  executed action; injection is input-only and logs carry tokens + class only, never values.
 
 **Completed 2026-07-12:** every privacy-enabled request now receives a scheme and duplicate warning
 merged into Holo's existing system message plus a value-free manifest immediately beside the
-current screenshot. The
-manifest is produced atomically by the same vault-paint operation, lists only token/class pairs,
-explicitly says `none` when the current frame has no tokens, and removes older injected manifests
-before forwarding. The action syntax clarifies that Holo must emit the exact inner token without
-the decorative guillemets. A static `plva-placeholders` HoloDesktop skill reinforces the scheme;
-the proxy remains authoritative. Unit/integration tests cover exact current-frame membership,
-stale-token removal, empty manifests, malformed-token rejection, and absence of cleartext. See
+current screenshot. The manifest is produced atomically by the same vault-paint operation, lists
+only token/class pairs, explicitly says `none` when the current frame has no tokens, removes older
+injected manifests, and lists exact issued tokens that remain active for multi-step reuse. Forged
+manifest tokens are rejected against the vault. Decorative guillemets are tolerated and removed
+before local execution. A static `plva-placeholders` HoloDesktop skill reinforces the scheme and
+is refreshed for each run; the proxy remains authoritative. Unit/integration tests cover current
+and active membership, later-step reuse, empty manifests, malformed-token rejection, and absence
+of cleartext. See
 `Holo/verification/step-5a-placeholder-teaching.md`.
 
 ### ✅ Step 6 — Configurable per-class PII safety policy

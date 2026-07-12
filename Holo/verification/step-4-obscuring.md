@@ -19,10 +19,10 @@ via ONNX-Runtime WASM, fully offline (loopback-only server, wildcard DNS nulled)
 `node bin/plva-v2.mjs <png> --output <png> --report <json>`. It burns masks into a new PNG and
 emits a geometry-only report (no recognized text, no paths).
 
-Bundle's own caveats (from its README/snapshot): **development-only, not release-eligible** —
-the detector checkpoint is AGPL-3.0-only, and its measured secret-class recall was ~zero
-(missed 6 of 7 secret boxes in its WebPII quick-100 diagnostic). Good enough to demonstrate the
-pipeline; not a production privacy boundary.
+Historical bundle caveat: the frozen July 11 `plva-v2-baseline` snapshot recorded its then-current
+checkpoint as development-only and not release eligible. That provenance remains useful for
+reproducing the original Step 4 evidence, but it is superseded for current status: the current
+detector is release eligible.
 
 ## Integration (this repo)
 

@@ -14,6 +14,7 @@ from PIL import Image
 from plva_proxy.privacy import (
     PLACEHOLDER_MANIFEST_PREFIX,
     HistoryScrubber,
+    SafetyPolicy,
     SessionVault,
     StubRedactor,
     StubSpan,
@@ -33,6 +34,32 @@ from plva_proxy.proxy import (
 VALUE = "alice@example.com"
 TOKEN = "EMAIL_1_a3f9"
 CONFIG = ProxyConfig("https://upstream.invalid/v1", "integration-test-key")
+
+
+async def test_loopback_approval_api_grants_lists_and_revokes_without_raw_value() -> None:
+    vault = SessionVault(nonce="a3f9", policy=SafetyPolicy({"API_KEY": "approval"}))
+    token = vault.store("API_KEY", "synthetic-secret-key")
+    proxy = create_app(CONFIG, frame_store=FrameStore(), vault=vault)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=proxy), base_url="http://proxy.test"
+    ) as client:
+        body = {"token": token, "tool_name": "write", "argument_path": "content"}
+        created = await client.post("/viewer/approvals", json=body)
+        listed = await client.get("/viewer/approvals")
+        rejected_origin = await client.post(
+            "/viewer/approvals", json=body, headers={"origin": "https://attacker.test"}
+        )
+        revoked = await client.request("DELETE", "/viewer/approvals", json=body)
+        after = await client.get("/viewer/approvals")
+
+    assert created.status_code == 201
+    assert listed.json()["approvals"][0]["token"] == token
+    assert "synthetic-secret-key" not in "".join(
+        (created.text, listed.text, rejected_origin.text, after.text)
+    )
+    assert rejected_origin.status_code == 403
+    assert revoked.status_code == 204
+    assert after.json() == {"approvals": []}
 
 
 def source_png() -> bytes:
@@ -92,6 +119,26 @@ class SequencedManifestRedactor:
 
     def redact_with_manifest(self, png: bytes) -> tuple[bytes, tuple[dict[str, str], ...]]:
         return png, next(self._manifests)
+
+
+class SequencedFindingRedactor:
+    def __init__(self, spans: list[tuple[StubSpan, ...]]) -> None:
+        self._spans = iter(spans)
+        self._active = StubRedactor()
+
+    @property
+    def latest_analysis(self) -> dict[str, Any]:
+        return self._active.latest_analysis
+
+    def start(self) -> None:
+        return
+
+    def close(self) -> None:
+        self._active.close()
+
+    def __call__(self, png: bytes) -> bytes:
+        self._active = StubRedactor(next(self._spans))
+        return self._active(png)
 
 
 def test_manifest_tracks_only_latest_frame_and_explicitly_clears_stale_tokens() -> None:
@@ -179,7 +226,7 @@ async def test_full_store_paint_resolve_and_history_scrub_loop(
     assert manifest_parts == [
         "[PLVA_VISIBLE_PLACEHOLDERS] Placeholders visible in the current screenshot: "
         "«EMAIL_1_a3f9» (email · hidden, use allowed). "
-        "Use only the exact inner tokens shown here for this step."
+        "Use only exact tokens listed in this manifest; never invent one."
     ]
     assert TOKEN in seen[1]["messages"][1]["content"]
     result = json.loads(first.json()["choices"][0]["message"]["content"])
@@ -188,6 +235,51 @@ async def test_full_store_paint_resolve_and_history_scrub_loop(
     assert store.stats()["frames_seen"] == 2
     assert vaulted.latest_analysis["findings"][0]["placeholders"] == [TOKEN]
     assert VALUE not in "\n".join(record.getMessage() for record in caplog.records)
+
+
+async def test_token_remains_usable_after_private_value_leaves_current_frame() -> None:
+    seen: list[dict[str, Any]] = []
+    vault = SessionVault(nonce="a3f9")
+    detector = SequencedFindingRedactor([(StubSpan("EMAIL", VALUE, (20, 20, 240, 65)),), ()])
+    vaulted = VaultRedactor(detector, vault, cache_entries=0)
+    scrubber = HistoryScrubber(
+        vault,
+        lambda texts: [{"sensitive": False, "values": []} for _ in texts],
+    )
+    store = FrameStore()
+    hooks = Hooks(
+        _chain_request_hooks(
+            frame_redaction_hook(vaulted, store, include_placeholder_manifest=True),
+            privacy_request_hook(scrubber),
+        ),
+        privacy_response_hook(vault),
+    )
+    proxy = create_app(
+        CONFIG,
+        hooks=hooks,
+        frame_store=store,
+        transport=httpx.ASGITransport(app=upstream_app(seen)),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=proxy), base_url="http://proxy.test"
+    ) as client:
+        first = await client.post("/v1/chat/completions", json=cua_payload())
+        second = await client.post("/v1/chat/completions", json=cua_payload())
+
+    second_manifest = next(
+        part["text"]
+        for part in seen[1]["messages"][-1]["content"]
+        if isinstance(part, dict)
+        and isinstance(part.get("text"), str)
+        and part["text"].startswith(PLACEHOLDER_MANIFEST_PREFIX)
+    )
+    second_action = json.loads(second.json()["choices"][0]["message"]["content"])
+    assert first.status_code == second.status_code == 200
+    assert "visible in the current screenshot: none" in second_manifest
+    assert f"Active private-session tokens from earlier observations: «{TOKEN}»" in second_manifest
+    assert VALUE not in json.dumps(seen)
+    assert second_action["tool_call"]["content"] == VALUE
 
 
 async def test_history_classifier_failure_forwards_nothing() -> None:

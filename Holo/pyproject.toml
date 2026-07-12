@@ -13,10 +13,13 @@ dependencies = [
 
 [project.scripts]
 plva-demo = "plva_proxy.demo:main"
+plva-egress-preflight = "plva_proxy.egress_preflight:main"
+plva-egress-verify = "plva_proxy.egress_verify:main"
 plva-live = "plva_proxy.live:main"
 plva-probe = "plva_proxy.contract_probe:main"
 plva-proxy = "plva_proxy.proxy:main"
 plva-runtime-capture = "plva_proxy.runtime_capture:main"
+plva-benchmark = "plva_proxy.benchmark:main"
 
 [build-system]
 requires = ["hatchling>=1.28.0"]

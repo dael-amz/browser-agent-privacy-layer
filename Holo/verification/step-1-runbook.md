@@ -73,7 +73,14 @@ rm -rf "$RUNS_DIR"
 
 ## 4. Verify egress while the run is active (Terminal C)
 
-**Tier A — observational (no sudo, do at least this):**
+**Tier A — enforced per-run guard (no sudo):** `run_step1.sh` starts the CUA
+process group stopped, proves that `lsof` can observe a local canary socket,
+then samples the whole process group and terminates it if any remote endpoint
+is not the selected loopback proxy. The runtime is not resumed if visibility
+cannot be proved. Each run prints a `PLVA_EGRESS_STATUS_JSON=...` evidence line;
+set `PLVA_EGRESS_STATUS_FILE=/protected/path.json` to retain it with mode 0600.
+
+For manual diagnosis only:
 
 ```bash
 # The runtime's only remote endpoint must be the loopback proxy:
@@ -87,9 +94,10 @@ done
 # Expect only the plva-proxy python process
 ```
 
-**Tier B — enforcing (optional, sudo):** load `docs/egress/pf-plva.anchor` and run the proxy as
-the `_plvaproxy` role user per the instructions inside that file. This makes "only the proxy can
-reach the provider" a packet-filter guarantee instead of an observation.
+**Tier B — host packet filter (optional, administrator bootstrap):** first run
+`.venv/bin/python -m plva_proxy.egress_preflight`. It makes no privileged calls
+and emits machine-readable readiness plus actions. If it reports `ready:false`,
+follow `docs/egress/bootstrap-pf.md`; the project never invokes sudo itself.
 
 ## 5. Record the outcome
 

@@ -121,6 +121,36 @@ def test_stub_detect_nothing_preserves_all_pixels_and_creates_no_vault_entry() -
     assert vault.placeholders() == ()
 
 
+def test_vault_redactor_caches_final_painted_frame_and_manifest() -> None:
+    class CountingRedactor:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.inner = StubRedactor((StubSpan("EMAIL", "alice@example.com", (20, 20, 220, 55)),))
+
+        @property
+        def latest_analysis(self) -> dict[str, Any]:
+            return self.inner.latest_analysis
+
+        def start(self) -> None:
+            self.inner.start()
+
+        def close(self) -> None:
+            self.inner.close()
+
+        def __call__(self, png: bytes) -> bytes:
+            self.calls += 1
+            return self.inner(png)
+
+    detector = CountingRedactor()
+    redactor = VaultRedactor(detector, SessionVault(nonce="a3f9"))
+
+    first = redactor.redact_with_manifest(png_fixture())
+    second = redactor.redact_with_manifest(png_fixture())
+
+    assert first == second
+    assert detector.calls == 1
+
+
 def test_stub_and_vault_redactor_lifecycle_and_invalid_inputs() -> None:
     value = "a@example.com"
     stub = StubRedactor((StubSpan("EMAIL", value, (0, 0, 20, 20)),))
@@ -135,6 +165,8 @@ def test_stub_and_vault_redactor_lifecycle_and_invalid_inputs() -> None:
         StubRedactor()(b"not an image")
     with pytest.raises(PrivacyError, match="outside"):
         StubRedactor((StubSpan("EMAIL", value, (-1, 0, 20, 20)),))(png_fixture())
+    with pytest.raises(ValueError, match="cache"):
+        VaultRedactor(StubRedactor(), SessionVault(nonce="a3f9"), cache_entries=-1)
 
 
 def test_history_scrub_plain_match_then_semantic_backstop() -> None:
@@ -285,9 +317,37 @@ def test_request_hook_merges_all_system_messages_for_hcompany_compatibility() ->
     assert serialized.count("[PLVA_PLACEHOLDERS_BEGIN]") == 1
 
 
-def test_request_hook_injects_only_current_manifest_and_removes_stale_teaching() -> None:
+def test_request_prompt_reports_approval_without_egressing_context_details() -> None:
+    vault = SessionVault(nonce="a3f9", policy=SafetyPolicy({"API_KEY": "approval"}))
+    token = vault.store("API_KEY", "synthetic-secret-key")
+    vault.grant_approval(
+        token,
+        tool_name="write",
+        argument_path="args.content",
+        target="https://private-target.test/account/123",
+    )
     scrubber = HistoryScrubber(
-        SessionVault(nonce="a3f9"),
+        vault,
+        lambda texts: [{"sensitive": False, "values": []} for _ in texts],
+    )
+
+    document, _ = privacy_request_hook(scrubber)(
+        {"messages": [{"role": "system", "content": "Runtime instructions"}]}, {}
+    )
+    serialized = json.dumps(document)
+
+    assert "[PLVA_LOCAL_APPROVALS]" in serialized and token in serialized
+    assert "synthetic-secret-key" not in serialized
+    assert "private-target" not in serialized
+    assert "args.content" not in serialized
+
+
+def test_request_hook_injects_only_current_manifest_and_removes_stale_teaching() -> None:
+    vault = SessionVault(nonce="a3f9")
+    assert vault.store("EMAIL", "alice@example.com") == "EMAIL_1_a3f9"
+    assert vault.store("PHONE", "+1 415 555 0100") == "PHONE_1_a3f9"
+    scrubber = HistoryScrubber(
+        vault,
         lambda texts: [{"sensitive": False, "values": []} for _ in texts],
     )
     old_manifest = (
@@ -312,7 +372,7 @@ def test_request_hook_injects_only_current_manifest_and_removes_stale_teaching()
                 "message_index": 2,
                 "items": [
                     {"token": "EMAIL_1_a3f9", "class": "EMAIL"},
-                    {"token": "PHONE_2_a3f9", "class": "PHONE"},
+                    {"token": "PHONE_1_a3f9", "class": "PHONE"},
                 ],
             },
         },
@@ -327,8 +387,8 @@ def test_request_hook_injects_only_current_manifest_and_removes_stale_teaching()
     assert current[-2]["text"] == (
         f"{PLACEHOLDER_MANIFEST_PREFIX} Placeholders visible in the current screenshot: "
         "«EMAIL_1_a3f9» (email · hidden, use allowed), "
-        "«PHONE_2_a3f9» (phone · hidden, use allowed). "
-        "Use only the exact inner tokens shown here for this step."
+        "«PHONE_1_a3f9» (phone · hidden, use allowed). "
+        "Use only exact tokens listed in this manifest; never invent one."
     )
     assert current[-1]["type"] == "image_url"
 
@@ -359,6 +419,66 @@ def test_request_hook_emits_explicit_empty_manifest_and_rejects_forgery() -> Non
             },
             {},
         )
+
+
+def test_request_hook_lists_issued_session_token_after_it_leaves_current_frame() -> None:
+    vault = SessionVault(nonce="a3f9")
+    token = vault.store("EMAIL", "alice@example.com")
+    scrubber = HistoryScrubber(
+        vault,
+        lambda texts: [{"sensitive": False, "values": []} for _ in texts],
+    )
+
+    document, _ = privacy_request_hook(scrubber)(
+        {
+            "messages": [{"role": "user", "content": "Continue to the next form step"}],
+            PLACEHOLDER_MANIFEST_KEY: {"message_index": 0, "items": []},
+        },
+        {},
+    )
+
+    manifest = document["messages"][0]["content"]
+    assert "visible in the current screenshot: none" in manifest
+    assert f"Active private-session tokens from earlier observations: «{token}»" in manifest
+    assert "alice@example.com" not in manifest
+
+
+def test_request_hook_rejects_well_shaped_but_unissued_manifest_token() -> None:
+    scrubber = HistoryScrubber(
+        SessionVault(nonce="a3f9"),
+        lambda texts: [{"sensitive": False, "values": []} for _ in texts],
+    )
+
+    with pytest.raises(PrivacyError, match="not issued"):
+        privacy_request_hook(scrubber)(
+            {
+                "messages": [{"role": "user", "content": "Observe"}],
+                PLACEHOLDER_MANIFEST_KEY: {
+                    "message_index": 0,
+                    "items": [{"token": "EMAIL_1_a3f9", "class": "EMAIL"}],
+                },
+            },
+            {},
+        )
+
+
+def test_history_scrubber_classifies_only_new_or_changed_safe_texts() -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def classify(texts: tuple[str, ...]) -> list[dict[str, object]]:
+        calls.append(texts)
+        return [{"sensitive": False, "values": []} for _ in texts]
+
+    scrubber = HistoryScrubber(SessionVault(nonce="a3f9"), classify)
+    assert scrubber.scrub(("base prompt", "first step")) == ("base prompt", "first step")
+    assert scrubber.scrub(("base prompt", "first step", "second step")) == (
+        "base prompt",
+        "first step",
+        "second step",
+    )
+
+    assert calls == [("base prompt", "first step"), ("second step",)]
+    assert scrubber.diagnostics()["classification_cache_hits"] == 2
 
 
 def test_request_features_can_be_disabled_independently_for_diagnostics() -> None:
@@ -453,6 +573,76 @@ def test_safety_policy_defaults_and_resolution_gates() -> None:
         vault.store("UNRECOGNIZED_PII", "synthetic")
 
 
+def test_approval_grant_is_exact_one_use_and_never_exposes_value() -> None:
+    policy = SafetyPolicy({"API_KEY": "approval"})
+    vault = SessionVault(nonce="a3f9", policy=policy)
+    token = vault.store("API_KEY", "synthetic-secret-key")
+
+    grant = vault.grant_approval(
+        token,
+        tool_name="write",
+        argument_path="content",
+        target="https://example.test",
+        ttl_seconds=30,
+    )
+
+    assert "synthetic-secret-key" not in json.dumps(grant)
+    resolved = vault.resolve_action(
+        ((token, "content"),), tool_name="write", target="https://example.test"
+    )
+    assert resolved[(token, "content")] == "synthetic-secret-key"
+    assert vault.approvals() == ()
+    with pytest.raises(PrivacyError, match="matching local approval"):
+        vault.resolve_action(
+            ((token, "content"),), tool_name="write", target="https://example.test"
+        )
+
+
+def test_approval_rejects_wrong_tool_path_target_and_expiry() -> None:
+    now = [10.0]
+    vault = SessionVault(
+        nonce="a3f9",
+        policy=SafetyPolicy({"API_KEY": "approval"}),
+        clock=lambda: now[0],
+    )
+    token = vault.store("API_KEY", "synthetic-secret-key")
+    vault.grant_approval(
+        token,
+        tool_name="write",
+        argument_path="content",
+        target="https://example.test",
+        ttl_seconds=1,
+        use_count=2,
+    )
+
+    for tool, path, target in (
+        ("click", "content", "https://example.test"),
+        ("write", "args.content", "https://example.test"),
+        ("write", "content", "https://attacker.test"),
+    ):
+        with pytest.raises(PrivacyError, match="matching local approval"):
+            vault.resolve_action(((token, path),), tool_name=tool, target=target)
+    assert vault.approvals()[0]["remaining_uses"] == 2
+    now[0] = 11.1
+    assert vault.approvals() == ()
+
+
+def test_approval_resolution_is_atomic_and_revocable() -> None:
+    vault = SessionVault(nonce="a3f9", policy=SafetyPolicy({"API_KEY": "approval"}))
+    token = vault.store("API_KEY", "synthetic-secret-key")
+    vault.grant_approval(token, tool_name="write", argument_path="content")
+
+    with pytest.raises(PrivacyError, match="not issued"):
+        vault.resolve_action(
+            ((token, "content"), ("API_KEY_99_a3f9", "content")),
+            tool_name="write",
+            target=None,
+        )
+    assert vault.approvals()[0]["remaining_uses"] == 1
+    assert vault.revoke_approval(token, tool_name="write", argument_path="content")
+    assert not vault.revoke_approval(token, tool_name="write", argument_path="content")
+
+
 def test_blocked_finding_is_masked_but_never_vaulted_or_manifested() -> None:
     vault = SessionVault(nonce="a3f9")
     redactor = VaultRedactor(
@@ -513,6 +703,94 @@ def test_response_fails_closed_on_forged_placeholder_in_action() -> None:
     }
 
     with pytest.raises(PrivacyError, match="not issued"):
+        privacy_response_hook(vault)(document)
+
+
+def test_response_uses_approval_only_for_the_granted_action_context() -> None:
+    vault = SessionVault(nonce="a3f9", policy=SafetyPolicy({"API_KEY": "approval"}))
+    token = vault.store("API_KEY", "synthetic-secret-key")
+    vault.grant_approval(token, tool_name="write", argument_path="content")
+    document = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps({"tool_call": {"tool_name": "write", "content": token}})
+                }
+            }
+        ]
+    }
+
+    result = privacy_response_hook(vault)(document)
+    action = json.loads(result["choices"][0]["message"]["content"])
+    assert action["tool_call"]["content"] == "synthetic-secret-key"
+    assert "synthetic-secret-key" not in json.dumps(document)
+
+
+def test_response_resolves_decorative_wrapper_without_typing_guillemets() -> None:
+    vault = SessionVault(nonce="a3f9")
+    token = vault.store("EMAIL", "alice@example.com")
+    document = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {"tool_call": {"tool_name": "write", "content": f"« {token} »"}}
+                    )
+                }
+            }
+        ]
+    }
+
+    result = privacy_response_hook(vault)(document)
+    action = json.loads(result["choices"][0]["message"]["content"])
+    assert action["tool_call"]["content"] == "alice@example.com"
+
+
+@pytest.mark.parametrize(
+    "action,extract",
+    [
+        (
+            {"action": "type", "text": "EMAIL_1_a3f9", "thought": "EMAIL_1_a3f9"},
+            lambda value: value["text"],
+        ),
+        (
+            {"action": {"type": "type", "text": "EMAIL_1_a3f9"}},
+            lambda value: value["action"]["text"],
+        ),
+        (
+            {
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "write",
+                            "arguments": '{"content":"EMAIL_1_a3f9"}',
+                        },
+                    }
+                ]
+            },
+            lambda value: value["tool_calls"][0]["function"]["arguments"],
+        ),
+    ],
+)
+def test_response_resolves_supported_action_grammars(action: dict[str, Any], extract: Any) -> None:
+    vault = SessionVault(nonce="a3f9")
+    vault.store("EMAIL", "alice@example.com")
+    document = {"choices": [{"message": {"content": json.dumps(action)}}]}
+
+    result = privacy_response_hook(vault)(document)
+    rewritten = json.loads(result["choices"][0]["message"]["content"])
+
+    assert "alice@example.com" in extract(rewritten)
+    if isinstance(rewritten.get("thought"), str):
+        assert rewritten["thought"] == "EMAIL_1_a3f9"
+
+
+def test_response_rejects_malformed_tool_call_envelopes() -> None:
+    vault = SessionVault(nonce="a3f9")
+    document = {"choices": [{"message": {"content": json.dumps({"tool_calls": ["not-a-call"]})}}]}
+
+    with pytest.raises(PrivacyError, match="invalid shape"):
         privacy_response_hook(vault)(document)
 
 

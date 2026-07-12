@@ -8,9 +8,12 @@ import json
 import re
 import secrets
 import threading
+import time
 import unicodedata
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any, Final, Protocol
 
 from PIL import Image, ImageDraw, ImageFont
@@ -22,14 +25,13 @@ PLACEHOLDER_SCHEME: Final = (
     "To use it, copy only the inner token (for example EMAIL_1_ab12), exactly and with its "
     "session suffix, into the executed action field. Do not include the decorative « » marks, "
     "change its spelling or case, invent a token, guess the hidden value, or expose a token only "
-    "in notes/reasoning. If a hidden sensitive value you need is not listed as a visible PLVA "
-    "token in the current observation, do not fabricate or reuse it. Ordinary unmarked UI text "
-    "and non-sensitive actions are unaffected; continue the requested task normally."
+    "in notes/reasoning. A token explicitly listed as active for this private session may be "
+    "reused in a later step when the task clearly refers to the same previously observed value. "
+    "Never fabricate a token or reuse one that is not in the active-session list."
 )
 PLACEHOLDER_DUPLICATE_WARNING: Final = (
-    "[PLVA_PLACEHOLDERS] Occasionally one real value may have more than one token "
-    "across steps; treat each token independently and use the token shown on the field you are "
-    "acting on."
+    "[PLVA_PLACEHOLDERS] Tokens are stable within this private session. When several tokens have "
+    "the same class, preserve the exact token associated with the value or field you observed."
 )
 PLACEHOLDER_INSTRUCTIONS: Final = (
     PLACEHOLDER_SCHEME + " " + PLACEHOLDER_DUPLICATE_WARNING.removeprefix("[PLVA_PLACEHOLDERS] ")
@@ -41,8 +43,16 @@ PLACEHOLDER_SYSTEM_END: Final = "[PLVA_PLACEHOLDERS_END]"
 _CREDENTIAL_CLASSES: Final = frozenset(
     {"API_KEY", "AUTH_TOKEN", "PASSWORD", "CVC", "CARD_NUMBER", "PRIVATE_KEY", "SECRET"}
 )
-_PLACEHOLDER_SHAPE: Final = re.compile(r"\b[A-Z][A-Z0-9_]*_[1-9]\d*_[0-9a-f]{4}\b")
-_TOOL_NAME_KEYS: Final = frozenset({"tool_name", "name", "id"})
+_PLACEHOLDER_TOKEN_PATTERN: Final = r"[A-Z][A-Z0-9_]*_[1-9]\d*_[0-9a-f]{4}"
+_PLACEHOLDER_SHAPE: Final = re.compile(rf"\b{_PLACEHOLDER_TOKEN_PATTERN}\b")
+_PLACEHOLDER_REFERENCE: Final = re.compile(
+    rf"«\s*(?P<wrapped>{_PLACEHOLDER_TOKEN_PATTERN})\s*»|"
+    rf"\b(?P<plain>{_PLACEHOLDER_TOKEN_PATTERN})\b"
+)
+_TOOL_NAME_KEYS: Final = frozenset({"tool_name", "name", "id", "action", "type"})
+_NON_EXECUTED_FIELDS: Final = frozenset(
+    {"thought", "reasoning", "note", "notes", "explanation", "rationale"}
+)
 
 
 class PrivacyError(RuntimeError):
@@ -146,10 +156,30 @@ class VaultEntry:
     canonical: str
 
 
+@dataclass(slots=True)
+class ApprovalGrant:
+    """One local, short-lived capability to use an approval-gated token."""
+
+    token: str
+    tool_name: str
+    argument_path: str
+    target: str | None
+    expires_at: float
+    remaining_uses: int
+
+
 class SessionVault:
     """Thread-safe, memory-only placeholder map scoped to one proxy process."""
 
-    def __init__(self, *, nonce: str | None = None, policy: SafetyPolicy | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        nonce: str | None = None,
+        policy: SafetyPolicy | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        approval_ttl_seconds: float = 60.0,
+        approval_use_count: int = 1,
+    ) -> None:
         selected_nonce = nonce or secrets.token_hex(2)
         if re.fullmatch(r"[0-9a-f]{4}", selected_nonce) is None:
             raise ValueError("vault nonce must be four lowercase hexadecimal characters")
@@ -160,6 +190,14 @@ class SessionVault:
         self._by_placeholder: dict[str, VaultEntry] = {}
         self._variants: dict[str, str] = {}
         self._counters: dict[str, int] = {}
+        self._clock = clock
+        if approval_ttl_seconds <= 0 or approval_ttl_seconds > 3600:
+            raise ValueError("default approval TTL must be between 0 and 3600 seconds")
+        if approval_use_count < 1 or approval_use_count > 100:
+            raise ValueError("default approval use count must be between 1 and 100")
+        self._approval_ttl_seconds = float(approval_ttl_seconds)
+        self._approval_use_count = approval_use_count
+        self._approval_grants: dict[tuple[str, str, str, str | None], ApprovalGrant] = {}
 
     @property
     def nonce(self) -> str:
@@ -204,6 +242,164 @@ class SessionVault:
                 raise PrivacyError("placeholder requires local approval")
             return entry.value
 
+    def grant_approval(
+        self,
+        placeholder: str,
+        *,
+        tool_name: str,
+        argument_path: str,
+        target: str | None = None,
+        ttl_seconds: float | None = None,
+        use_count: int | None = None,
+    ) -> dict[str, Any]:
+        """Mint a value-free local capability for one exact action context.
+
+        The raw value never leaves the vault. Grants are deliberately not bearer
+        tokens returned to the model: the tuple of issued placeholder, tool,
+        argument path, and optional destination must match during local action
+        rewriting.
+        """
+
+        normalized_tool = _normalize_approval_component(tool_name, "tool name")
+        normalized_path = _normalize_approval_component(argument_path, "argument path")
+        normalized_target = _normalize_optional_target(target)
+        selected_ttl = self._approval_ttl_seconds if ttl_seconds is None else ttl_seconds
+        selected_uses = self._approval_use_count if use_count is None else use_count
+        if not isinstance(selected_ttl, (int, float)) or isinstance(selected_ttl, bool):
+            raise ValueError("approval TTL must be a number")
+        if selected_ttl <= 0 or selected_ttl > 3600:
+            raise ValueError("approval TTL must be between 0 and 3600 seconds")
+        if (
+            not isinstance(selected_uses, int)
+            or isinstance(selected_uses, bool)
+            or selected_uses < 1
+        ):
+            raise ValueError("approval use count must be a positive integer")
+        if selected_uses > 100:
+            raise ValueError("approval use count cannot exceed 100")
+        with self._lock:
+            entry = self._by_placeholder.get(placeholder)
+            if entry is None:
+                raise PrivacyError("approval token was not issued by this session")
+            if self._policy.level_for(entry.pii_class) != "approval":
+                raise PrivacyError("only approval-gated placeholders may receive approval")
+            self._prune_approvals_locked()
+            key = (placeholder, normalized_tool, normalized_path, normalized_target)
+            grant = ApprovalGrant(
+                token=placeholder,
+                tool_name=normalized_tool,
+                argument_path=normalized_path,
+                target=normalized_target,
+                expires_at=self._clock() + float(selected_ttl),
+                remaining_uses=selected_uses,
+            )
+            self._approval_grants[key] = grant
+            return self._approval_metadata(grant)
+
+    def approvals(self) -> tuple[dict[str, Any], ...]:
+        """Return active grant metadata without exposing any vaulted value."""
+
+        with self._lock:
+            self._prune_approvals_locked()
+            return tuple(self._approval_metadata(grant) for grant in self._approval_grants.values())
+
+    def revoke_approval(
+        self,
+        placeholder: str,
+        *,
+        tool_name: str,
+        argument_path: str,
+        target: str | None = None,
+    ) -> bool:
+        """Revoke one exact local capability; never alter or reveal the vault entry."""
+
+        key = (
+            placeholder,
+            _normalize_approval_component(tool_name, "tool name"),
+            _normalize_approval_component(argument_path, "argument path"),
+            _normalize_optional_target(target),
+        )
+        with self._lock:
+            self._prune_approvals_locked()
+            return self._approval_grants.pop(key, None) is not None
+
+    def approval_prompt(self) -> str | None:
+        """Describe active capabilities to the planner without disclosing local values."""
+
+        grants = self.approvals()
+        if not grants:
+            return None
+        contexts = ", ".join(
+            f"{grant['token']} ({grant['remaining_uses']} exact local use(s))" for grant in grants
+        )
+        return (
+            "[PLVA_LOCAL_APPROVALS] Active local capabilities: "
+            + contexts
+            + ". Each remains subject to expiry and exact local action-context matching; "
+            "context details are intentionally not sent to the provider."
+        )
+
+    def resolve_action(
+        self,
+        references: tuple[tuple[str, str], ...],
+        *,
+        tool_name: str,
+        target: str | None,
+    ) -> dict[tuple[str, str], str]:
+        """Atomically authorize and resolve all token/path pairs in one local action."""
+
+        normalized_tool = _normalize_approval_component(tool_name, "tool name")
+        normalized_target = _normalize_optional_target(target)
+        unique = tuple(dict.fromkeys(references))
+        with self._lock:
+            self._prune_approvals_locked()
+            resolved: dict[tuple[str, str], str] = {}
+            required_grants: dict[tuple[str, str, str, str | None], int] = {}
+            for token, raw_path in unique:
+                path = _normalize_approval_component(raw_path, "argument path")
+                entry = self._by_placeholder.get(token)
+                if entry is None:
+                    raise PrivacyError("placeholder was not issued by this session")
+                level = self._policy.level_for(entry.pii_class)
+                if level == "blocked":
+                    raise PrivacyError("placeholder is blocked by policy")
+                if level == "approval":
+                    exact = (token, normalized_tool, path, normalized_target)
+                    unscoped = (token, normalized_tool, path, None)
+                    key = exact if exact in self._approval_grants else unscoped
+                    grant = self._approval_grants.get(key)
+                    if grant is None:
+                        raise PrivacyError("placeholder requires matching local approval")
+                    required_grants[key] = required_grants.get(key, 0) + 1
+                resolved[(token, path)] = entry.value
+            for key, count in required_grants.items():
+                if self._approval_grants[key].remaining_uses < count:
+                    raise PrivacyError("local approval use count is exhausted")
+            for key, count in required_grants.items():
+                grant = self._approval_grants[key]
+                grant.remaining_uses -= count
+                if grant.remaining_uses == 0:
+                    del self._approval_grants[key]
+            return resolved
+
+    def _prune_approvals_locked(self) -> None:
+        now = self._clock()
+        self._approval_grants = {
+            key: grant
+            for key, grant in self._approval_grants.items()
+            if grant.expires_at > now and grant.remaining_uses > 0
+        }
+
+    def _approval_metadata(self, grant: ApprovalGrant) -> dict[str, Any]:
+        return {
+            "token": grant.token,
+            "tool_name": grant.tool_name,
+            "argument_path": grant.argument_path,
+            "target": grant.target,
+            "expires_in_seconds": max(0.0, grant.expires_at - self._clock()),
+            "remaining_uses": grant.remaining_uses,
+        }
+
     def safety_level(self, pii_class: str) -> str:
         return self._policy.level_for(pii_class)
 
@@ -222,11 +418,39 @@ class SessionVault:
                 for entry in self._by_placeholder.values()
             )
 
+    def manifest(self) -> tuple[dict[str, str], ...]:
+        """Return active session tokens without exposing any vaulted value."""
+
+        with self._lock:
+            return tuple(
+                {
+                    "token": entry.placeholder,
+                    "class": entry.pii_class,
+                    "safety_level": self._policy.level_for(entry.pii_class),
+                }
+                for entry in self._by_placeholder.values()
+            )
+
+    def validate_manifest_item(self, token: str, pii_class: str, safety_level: str) -> None:
+        """Reject forged or stale internal manifest metadata before model egress."""
+
+        with self._lock:
+            entry = self._by_placeholder.get(token)
+            if entry is None:
+                raise PrivacyError("placeholder manifest token was not issued by this session")
+            if entry.pii_class != _normalize_class(pii_class):
+                raise PrivacyError("placeholder manifest class does not match the issued token")
+            if self._policy.level_for(entry.pii_class) != safety_level:
+                raise PrivacyError("placeholder manifest policy does not match the issued token")
+
     def resolve_text(self, text: str) -> str:
         def replace(match: re.Match[str]) -> str:
-            return self.resolve(match.group(0))
+            token = match.group("wrapped") or match.group("plain")
+            if token is None:  # pragma: no cover - guaranteed by the expression
+                raise PrivacyError("placeholder reference is invalid")
+            return self.resolve(token)
 
-        return _PLACEHOLDER_SHAPE.sub(replace, text)
+        return _PLACEHOLDER_REFERENCE.sub(replace, text)
 
     def scrub_plain(self, text: str) -> str:
         with self._lock:
@@ -246,6 +470,7 @@ class SessionVault:
             self._by_placeholder.clear()
             self._variants.clear()
             self._counters.clear()
+            self._approval_grants.clear()
 
     def placeholders(self) -> tuple[str, ...]:
         with self._lock:
@@ -255,9 +480,17 @@ class SessionVault:
 class VaultRedactor:
     """Wrap a findings-capable redactor and paint vault-owned placeholder chips."""
 
-    def __init__(self, redactor: RedactorWithAnalysis, vault: SessionVault) -> None:
+    def __init__(
+        self, redactor: RedactorWithAnalysis, vault: SessionVault, *, cache_entries: int = 32
+    ) -> None:
+        if cache_entries < 0:
+            raise ValueError("painted-frame cache cannot be negative")
         self._redactor = redactor
         self._vault = vault
+        self._cache_entries = cache_entries
+        self._cache: OrderedDict[
+            bytes, tuple[bytes, tuple[dict[str, str], ...], dict[str, Any]]
+        ] = OrderedDict()
         self._analysis: dict[str, Any] = {}
         self._lock = threading.RLock()
 
@@ -275,6 +508,7 @@ class VaultRedactor:
         finally:
             self._vault.dispose()
             with self._lock:
+                self._cache.clear()
                 self._analysis = {}
 
     def __call__(self, png: bytes) -> bytes:
@@ -288,6 +522,13 @@ class VaultRedactor:
             return self._redact_with_manifest(png)
 
     def _redact_with_manifest(self, png: bytes) -> tuple[bytes, tuple[dict[str, str], ...]]:
+        key = sha256(png).digest()
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.move_to_end(key)
+            painted, cached_manifest, analysis = cached
+            self._analysis = copy.deepcopy(analysis)
+            return painted, copy.deepcopy(cached_manifest)
         redacted = self._redactor(png)
         analysis = self._redactor.latest_analysis
         findings = analysis.get("findings")
@@ -341,7 +582,13 @@ class VaultRedactor:
         analysis["vault_placeholders"] = sum(len(placeholders) for _, placeholders in chips)
         analysis["policy"] = self._vault.policy_snapshot()
         self._analysis = analysis
-        return painted, tuple(manifest)
+        result_manifest = tuple(manifest)
+        if self._cache_entries:
+            self._cache[key] = (painted, copy.deepcopy(result_manifest), copy.deepcopy(analysis))
+            self._cache.move_to_end(key)
+            while len(self._cache) > self._cache_entries:
+                self._cache.popitem(last=False)
+        return painted, result_manifest
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,15 +667,22 @@ class StubRedactor:
 class HistoryScrubber:
     """Plain-vault scrub followed by accelerated Rampart classification."""
 
-    def __init__(self, vault: SessionVault, classify: TextClassifier) -> None:
+    def __init__(
+        self, vault: SessionVault, classify: TextClassifier, *, cache_entries: int = 256
+    ) -> None:
+        if cache_entries < 1:
+            raise ValueError("history cache must contain at least one entry")
         self._vault = vault
         self._classify = classify
+        self._cache_entries = cache_entries
+        self._safe_cache: OrderedDict[tuple[int, bytes], dict[str, Any]] = OrderedDict()
         self._lock = threading.Lock()
         self._diagnostics: dict[str, int | str] = {
             "status": "idle",
             "texts_scanned": 0,
             "plain_vault_hits": 0,
             "semantic_hits": 0,
+            "classification_cache_hits": 0,
             "blocked_hits": 0,
             "error_code": "none",
         }
@@ -437,7 +691,12 @@ class HistoryScrubber:
         with self._lock:
             return dict(self._diagnostics)
 
+    def approval_prompt(self) -> str | None:
+        return self._vault.approval_prompt()
+
     def scrub(self, texts: tuple[str, ...]) -> tuple[str, ...]:
+        if not texts:
+            return ()
         plain = tuple(self._vault.scrub_plain(text) for text in texts)
         plain_hits = sum(
             max(0, len(_PLACEHOLDER_SHAPE.findall(after)) - len(_PLACEHOLDER_SHAPE.findall(before)))
@@ -447,12 +706,16 @@ class HistoryScrubber:
             _PLACEHOLDER_SHAPE.sub(lambda match: " " * len(match.group(0)), text) for text in plain
         )
         try:
-            classifications = self._classify(classifier_inputs)
+            classifications, cache_hits = self._classify_incremental(classifier_inputs)
         except Exception as exc:
-            self._set_diagnostics("failed", len(texts), plain_hits, 0, 0, "classifier_failed")
+            self._set_diagnostics(
+                "failed", len(texts), plain_hits, 0, 0, 0, "classifier_failed"
+            )
             raise PrivacyError("history classifier failed") from exc
         if len(classifications) != len(plain):
-            self._set_diagnostics("failed", len(texts), plain_hits, 0, 0, "result_count")
+            self._set_diagnostics(
+                "failed", len(texts), plain_hits, 0, cache_hits, 0, "result_count"
+            )
             raise PrivacyError("history classifier returned the wrong result count")
         semantic_hits = sum(
             len(classification.get("values", []))
@@ -476,14 +739,68 @@ class HistoryScrubber:
                 len(texts),
                 plain_hits,
                 semantic_hits,
+                cache_hits,
                 blocked_hits,
                 "transform_failed",
             )
             raise
         self._set_diagnostics(
-            "passed", len(texts), plain_hits, semantic_hits, blocked_hits, "none"
+            "passed",
+            len(texts),
+            plain_hits,
+            semantic_hits,
+            cache_hits,
+            blocked_hits,
+            "none",
         )
         return tuple(scrubbed)
+
+    def active_manifest(self) -> tuple[dict[str, str], ...]:
+        return self._vault.manifest()
+
+    def validate_manifest(self, items: tuple[tuple[str, str, str], ...]) -> None:
+        for token, pii_class, safety_level in items:
+            self._vault.validate_manifest_item(token, pii_class, safety_level)
+
+    def _classify_incremental(self, texts: tuple[str, ...]) -> tuple[list[dict[str, Any]], int]:
+        results: list[dict[str, Any] | None] = [None] * len(texts)
+        missing: OrderedDict[tuple[int, bytes], tuple[str, list[int]]] = OrderedDict()
+        cache_hits = 0
+        with self._lock:
+            for index, text in enumerate(texts):
+                encoded = text.encode("utf-8")
+                key = (len(encoded), sha256(encoded).digest())
+                cached = self._safe_cache.get(key)
+                if cached is not None:
+                    self._safe_cache.move_to_end(key)
+                    results[index] = copy.deepcopy(cached)
+                    cache_hits += 1
+                    continue
+                pending = missing.get(key)
+                if pending is None:
+                    missing[key] = (text, [index])
+                else:
+                    pending[1].append(index)
+        if missing:
+            classified = self._classify(tuple(item[0] for item in missing.values()))
+            if len(classified) != len(missing):
+                return [item for item in results if item is not None], cache_hits
+            for (key, (_, indexes)), classification in zip(
+                missing.items(), classified, strict=True
+            ):
+                if not isinstance(classification, dict):
+                    raise PrivacyError("history classifier returned an invalid result")
+                for index in indexes:
+                    results[index] = copy.deepcopy(classification)
+                if classification.get("sensitive") is False and classification.get("values") == []:
+                    with self._lock:
+                        self._safe_cache[key] = copy.deepcopy(classification)
+                        self._safe_cache.move_to_end(key)
+                        while len(self._safe_cache) > self._cache_entries:
+                            self._safe_cache.popitem(last=False)
+        if any(item is None for item in results):
+            raise PrivacyError("history classifier returned the wrong result count")
+        return [item for item in results if item is not None], cache_hits
 
     def _set_diagnostics(
         self,
@@ -491,6 +808,7 @@ class HistoryScrubber:
         texts: int,
         plain_hits: int,
         semantic_hits: int,
+        cache_hits: int,
         blocked_hits: int,
         error_code: str,
     ) -> None:
@@ -500,6 +818,7 @@ class HistoryScrubber:
                 "texts_scanned": texts,
                 "plain_vault_hits": plain_hits,
                 "semantic_hits": semantic_hits,
+                "classification_cache_hits": cache_hits,
                 "blocked_hits": blocked_hits,
                 "error_code": error_code,
             }
@@ -553,7 +872,7 @@ def privacy_request_hook(
     def apply(
         document: dict[str, Any], headers: dict[str, str]
     ) -> tuple[dict[str, Any], dict[str, str]]:
-        rewritten: dict[str, Any] = json.loads(json.dumps(document))
+        rewritten: dict[str, Any] = copy.deepcopy(document)
         raw_manifest = rewritten.pop(PLACEHOLDER_MANIFEST_KEY, None)
         messages = rewritten.get("messages")
         if not isinstance(messages, list):
@@ -577,15 +896,29 @@ def privacy_request_hook(
         scrubbed = scrubber.scrub(texts) if texts and history_scrub else texts
         for (container, key), value in zip(locations, scrubbed, strict=True):
             container[key] = value
+        if manifest_target is not None:
+            scrubber.validate_manifest(manifest_items)
         instructions = _placeholder_instructions(
             scheme=inject_scheme,
             duplicate_warning=inject_duplicate_warning,
-            policy_prompt=(policy or SafetyPolicy()).prompt() if inject_policy else None,
+            policy_prompt=(
+                " ".join(
+                    part
+                    for part in ((policy or SafetyPolicy()).prompt(), scrubber.approval_prompt())
+                    if part is not None
+                )
+                if inject_policy
+                else None
+            ),
         )
         if instructions is not None:
             _inject_placeholder_instructions(messages, instructions, manifest_target)
         if manifest_target is not None:
-            _attach_manifest(manifest_target, manifest_items)
+            active_items = tuple(
+                (item["token"], item["class"], item["safety_level"])
+                for item in scrubber.active_manifest()
+            )
+            _attach_manifest(manifest_target, manifest_items, active_items)
         return rewritten, headers
 
     return apply
@@ -740,7 +1073,11 @@ def _strip_placeholder_text(text: str) -> str:
     return "\n".join(kept).rstrip()
 
 
-def _attach_manifest(message: dict[str, Any], items: tuple[tuple[str, str, str], ...]) -> None:
+def _attach_manifest(
+    message: dict[str, Any],
+    items: tuple[tuple[str, str, str], ...],
+    active_items: tuple[tuple[str, str, str], ...],
+) -> None:
     if items:
         visible = ", ".join(
             f"«{token}» ({_class_hint(pii_class)} · {_level_hint(level)})"
@@ -748,13 +1085,24 @@ def _attach_manifest(message: dict[str, Any], items: tuple[tuple[str, str, str],
         )
         text = (
             f"{PLACEHOLDER_MANIFEST_PREFIX} Placeholders visible in the current screenshot: "
-            f"{visible}. Use only the exact inner tokens shown here for this step."
+            f"{visible}."
         )
     else:
         text = (
-            f"{PLACEHOLDER_MANIFEST_PREFIX} Placeholders visible in the current screenshot: "
-            "none. Do not reuse a placeholder merely because it appeared in an earlier step."
+            f"{PLACEHOLDER_MANIFEST_PREFIX} Placeholders visible in the current screenshot: none."
         )
+    current = {token for token, _, _ in items}
+    reusable = [item for item in active_items if item[0] not in current]
+    if reusable:
+        active = ", ".join(
+            f"«{token}» ({_class_hint(pii_class)} · {_level_hint(level)})"
+            for token, pii_class, level in reusable
+        )
+        text += (
+            f" Active private-session tokens from earlier observations: {active}. Reuse one only "
+            "when the task clearly refers to the same previously observed value."
+        )
+    text += " Use only exact tokens listed in this manifest; never invent one."
     _attach_observation_text(message, text)
 
 
@@ -796,7 +1144,7 @@ def _level_hint(level: str) -> str:
 
 def privacy_response_hook(vault: SessionVault) -> Callable[[dict[str, Any]], dict[str, Any]]:
     def apply(document: dict[str, Any]) -> dict[str, Any]:
-        rewritten: dict[str, Any] = json.loads(json.dumps(document))
+        rewritten: dict[str, Any] = copy.deepcopy(document)
         choices = rewritten.get("choices")
         if not isinstance(choices, list):
             raise PrivacyError("completion has no choices")
@@ -817,14 +1165,10 @@ def privacy_response_hook(vault: SessionVault) -> Callable[[dict[str, Any]], dic
                 continue
             calls = _executed_calls(action)
             for call in calls:
-                name = call.get("tool_name", call.get("name"))
-                if not isinstance(name, str):
-                    raise PrivacyError("tool call has no name")
-                if "answer" in name.lower():
+                name = _call_name(call)
+                if name.lower() in {"answer", "final_answer"}:
                     continue
-                for key, value in list(call.items()):
-                    if key not in _TOOL_NAME_KEYS:
-                        call[key] = _resolve_structure(value, vault)
+                _resolve_call(call, vault)
             if calls:
                 message["content"] = json.dumps(action, separators=(",", ":"))
         return rewritten
@@ -834,25 +1178,129 @@ def privacy_response_hook(vault: SessionVault) -> Callable[[dict[str, Any]], dic
 
 def _executed_calls(action: dict[str, Any]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
-    plural = action.get("tool_calls")
-    if isinstance(plural, list):
-        calls.extend(call for call in plural if isinstance(call, dict))
-    singular = action.get("tool_call")
-    if isinstance(singular, dict):
+    if "tool_calls" in action:
+        plural = action["tool_calls"]
+        if not isinstance(plural, list) or any(not isinstance(call, dict) for call in plural):
+            raise PrivacyError("tool_calls has an invalid shape")
+        calls.extend(plural)
+    if "tool_call" in action:
+        singular = action["tool_call"]
+        if not isinstance(singular, dict):
+            raise PrivacyError("tool_call has an invalid shape")
         calls.append(singular)
-    if isinstance(action.get("tool_name"), str):
+    if isinstance(action.get("tool_name"), str) or (
+        isinstance(action.get("action"), str)
+        and any(
+            key in action for key in ("text", "content", "url", "args", "arguments", "coordinates")
+        )
+    ):
         calls.append(action)
+    nested = action.get("action")
+    if isinstance(nested, dict):
+        calls.append(nested)
     return calls
 
 
-def _resolve_structure(value: Any, vault: SessionVault) -> Any:
+def _call_name(call: dict[str, Any]) -> str:
+    for key in ("tool_name", "name", "action"):
+        value = call.get(key)
+        if isinstance(value, str) and value:
+            return value
+    call_type = call.get("type")
+    if isinstance(call_type, str) and call_type and call_type != "function":
+        return call_type
+    function = call.get("function")
+    if isinstance(function, dict):
+        function_name = function.get("name")
+        if isinstance(function_name, str):
+            return function_name
+    raise PrivacyError("tool call has no name")
+
+
+def _resolve_call(call: dict[str, Any], vault: SessionVault) -> None:
+    tool_name = _call_name(call)
+    target = _call_target(call)
+    references: list[tuple[str, str]] = []
+    for key, value in list(call.items()):
+        if key in _TOOL_NAME_KEYS or key in _NON_EXECUTED_FIELDS:
+            continue
+        if key == "function":
+            if not isinstance(value, dict) or not isinstance(value.get("name"), str):
+                raise PrivacyError("function tool call has an invalid shape")
+            if "arguments" in value:
+                _collect_structure_references(value["arguments"], "function.arguments", references)
+            continue
+        _collect_structure_references(value, key, references)
+    resolved = vault.resolve_action(tuple(references), tool_name=tool_name, target=target)
+    for key, value in list(call.items()):
+        if key in _TOOL_NAME_KEYS or key in _NON_EXECUTED_FIELDS:
+            continue
+        if key == "function":
+            function = dict(value)
+            if "arguments" in function:
+                function["arguments"] = _resolve_structure(
+                    function["arguments"], "function.arguments", resolved
+                )
+            call[key] = function
+            continue
+        call[key] = _resolve_structure(value, key, resolved)
+
+
+def _collect_structure_references(value: Any, path: str, references: list[tuple[str, str]]) -> None:
     if isinstance(value, str):
-        return vault.resolve_text(value)
+        for match in _PLACEHOLDER_REFERENCE.finditer(value):
+            token = match.group("wrapped") or match.group("plain")
+            if token is not None:
+                references.append((token, path))
+        return
     if isinstance(value, list):
-        return [_resolve_structure(item, vault) for item in value]
+        for index, item in enumerate(value):
+            _collect_structure_references(item, f"{path}[{index}]", references)
+        return
     if isinstance(value, dict):
-        return {key: _resolve_structure(item, vault) for key, item in value.items()}
+        for key, item in value.items():
+            _collect_structure_references(item, f"{path}.{key}", references)
+
+
+def _resolve_structure(value: Any, path: str, resolved: Mapping[tuple[str, str], str]) -> Any:
+    if isinstance(value, str):
+
+        def replace(match: re.Match[str]) -> str:
+            token = match.group("wrapped") or match.group("plain")
+            if token is None:  # pragma: no cover - guaranteed by the expression
+                raise PrivacyError("placeholder reference is invalid")
+            try:
+                return resolved[(token, path)]
+            except KeyError as exc:  # pragma: no cover - collector and resolver are paired
+                raise PrivacyError("placeholder was not authorized for this action") from exc
+
+        return _PLACEHOLDER_REFERENCE.sub(replace, value)
+    if isinstance(value, list):
+        return [
+            _resolve_structure(item, f"{path}[{index}]", resolved)
+            for index, item in enumerate(value)
+        ]
+    if isinstance(value, dict):
+        return {
+            key: _resolve_structure(item, f"{path}.{key}", resolved) for key, item in value.items()
+        }
     return value
+
+
+def _call_target(call: Mapping[str, Any]) -> str | None:
+    """Read an explicit destination hint without ever deriving one from raw vault data."""
+
+    for key in ("origin", "url", "target", "destination"):
+        value = call.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for container_key in ("args", "arguments"):
+        nested = call.get(container_key)
+        if isinstance(nested, Mapping):
+            target = _call_target(nested)
+            if target is not None:
+                return target
+    return None
 
 
 def _paint_chips(
@@ -905,6 +1353,21 @@ def _normalize_class(value: str) -> str:
     if not normalized:
         raise PrivacyError("PII class is empty")
     return normalized
+
+
+def _normalize_approval_component(value: str, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"approval {label} cannot be empty")
+    normalized = value.strip()
+    if len(normalized) > 512 or any(ord(character) < 32 for character in normalized):
+        raise ValueError(f"approval {label} is invalid")
+    return normalized.casefold() if label == "tool name" else normalized
+
+
+def _normalize_optional_target(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return _normalize_approval_component(value, "target")
 
 
 def _canonical_value(pii_class: str, value: str) -> str:

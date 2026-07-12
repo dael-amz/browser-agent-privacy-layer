@@ -58,7 +58,9 @@ class AcceleratedRedactorConfig:
     profile: str = "high-recall"
     startup_timeout_s: float = 180.0
     frame_timeout_s: float = 180.0
-    cache_entries: int = 4
+    # A CUA request can carry many historical frames. Four entries caused an
+    # oldest-to-newest LRU thrash once trajectories grew past four steps.
+    cache_entries: int = 32
     idle_timeout_s: float | None = 60.0
     worker_kind: str = "browser"
     worker_root: Path | None = None
