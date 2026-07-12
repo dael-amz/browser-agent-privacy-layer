@@ -6,6 +6,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -28,6 +29,10 @@ ROOT: Final = Path(__file__).resolve().parents[2]
 UI_PATH: Final = Path(__file__).with_name("demo_ui.html")
 DEFAULT_POLICY_PATH: Final = ROOT / "config" / "privacy-policy.json"
 PROXY_BASE: Final = "http://127.0.0.1:18081"
+_ANSI_ESCAPE: Final = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_INLINE_SECRET: Final = re.compile(
+    r"(?i)\b([A-Z_]*(?:API_KEY|AUTH_TOKEN|PASSWORD|SECRET|TOKEN|KEY))\s*=\s*([^\s]+)"
+)
 FEATURE_ENV: Final = {
     "chips": "PLVA_PRIVACY_CHIPS",
     "history_scrub": "PLVA_PRIVACY_HISTORY_SCRUB",
@@ -70,6 +75,8 @@ class DemoController:
         self._started_at = 0.0
         self._finished_at = 0.0
         self._events: deque[dict[str, str]] = deque(maxlen=24)
+        self._traces: deque[dict[str, str]] = deque(maxlen=300)
+        self._traces_dropped = 0
         self._frame: bytes | None = None
         self._vault: dict[str, Any] = {"entries": [], "policy": {}}
         self._findings: dict[str, Any] = {}
@@ -96,6 +103,7 @@ class DemoController:
                 "started_at": self._started_at,
                 "finished_at": self._finished_at,
                 "events": list(self._events),
+                "trace_count": len(self._traces),
                 "policy": dict(self._policy),
                 "settings": json.loads(json.dumps(self._settings)),
                 "stats": dict(self._stats),
@@ -159,6 +167,8 @@ class DemoController:
             self._started_at = time.time()
             self._finished_at = 0.0
             self._events.clear()
+            self._traces.clear()
+            self._traces_dropped = 0
             self._frame = None
             self._vault = {"entries": [], "policy": dict(self._policy)}
             self._findings = {}
@@ -237,6 +247,14 @@ class DemoController:
         with self._lock:
             return self._call_images.get((call_id, index))
 
+    def traces(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "entries": list(self._traces),
+                "dropped": self._traces_dropped,
+                "memory_only": True,
+            }
+
     def _require_idle(self) -> None:
         if self._process is not None and self._process.poll() is None:
             raise RuntimeError("stop the active task before changing this setting")
@@ -263,12 +281,24 @@ class DemoController:
         stdout = process.stdout
         if stdout is not None:
             for line in stdout:
+                trace = _safe_agent_trace(line)
                 event = _safe_runner_event(line)
-                if event is not None:
+                if trace is not None or event is not None:
                     with self._lock:
-                        self._event(*event)
-                        if event[0] in {"Privacy engine ready", "Provider connected"}:
-                            self._status = "running"
+                        if trace is not None:
+                            if self._traces and all(
+                                self._traces[-1][key] == trace[key]
+                                for key in ("channel", "text")
+                            ):
+                                trace = None
+                            if trace is not None:
+                                if len(self._traces) == self._traces.maxlen:
+                                    self._traces_dropped += 1
+                                self._traces.append(trace)
+                        if event is not None:
+                            self._event(*event)
+                            if event[0] in {"Privacy engine ready", "Provider connected"}:
+                                self._status = "running"
         exit_code = process.wait()
         with self._lock:
             if self._process is process:
@@ -373,6 +403,38 @@ def _safe_runner_event(line: str) -> tuple[str, str] | None:
     if "ERROR" in text.upper():
         return "Runner reported an error", "Sensitive command output is intentionally hidden here."
     return None
+
+
+def _safe_agent_trace(line: str) -> dict[str, str] | None:
+    """Keep useful Holo output in memory without retaining the user's task or credentials."""
+
+    text = _ANSI_ESCAPE.sub("", line).strip()
+    if not text or text.startswith(("user:", "--- task:")):
+        return None
+    text = text.strip("│ ")
+    if not text or all(character in "─━═╭╮╰╯┌┐└┘┄┈ " for character in text):
+        return None
+    text = _INLINE_SECRET.sub(lambda match: f"{match.group(1)}=[REDACTED]", text)
+    text = "".join(character for character in text if character >= " " or character == "\t")
+    if len(text) > 2_000:
+        text = text[:1_997] + "…"
+    lowered = text.lower()
+    if text.startswith("---"):
+        channel = "runtime"
+    elif "💭" in text or lowered.startswith(("thought", "reasoning")):
+        channel = "reasoning"
+    elif "⚡" in text or any(
+        marker in lowered
+        for marker in ("click", "write", "scroll", "keypress", "tool_call", "action")
+    ):
+        channel = "action"
+    elif "📝" in text or "answer" in lowered:
+        channel = "answer"
+    elif "error" in lowered or "failed" in lowered:
+        channel = "error"
+    else:
+        return None
+    return {"time": time.strftime("%H:%M:%S"), "channel": channel, "text": text}
 
 
 def _fetch_bytes(path: str) -> bytes | None:
@@ -483,6 +545,10 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="call image not found")
         media_type, data = image
         return Response(data, media_type=media_type, headers={"cache-control": "no-store"})
+
+    @app.get("/api/traces")
+    async def traces() -> Response:
+        return _json_response(active.traces())
 
     return app
 

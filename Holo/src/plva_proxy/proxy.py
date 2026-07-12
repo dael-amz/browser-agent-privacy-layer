@@ -395,11 +395,11 @@ def _preview_text(document: dict[str, Any]) -> str:
         if isinstance(content, str):
             preview = content
         elif isinstance(content, list):
-            texts = [
-                part.get("text")
-                for part in content
-                if isinstance(part, dict) and isinstance(part.get("text"), str)
-            ]
+            texts: list[str] = []
+            for part in content:
+                text = part.get("text") if isinstance(part, dict) else None
+                if isinstance(text, str):
+                    texts.append(text)
             if texts:
                 preview = " ".join(texts)
     return " ".join(preview.split())[:160]

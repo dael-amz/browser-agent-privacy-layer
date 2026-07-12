@@ -167,6 +167,35 @@ def test_history_scrub_plain_match_then_semantic_backstop() -> None:
     assert vault.resolve("SSN_1_a3f9") == "472-81-0094"
 
 
+def test_history_scrub_opaquely_removes_blocked_values_without_vaulting() -> None:
+    secret = "synthetic-secret"
+
+    def classify(texts: tuple[str, ...]) -> list[dict[str, object]]:
+        start = texts[0].index(secret)
+        return [
+            {
+                "sensitive": True,
+                "values": [
+                    {
+                        "label": "PASSWORD",
+                        "value": secret,
+                        "start": start,
+                        "end": start + len(secret),
+                    }
+                ],
+            }
+        ]
+
+    vault = SessionVault(nonce="a3f9")
+    scrubber = HistoryScrubber(vault, classify)
+
+    scrubbed = scrubber.scrub((f"Never repeat {secret}",))
+
+    assert scrubbed == ("Never repeat [PLVA_BLOCKED_PASSWORD]",)
+    assert vault.entries() == ()
+    assert scrubber.diagnostics()["blocked_hits"] == 1
+
+
 def test_history_scrub_fails_closed_when_classifier_has_no_exact_value() -> None:
     scrubber = HistoryScrubber(
         SessionVault(nonce="a3f9"),

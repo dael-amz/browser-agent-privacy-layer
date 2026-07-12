@@ -22,8 +22,9 @@ PLACEHOLDER_SCHEME: Final = (
     "To use it, copy only the inner token (for example EMAIL_1_ab12), exactly and with its "
     "session suffix, into the executed action field. Do not include the decorative « » marks, "
     "change its spelling or case, invent a token, guess the hidden value, or expose a token only "
-    "in notes/reasoning. If the needed value is not listed as visible in the current observation, "
-    "do not fabricate or reuse it."
+    "in notes/reasoning. If a hidden sensitive value you need is not listed as a visible PLVA "
+    "token in the current observation, do not fabricate or reuse it. Ordinary unmarked UI text "
+    "and non-sensitive actions are unaffected; continue the requested task normally."
 )
 PLACEHOLDER_DUPLICATE_WARNING: Final = (
     "[PLVA_PLACEHOLDERS] Occasionally one real value may have more than one token "
@@ -131,7 +132,9 @@ class SafetyPolicy:
             f"blocked={','.join(grouped['blocked']) or 'none'}. "
             "hide_use tokens may be copied verbatim into executed actions; approval tokens require "
             "an explicit local approval and must not be used before approval; blocked classes are "
-            "opaque, have no usable token, and must never be guessed or requested from the model."
+            "opaque, have no usable token, and must never be guessed or requested from the model. "
+            "These restrictions apply only to PLVA-marked sensitive content. They do not restrict "
+            "ordinary visible UI text or unrelated actions; continue the user's task normally."
         )
 
 
@@ -426,6 +429,8 @@ class HistoryScrubber:
             "texts_scanned": 0,
             "plain_vault_hits": 0,
             "semantic_hits": 0,
+            "blocked_hits": 0,
+            "error_code": "none",
         }
 
     def diagnostics(self) -> dict[str, int | str]:
@@ -444,27 +449,50 @@ class HistoryScrubber:
         try:
             classifications = self._classify(classifier_inputs)
         except Exception as exc:
-            self._set_diagnostics("failed", len(texts), plain_hits, 0)
+            self._set_diagnostics("failed", len(texts), plain_hits, 0, 0, "classifier_failed")
             raise PrivacyError("history classifier failed") from exc
         if len(classifications) != len(plain):
-            self._set_diagnostics("failed", len(texts), plain_hits, 0)
+            self._set_diagnostics("failed", len(texts), plain_hits, 0, 0, "result_count")
             raise PrivacyError("history classifier returned the wrong result count")
-        scrubbed = tuple(
-            self._apply_classification(text, classified, classification)
-            for text, classified, classification in zip(
-                plain, classifier_inputs, classifications, strict=True
-            )
-        )
         semantic_hits = sum(
             len(classification.get("values", []))
             for classification in classifications
             if isinstance(classification.get("values"), list)
         )
-        self._set_diagnostics("passed", len(texts), plain_hits, semantic_hits)
-        return scrubbed
+        scrubbed: list[str] = []
+        blocked_hits = 0
+        try:
+            for text, classified, classification in zip(
+                plain, classifier_inputs, classifications, strict=True
+            ):
+                rewritten, blocked = self._apply_classification(
+                    text, classified, classification
+                )
+                scrubbed.append(rewritten)
+                blocked_hits += blocked
+        except PrivacyError:
+            self._set_diagnostics(
+                "failed",
+                len(texts),
+                plain_hits,
+                semantic_hits,
+                blocked_hits,
+                "transform_failed",
+            )
+            raise
+        self._set_diagnostics(
+            "passed", len(texts), plain_hits, semantic_hits, blocked_hits, "none"
+        )
+        return tuple(scrubbed)
 
     def _set_diagnostics(
-        self, status: str, texts: int, plain_hits: int, semantic_hits: int
+        self,
+        status: str,
+        texts: int,
+        plain_hits: int,
+        semantic_hits: int,
+        blocked_hits: int,
+        error_code: str,
     ) -> None:
         with self._lock:
             self._diagnostics = {
@@ -472,16 +500,19 @@ class HistoryScrubber:
                 "texts_scanned": texts,
                 "plain_vault_hits": plain_hits,
                 "semantic_hits": semantic_hits,
+                "blocked_hits": blocked_hits,
+                "error_code": error_code,
             }
 
     def _apply_classification(
         self, text: str, classified: str, classification: dict[str, Any]
-    ) -> str:
+    ) -> tuple[str, int]:
         values = classification.get("values")
         sensitive = bool(classification.get("sensitive"))
         if not isinstance(values, list):
             raise PrivacyError("history classifier returned invalid values")
         replacements: list[tuple[int, int, str]] = []
+        blocked_hits = 0
         for raw in values:
             if not isinstance(raw, dict):
                 raise PrivacyError("history classifier returned an invalid value")
@@ -494,13 +525,19 @@ class HistoryScrubber:
                 raise PrivacyError("history classifier omitted span metadata") from exc
             if start < 0 or end <= start or end > len(text) or classified[start:end] != value:
                 raise PrivacyError("history classifier span did not project to source text")
-            replacements.append((start, end, self._vault.store(label, text[start:end])))
+            normalized_class = _normalize_class(label)
+            if self._vault.safety_level(normalized_class) == "blocked":
+                replacement = f"[PLVA_BLOCKED_{normalized_class}]"
+                blocked_hits += 1
+            else:
+                replacement = self._vault.store(normalized_class, text[start:end])
+            replacements.append((start, end, replacement))
         if sensitive and not replacements:
             raise PrivacyError("history contains sensitive text without an exact local value")
         scrubbed = text
         for start, end, placeholder in sorted(replacements, reverse=True):
             scrubbed = scrubbed[:start] + placeholder + scrubbed[end:]
-        return scrubbed
+        return scrubbed, blocked_hits
 
 
 def privacy_request_hook(

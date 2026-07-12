@@ -63,7 +63,9 @@ the model's view. So the discipline is not "never let a real value reach any des
 - **audio** via Gradium, in two directions (NEW, §9 Steps 9, 10, 12): inbound STT → redacted context,
   and a privacy-free outbound **voice-read** of real values through a **local** TTS model;
 - a thin **app** that takes a typed or (lower priority) spoken prompt and runs the task (NEW, §9
-  Step 11).
+  Step 11);
+- **placeholder-preserving semantic operations** so content-dependent tasks (sort / filter / reason
+  over hidden values) work even though the model never sees the real values (NEW, §9 Step 13).
 
 **Out of scope (separate component):** the actual detection/redaction of PII pixels, and its
 GPU/CoreML acceleration. Here the detector is a **pluggable dependency** with a stub (see §5). The
@@ -106,6 +108,11 @@ detector must, however, emit recognized **values** to the vault locally — see 
 - **Audio-in / audio-out** (NEW) — *in*: mic/loopback → STT → scrub → model context (must be
   redacted before the model). *out*: vault → local TTS → speakers (never reaches the model, so it
   may carry real values).
+- **Placeholder-preserving operation** (NEW) — a content-dependent computation (sort, filter,
+  dedupe, compare, or free reasoning) run by a **local** executor that *may* see cleartext but
+  returns its result expressed **only in placeholders** (an ordering, a selected subset, or a
+  carefully-gated aggregate). Lets the CUA obtain the *answer* to a task that needs semantic content
+  without any real value entering the model's view (§9 Step 13).
 
 ---
 
@@ -291,6 +298,12 @@ Fail-closed: if the mediator is unreachable or times out, **deny**.
 11. **NEW — local acceleration stays fail-closed and offline.** A GPU/CoreML/WebGPU backend for any
     local model must not change fail-closed behavior and must not add network egress; the frozen
     baseline remains the correctness oracle.
+12. **NEW — placeholder-preserving ops return tokens, not values.** A content-dependent operation
+    (§9 Step 13) may resolve real values locally to compute its answer, but what it returns **to the
+    model** must be placeholders/orderings/selections only (or a deliberately gated aggregate),
+    never a real value — the return enters model context and would otherwise leak upstream exactly
+    like an un-scrubbed history (cf. §8.4, §8.9). Its executor may see cleartext **only** if it is
+    local with zero egress (same rule as the mediator, §7).
 
 ---
 
@@ -425,6 +438,40 @@ opaque mask but receive no token or vault entry; `approval` tokens are stored bu
 denied until Step 7 supplies a local approver. The consumer app exposes all 15 classes and three
 levels. See `Holo/verification/step-6-policy.md`.
 
+### 🔲 Step 6.5 — Tool-call channel spike: can Holo3 make tool calls via skills + prompting? — **NEW · DO THIS NEXT**
+- **Why this is next (not a refinement of Step 6 — a standalone prerequisite).** Several remaining
+  steps assume the CUA can **invoke a tool and consume its result**: the local reasoning tool and
+  deterministic ops (Step 13), SPEAK / voice-read (Steps 8–9), spoken-prompt routing (Step 10), and
+  any future tool. But Step 0 found Holo3 exposes `structured_outputs` **and no native `tools`**, so
+  *whether* — and *how* — we can get a parseable, round-trippable tool call out of it is an **open,
+  load-bearing question**. Settle it **once, here, before** building anything that depends on it.
+  This is the general form of the SPEAK-specific probe in Step 8, which now specializes it.
+- **Goal:** an empirical, recorded answer to *"can Holo3 emit a tool call the proxy can parse, and
+  then consume the tool's result to continue the task?"* — plus a recommended mechanism the
+  dependent steps all adopt.
+- **Build — a Step-0-style, non-sensitive capture** (record the action/grammar schema and
+  compliance only; **never** real frames, values, or transcripts). Exercise a trivial round-trip
+  tool (e.g. `echo` / `add`, or `sort` from Step 13) with prompts that should trigger it, across the
+  **candidate invocation channels**, ranked:
+  1. **Native skill-declared tool.** Declare a callable tool in a HoloDesktop `SKILL.md` (reusing
+     the `plva-placeholders` skill plumbing from Step 5a) and see whether the runtime/model emits an
+     invocation for it.
+  2. **Structured-action tool call.** Via proxy prompt-injection, get the model to emit the call
+     inside its `structured_outputs` action schema (a designated action type / field). Tests whether
+     the grammar admits a novel action and the model complies.
+  3. **Free-text marker convention.** The model emits a parseable marker (e.g. `⟦TOOL sort …⟧`) in a
+     free-text field it already produces; the proxy scans and executes. Loosest coupling — the
+     fallback if the grammar resists.
+  For **each** channel record four yes/nos: (a) grammar/template **permits** it; (b) model
+  **actually emits** it on cue; (c) proxy can **parse** it deterministically; (d) **round-trip** —
+  the proxy injects the tool *result* back and the model **consumes** it and continues. A tool call
+  is only useful if **(d)** holds.
+- **Verify:** a recorded matrix (channels × a–d), the captured schema, and a **recommendation** of
+  the single channel Steps 7/8/9/10/13 will use — plus the **fallback** if none round-trip
+  model-side (proxy/app-mediated pseudo-tools that need no model cooperation: the proxy runs the op
+  and folds the result into the next injected observation, or the point-and-flag shape from Step 8).
+  Nothing sensitive recorded.
+
 ### 🔲 Step 7 — LLM mediator (OpenShell) for approvals + steering
 - **Goal:** `approval`-class resolutions and configurable risk flags are decided by a mediator
   against user-defined criteria, safely.
@@ -443,7 +490,8 @@ levels. See `Holo/verification/step-6-policy.md`.
 - **Build:** a Step-0-style capture (non-sensitive: record the action/grammar schema, never frames
   or values), then with prompts like *"read me the most upvoted comment on this thread"* test the
   **top 3 candidate mechanisms**, ranked, recording for each whether the grammar permits it and
-  whether the model actually emits it:
+  whether the model actually emits it. **Specializes Step 6.5:** reuse the tool-call channel chosen
+  there; this step only settles the SPEAK-specific payload/reference question layered on top of it:
   1. **Structured SPEAK (text payload).** Teach the model to emit a SPEAK carrying the text to
      speak (placeholders allowed for embedded PII). Tests whether `structured_outputs` permits a
      novel action/field at all, and whether the model complies and reproduces the text. Weakness:
@@ -513,6 +561,77 @@ for the explicitly deferred Step 7/9/10/12 controls.
   Gradium). Note the trusted-boundary assumption: Gradium's cloud hears pre-redaction audio.
 - **Verify:** a spoken value appears to the model only as a placeholder and resolves like an
   on-screen value; with audio disabled, behavior is unchanged.
+
+### 🔲 Step 13 — Placeholder-preserving semantic operations (content-dependent reasoning without cleartext) — **NEW**
+- **Problem this solves.** Some tasks need the *semantic content* of a redacted value, not just its
+  identity: *"sort this list of names," "pick the most recent date," "which of these is a work
+  email," "dedupe this list," "group these by topic."* With only opaque placeholders (`NAME_1`,
+  `NAME_2`, …) the CUA has nothing to reason over — it cannot order letters it cannot see. Step 13
+  gives the CUA a way to **delegate a content-dependent computation to a local executor that may see
+  cleartext but hands back only placeholders**, so the model gains the *answer* (an ordering /
+  selection / aggregate) while no real value ever reaches it or Overshoot.
+- **Goal:** content-dependent operations over hidden values work end-to-end, with the executor's
+  return to the model provably value-free (§8.12).
+- **Two executor shapes — one shared privacy contract; choose per operation:**
+  - **(A) Deterministic local tools.** A small fixed library of pure functions over *token lists* —
+    `sort`, `filter`, `dedupe`, `group`, `min`/`max`, `count_matching`, `compare`. The proxy
+    resolves the tokens → real values in the vault, runs the op **locally**, and returns the result
+    **as reordered/selected tokens** (or a scalar for genuine aggregates). Output is value-free *by
+    construction* (the contract emits tokens, never values), so leak-safety is trivially provable.
+    Fast, deterministic, no extra model.
+  - **(B) Local reasoning model (NemoTron in the OpenShell sandbox).** Reuse the §7 mediator sandbox
+    pattern: a **fully local, zero-egress** model the CUA delegates a *fuzzy* sub-task to ("order
+    these by relevance," "group by sentiment," "which reads like a personal vs. work address"). It
+    resolves tokens to cleartext, reasons, and must return **only placeholders** (a permutation /
+    subset) plus at most a value-free rationale. Handles arbitrary ops the deterministic library
+    can't enumerate. *(This local **helper** does not conflict with §3's fixed CUA-model choice —
+    NemoTron is not the CUA or its harness, just an on-device reasoning tool consulted by the proxy,
+    exactly like the mediator.)*
+- **Shared privacy contract (load-bearing — see §8.12):**
+  - The executor may see cleartext **only** when it is local with **zero egress** (same rule as the
+    mediator, §7); (A) runs in-proxy, (B) runs in the OpenShell sandbox.
+  - Its **return to the CUA carries no real value** — only tokens the model already holds
+    (orderings/selections add ~zero information beyond the ordering itself). **Scalar / derived**
+    returns (counts, "3 of these are `.edu`", an extracted substring) *can* leak and are gated or
+    aggregated with care, never emitted raw.
+  - **Invocation depends on the Step 6.5 tool-call spike.** Holo3 exposes `structured_outputs` but
+    has **no native `tools`** (§Step 0), so *how* the model emits the call (native skill-declared
+    tool vs. structured action field vs. free-text marker) is settled once by **Step 6.5** — adopt
+    its recommended channel rather than re-spiking it here.
+- **Build:** ship **(A) first** — the deterministic tool set behind the existing response-leg seam
+  (Step 3), resolving in-vault and returning tokens; then add **(B)** as the general fallback in the
+  Step 7 sandbox, with a **two-layer output filter:**
+  1. **Primary — structured token-only return.** Constrain (B) to return its answer as
+     tokens/orderings/selections; reject (and re-ask / fail closed on) any structured return
+     carrying a non-token value.
+  2. **Backstop — Rampart reparse.** Run any free-text the model emits (e.g. a rationale) through
+     the **same §8.9 scrub the history leg already uses** — plain vault match, then Rampart
+     reclassify — re-tokenizing recognized values and **failing closed on PII it cannot map to a
+     vault token.** This reuses existing, trusted machinery, so (B) can return a richer rationale.
+  > **Boundary — do not over-trust reparse.** It catches a *literal* value the LLM echoes, but
+  > Rampart has **finite recall** (§8.9's stated primary residual risk) and it does **not** catch
+  > *inferential* leakage — a rationale that describes a property of the hidden value ("the one
+  > starting with 'A'", "the `.edu` address") leaks without emitting the value. So reparse is
+  > **defense-in-depth**, not the guarantee: keep the token-only structured return as the primary
+  > contract, prefer minimal/no free rationale, and treat any rationale as the same controlled
+  > semantic-leak surface as a scalar aggregate (§8.12).
+- **Verify:** "sort these names" returns the tokens in the true alphabetical order of their hidden
+  values while **no** name text appears in any request to Overshoot or any log; a `filter` returns
+  exactly the correct token subset; **(B)**'s structured filter drops any response with a non-token
+  value, and a rationale that echoes a real value is re-tokenized (or fails closed) by the Rampart
+  reparse — while a crafted *inferential* leak is caught as a known gap, not a silent pass; with the
+  sandbox down, **(B)** fails closed while **(A)** still works; no log carries a real value.
+
+> **Recommendation for the demo — lead with (A), the deterministic tools.** For a live demo it is
+> the stronger choice on every axis that matters on stage: it is **deterministic** (no flaky model
+> output mid-demo), **fast** (no extra inference in the loop), and its privacy story is **provable
+> in front of the audience** — the tool contract can *only* emit tokens, so you can show a list of
+> real names get sorted correctly while the model/provider transcript contains **zero** real names.
+> "Sort this list" is itself a deterministic op, so (A) showcases exactly the headline capability
+> with none of (B)'s live risk (extra latency, plus a general LLM that might answer in cleartext and
+> silently break the guarantee). Keep **(B)** as the *"and it generalizes to arbitrary reasoning"*
+> talking point / stretch goal — it is little extra plumbing because it reuses the Step 7 sandbox,
+> but it should not be on the critical path for the demo.
 
 ---
 
