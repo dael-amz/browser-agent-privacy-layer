@@ -42,7 +42,9 @@ def source_png() -> bytes:
 
 
 def cua_payload(*, history_value: str | None = None) -> dict[str, Any]:
-    messages: list[dict[str, Any]] = []
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": "Synthetic Holo runtime instructions"}
+    ]
     if history_value is not None:
         messages.append(
             {
@@ -176,7 +178,8 @@ async def test_full_store_paint_resolve_and_history_scrub_loop(
     ]
     assert manifest_parts == [
         "[PLVA_VISIBLE_PLACEHOLDERS] Placeholders visible in the current screenshot: "
-        "«EMAIL_1_a3f9» (email). Use only the exact inner tokens shown here for this step."
+        "«EMAIL_1_a3f9» (email · hidden, use allowed). "
+        "Use only the exact inner tokens shown here for this step."
     ]
     assert TOKEN in seen[1]["messages"][1]["content"]
     result = json.loads(first.json()["choices"][0]["message"]["content"])

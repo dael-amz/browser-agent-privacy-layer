@@ -29,6 +29,18 @@ TASK="${1:-$DEFAULT_TASK}"
 PROVIDER="${PLVA_PROVIDER:-overshoot}"
 REDACT_ENGINE="${PLVA_REDACT_ENGINE:-accelerated}"
 
+parse_on_off() {
+  local destination="$1" value="$2" label="$3"
+  case "$value" in
+    1|true|TRUE|yes|YES|on|ON) printf -v "$destination" '%s' 1 ;;
+    0|false|FALSE|no|NO|off|OFF|"") printf -v "$destination" '%s' 0 ;;
+    *)
+      echo "ERROR: $label must be an on/off value" >&2
+      exit 1
+      ;;
+  esac
+}
+
 case "$PROVIDER" in
   overshoot)
     MODEL="${PLVA_MODEL:-Hcompany/Holo3-35B-A3B}"
@@ -76,6 +88,7 @@ case "${PLVA_REDACT:-0}" in
     exit 1
     ;;
 esac
+PRIVACY_ENABLED=0
 if [[ "$REDACTION_ENABLED" == 1 ]]; then
   PRIVACY_DEFAULT=0
   [[ "$REDACT_ENGINE" == "vision" ]] && PRIVACY_DEFAULT=1
@@ -87,6 +100,13 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
       exit 1
       ;;
   esac
+  parse_on_off PRIVACY_HISTORY_SCRUB "${PLVA_PRIVACY_HISTORY_SCRUB:-1}" PLVA_PRIVACY_HISTORY_SCRUB
+  parse_on_off PRIVACY_CHIPS "${PLVA_PRIVACY_CHIPS:-1}" PLVA_PRIVACY_CHIPS
+  parse_on_off PRIVACY_SCHEME "${PLVA_PRIVACY_SCHEME:-1}" PLVA_PRIVACY_SCHEME
+  parse_on_off PRIVACY_DUPLICATE_WARNING "${PLVA_PRIVACY_DUPLICATE_WARNING:-1}" PLVA_PRIVACY_DUPLICATE_WARNING
+  parse_on_off PRIVACY_MANIFEST "${PLVA_PRIVACY_MANIFEST:-1}" PLVA_PRIVACY_MANIFEST
+  parse_on_off PRIVACY_RESOLUTION "${PLVA_PRIVACY_RESOLUTION:-1}" PLVA_PRIVACY_RESOLUTION
+  parse_on_off PRIVACY_POLICY_TEACHING "${PLVA_PRIVACY_POLICY_TEACHING:-1}" PLVA_PRIVACY_POLICY_TEACHING
   HOOK_ARGS+=(
     --redact plva-v2-baseline
     --redact-engine "$REDACT_ENGINE"
@@ -105,20 +125,51 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
     HOOK_ARGS+=(--visual-model "$VISUAL_MODEL")
   fi
   [[ "$PRIVACY_ENABLED" == 1 ]] && HOOK_ARGS+=(--privacy)
+  if [[ "$PRIVACY_ENABLED" == 1 ]]; then
+    POLICY_FILE="${PLVA_POLICY_FILE:-config/privacy-policy.json}"
+    if [[ -z "${PLVA_POLICY_JSON:-}" && -f "$POLICY_FILE" ]]; then
+      export PLVA_POLICY_JSON="$(<"$POLICY_FILE")"
+    fi
+    [[ "$PRIVACY_HISTORY_SCRUB" == 0 ]] && HOOK_ARGS+=(--no-privacy-history-scrub)
+    [[ "$PRIVACY_CHIPS" == 0 ]] && HOOK_ARGS+=(--no-privacy-chips)
+    [[ "$PRIVACY_SCHEME" == 0 ]] && HOOK_ARGS+=(--no-privacy-scheme)
+    [[ "$PRIVACY_DUPLICATE_WARNING" == 0 ]] && HOOK_ARGS+=(--no-privacy-duplicate-warning)
+    [[ "$PRIVACY_MANIFEST" == 0 ]] && HOOK_ARGS+=(--no-privacy-manifest)
+    [[ "$PRIVACY_RESOLUTION" == 0 ]] && HOOK_ARGS+=(--no-privacy-resolution)
+    [[ "$PRIVACY_POLICY_TEACHING" == 0 ]] && HOOK_ARGS+=(--no-privacy-policy-teaching)
+  fi
   echo "--- redaction ON ($REDACT_ENGINE, ${PLVA_REDACT_LIFECYCLE:-adaptive}); privacy=$PRIVACY_ENABLED; watch frames at http://127.0.0.1:$PORT/viewer and OCR at /viewer/findings"
+  if [[ "$PRIVACY_ENABLED" == 1 ]]; then
+    echo "--- privacy features: chips=$PRIVACY_CHIPS history_scrub=$PRIVACY_HISTORY_SCRUB scheme=$PRIVACY_SCHEME duplicate_warning=$PRIVACY_DUPLICATE_WARNING manifest=$PRIVACY_MANIFEST resolution=$PRIVACY_RESOLUTION policy_teaching=$PRIVACY_POLICY_TEACHING"
+    if [[ "$PRIVACY_HISTORY_SCRUB" == 0 || "$PRIVACY_RESOLUTION" == 0 ]]; then
+      echo "--- WARNING: diagnostic privacy feature disablement; use synthetic data only" >&2
+    fi
+  fi
 else
   echo "--- redaction OFF"
 fi
+parse_on_off PRIVACY_SKILL "${PLVA_PRIVACY_SKILL:-$PRIVACY_ENABLED}" PLVA_PRIVACY_SKILL
 .venv/bin/plva-proxy --port "$PORT" "${HOOK_ARGS[@]}" >"$PROXY_LOG" 2>&1 &
 PROXY_PID=$!
 OBS_FILE=$(mktemp /tmp/plva-step1-egress.XXXXXX)
 RUNS_DIR=""
+SKILL_DISABLED_FILE=""
 cleanup() {
   kill "$PROXY_PID" "${OBS_PID:-}" 2>/dev/null || true
   # Frame-bearing artifacts must never survive, even on an aborted run.
   [[ -n "$RUNS_DIR" ]] && rm -rf "$RUNS_DIR"
+  if [[ -n "$SKILL_DISABLED_FILE" && -f "$SKILL_DISABLED_FILE" ]]; then
+    mv "$SKILL_DISABLED_FILE" "$HOME/.holo/skills/plva-placeholders/SKILL.md"
+  fi
 }
 trap cleanup EXIT
+if [[ "$PRIVACY_SKILL" == 0 && -f "$HOME/.holo/skills/plva-placeholders/SKILL.md" ]]; then
+  SKILL_DISABLED_FILE="$HOME/.holo/skills/plva-placeholders/SKILL.md.disabled.$$"
+  mv "$HOME/.holo/skills/plva-placeholders/SKILL.md" "$SKILL_DISABLED_FILE"
+  echo "--- native placeholder skill disabled for this diagnostic run"
+elif [[ "$PRIVACY_SKILL" == 1 ]]; then
+  echo "--- native placeholder skill enabled"
+fi
 PROXY_UP=""
 for _ in $(seq 1 240); do
   if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
@@ -176,7 +227,7 @@ HOLO_PID=$!
 set +m
 
 ABORTED=""
-if [[ -r /dev/tty ]]; then
+if [[ -t 0 && -r /dev/tty ]]; then
   last_esc=0
   while kill -0 "$HOLO_PID" 2>/dev/null; do
     key=""
