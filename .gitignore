@@ -1,27 +1,10 @@
-# Local secrets
+# OS / editor junk
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Never commit real secrets anywhere in the tree
 .env
 .env.*
 !.env.example
-
-# Python environments and caches
-.venv/
-.uv-cache/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-
-# Privacy-sensitive runtime output
-artifacts/
-captures/
-screenshots/
-transcripts/
-vault/
-
-# Local editor and OS files
-.DS_Store
-.idea/
-.vscode/

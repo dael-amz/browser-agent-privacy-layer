@@ -1,2 +1,0 @@
-"""PLVA privacy proxy."""
-
