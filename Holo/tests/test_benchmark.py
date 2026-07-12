@@ -78,6 +78,7 @@ def test_loopback_fixture_records_matching_submission() -> None:
         thread.join()
 
     assert receipt.submitted.is_set()
+    assert receipt.visited_source.is_set()
     assert receipt.visited_confirm
     assert receipt.matches
 
@@ -118,8 +119,12 @@ def test_run_live_uses_postcondition_not_process_exit(monkeypatch: Any, tmp_path
     runner.write_text("#!/bin/sh\n", encoding="utf-8")
 
     def fake_run(command: list[str], **kwargs: Any) -> Any:
+        if command[0] == "/usr/bin/open":
+            with urllib.request.urlopen(command[1]) as response:
+                response.read()
+            return type("Completed", (), {"returncode": 0})()
         assert command[0] == str(runner)
-        assert "Account email" in command[1]
+        assert "already open" in command[1]
         assert kwargs["env"]["PLVA_PRIVACY"] == "1"
         return type("Completed", (), {"returncode": 0})()
 

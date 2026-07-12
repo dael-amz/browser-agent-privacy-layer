@@ -2,9 +2,9 @@
 
 Date: 2026-07-11
 
-Status: **READY TO RUN — every buildable blocker is cleared; the end-to-end verify waits only on
-the operator's Overshoot key. See the 2026-07-11 resume section at the bottom and
-`step-1-runbook.md`.** (Original assessment kept below for the record.)
+Status: **LIVE ACCEPTANCE PASS — the real Holo runtime completed the controlled two-step PLVA flow
+on 2026-07-12, with independent loopback destination verification and monitored egress. See
+`cua-live-acceptance.md`.** (Original assessment kept below for the record.)
 
 Original status: **PARTIAL — the §7 decision is resolved and recorded; the end-to-end "runs under
 OpenShell isolation" verification cannot pass on this machine and is blocked, not failed.**

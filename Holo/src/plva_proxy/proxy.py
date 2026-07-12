@@ -1014,7 +1014,10 @@ def create_app(
                 # so it is the only version the history viewer may hold.
                 call_document = document
             except (HookError, PrivacyError, ValueError) as exc:
-                _LOGGER.warning("request hook failed closed: %s", type(exc).__name__)
+                # Hook/Privacy errors are deliberately value-free fixed messages;
+                # include them so live fail-closed loops are diagnosable without
+                # ever logging request content or vault values.
+                _LOGGER.warning("request hook failed closed: %s: %s", type(exc).__name__, str(exc))
                 raise HTTPException(status_code=502, detail="request hook failed") from exc
 
         upstream_request = client.build_request(method, path, content=body or None, headers=headers)
@@ -1064,7 +1067,7 @@ def create_app(
             except (HookError, PrivacyError, ValueError) as exc:
                 if not recorded:
                     record_call(200, None, "hook_failed")
-                _LOGGER.warning("response hook failed closed: %s", type(exc).__name__)
+                _LOGGER.warning("response hook failed closed: %s: %s", type(exc).__name__, str(exc))
                 raise HTTPException(status_code=502, detail="response hook failed") from exc
             _LOGGER.info(
                 "relay %s status=200 request_bytes=%d response_bytes=%d duration_ms=%d hooks=on",

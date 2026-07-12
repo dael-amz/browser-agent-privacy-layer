@@ -84,6 +84,10 @@ esac
 # per-run process-group guard below is mandatory regardless of PF status.
 PF_STATUS_JSON=$(.venv/bin/python -m plva_proxy.egress_preflight)
 echo "PLVA_PF_STATUS_JSON=$PF_STATUS_JSON"
+if pgrep -f '/hai-agent-runtime$' >/dev/null 2>&1; then
+  echo "ERROR: a Holo runtime is already active; stop it before starting a verified PLVA run" >&2
+  exit 1
+fi
 
 # 1) Start the loopback proxy (the sole provider egress; reads ./.env).
 #    PLVA_HOOK=test enables the Step 3 test hooks for the hook-mode verify.
@@ -193,6 +197,19 @@ fi
 cleanup() {
   set +e
   [[ -n "${HOLO_PID:-}" ]] && kill -- -"$HOLO_PID" 2>/dev/null
+  # The closed runtime daemonizes outside the CLI process group. The preflight
+  # above guarantees any matching runtime now belongs to this run.
+  RUNTIME_PIDS=$(pgrep -f '/hai-agent-runtime$' 2>/dev/null || true)
+  for runtime_pid in $RUNTIME_PIDS; do
+    kill "$runtime_pid" 2>/dev/null
+  done
+  for _ in $(seq 1 20); do
+    [[ -z "$(pgrep -f '/hai-agent-runtime$' 2>/dev/null || true)" ]] && break
+    sleep 0.05
+  done
+  for runtime_pid in $(pgrep -f '/hai-agent-runtime$' 2>/dev/null || true); do
+    kill -9 "$runtime_pid" 2>/dev/null
+  done
   kill "$PROXY_PID" "${EGRESS_PID:-}" 2>/dev/null
   wait "$PROXY_PID" "${EGRESS_PID:-}" 2>/dev/null
   # Frame-bearing artifacts must never survive, including on signals and failed preflights.
@@ -273,8 +290,9 @@ UV_OFFLINE=1 .venv/bin/python -m plva_proxy.stopped_exec \
 HOLO_PID=$!
 set +m
 
-# 4) Prove non-privileged socket visibility, then enforce the sole allowed remote endpoint.
-# The monitor records only pid/process/endpoint metadata and kills the runtime group on violation.
+# 4) Prove non-privileged socket visibility, then prohibit external runtime egress.
+# Holo's local CLI↔Agent-API control channel uses another loopback port, so all
+# loopback endpoints are safe; any non-loopback remote kills the runtime group.
 .venv/bin/python -m plva_proxy.egress_verify \
   --pgid "$HOLO_PID" --allowed-port "$PORT" \
   --ready-file "$EGRESS_READY_FILE" --status-file "$EGRESS_STATUS_FILE" &
@@ -297,7 +315,7 @@ if [[ -z "$EGRESS_READY" ]]; then
   [[ -s "$EGRESS_STATUS_FILE" ]] && sed 's/^/PLVA_EGRESS_STATUS_JSON=/' "$EGRESS_STATUS_FILE" >&2
   exit 1
 fi
-echo "--- egress guard ready: runtime may connect only to 127.0.0.1:$PORT"
+echo "--- egress guard ready: runtime may use local control ports; external egress is blocked"
 kill -CONT -- -"$HOLO_PID"
 
 ABORTED=""

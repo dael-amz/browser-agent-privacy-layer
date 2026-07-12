@@ -22,6 +22,25 @@
       --radius-card:16px;
       --ok:#0a8a4f;--warn:#b97e0f;--bad:#d13438;
       --font:"ABC Diatype","ABC Diatype Variable",Diatype,Inter,-apple-system,"SF Pro Text","Helvetica Neue","Segoe UI",Arial,sans-serif;
+
+      /* transitions-dev motion tokens (.agents/skills/transitions-dev/_root.css) */
+      --duration-stagger:40ms;--duration-micro:80ms;--duration-quick:150ms;--duration-fast:250ms;
+      --duration-medium:350ms;--duration-slow:400ms;--duration-very-slow:500ms;
+      --ease-smooth-out:cubic-bezier(0.22, 1, 0.36, 1);--ease-in-out:ease-in-out;--ease-out:ease-out;
+      --ease-linear:linear;--ease-bounce:cubic-bezier(0.34, 1.36, 0.64, 1);--ease-bounce-strong:cubic-bezier(0.34, 3.85, 0.64, 1);
+      --distance-micro:4px;--distance-small:6px;--distance-base:8px;--distance-medium:12px;--distance-large:30px;
+      --scale-large:0.96;--scale-medium:0.97;--scale-small:0.98;--scale-tiny:0.99;
+      --blur-small:2px;--blur-medium:3px;--blur-large:8px;
+      /* Text states swap */
+      --text-swap-dur:150ms;--text-swap-translate-y:4px;--text-swap-blur:2px;--text-swap-ease:ease-in-out;
+      /* Menu dropdown */
+      --dropdown-open-dur:250ms;--dropdown-close-dur:150ms;--dropdown-pre-scale:0.97;
+      --dropdown-closing-scale:0.99;--dropdown-ease:cubic-bezier(0.22, 1, 0.36, 1);
+      /* Tabs sliding (color tokens mapped to this design system) */
+      --tabs-dur:250ms;--tabs-ease:cubic-bezier(0.22, 1, 0.36, 1);--tabs-text-muted:var(--fore-secondary);
+      --tabs-text-active:var(--fore-primary);--tabs-bar-bg:var(--back-primary);--tabs-pill-bg:var(--back-secondary);
+      /* Accordion expand */
+      --acc-expand:250ms;--acc-collapse:250ms;--acc-chevron:250ms;--acc-ease:cubic-bezier(0.22, 1, 0.36, 1);
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -32,20 +51,17 @@
     .app{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
 
     /* ---------- top bar ---------- */
-    .topbar{position:relative;display:flex;align-items:flex-start;justify-content:space-between;padding:20px;flex-shrink:0}
-    .navpill{display:flex;align-items:flex-start;gap:2px;padding:8px;background:var(--back-primary);
-      border:1px solid var(--border-fade);border-radius:var(--radius-full);box-shadow:0 1px 2px rgba(12,12,12,.03)}
+    .topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;
+      padding:14px 24px;border-bottom:1px solid var(--border-fade);flex-shrink:0;background:var(--back-primary)}
+    .brand{display:flex;align-items:center;gap:10px}
+    .wordmark{font-size:18px;line-height:24px;font-weight:500;letter-spacing:-.2px}
+    .betachip{font-size:12px;line-height:16px;padding:2px 9px;border:1px solid var(--border-soft);
+      border-radius:var(--radius-full);color:var(--fore-secondary)}
+    .mainnav{justify-self:center;--tabs-bar-bg:var(--back-secondary);--tabs-pill-bg:var(--back-primary)}
     .navbtn{display:flex;align-items:center;justify-content:center;gap:2px;min-height:32px;padding:6px 12px;
-      border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;color:var(--fore-secondary);
-      transition:background .15s,color .15s;flex-shrink:0}
+      border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;color:var(--fore-secondary);flex-shrink:0}
     .navbtn:hover{color:var(--fore-primary)}
-    .navbtn.active{background:var(--back-secondary);color:var(--fore-primary)}
-    .navbtn.logo{padding:6px 10px 6px 12px;color:var(--fore-primary)}
-    .beta{position:absolute;top:0;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;justify-content:center;
-      padding:6px 16px;background:var(--back-primary);border:1px solid var(--border-fade);border-top:0;
-      border-radius:0 0 12px 12px;font-size:13px;line-height:18px;color:var(--fore-primary)}
-    .topright{display:flex;align-items:center;gap:8px;padding:8px;background:var(--back-primary);
-      border:1px solid var(--border-fade);border-radius:var(--radius-full)}
+    .topright{justify-self:end;display:flex;align-items:center;gap:8px}
     .statuspill{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:6px 12px;border-radius:var(--radius-full);
       font-size:15px;line-height:20px;letter-spacing:.05px;color:var(--fore-secondary)}
     .statuspill .dot{width:7px;height:7px;border-radius:50%;background:var(--fore-secondary);transition:background .2s}
@@ -62,23 +78,65 @@
     main{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
 
     /* hero (empty chat) */
-    .hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:20px}
+    .hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:20px}
+    .hero h1{margin:0;font-weight:400;font-size:32px;line-height:40px;letter-spacing:-.8px}
+    .composer{width:100%;max-width:680px;background:var(--back-primary);border:1px solid var(--border-fade);
+      border-radius:24px;box-shadow:0 16px 48px rgba(12,12,12,.06);padding:18px 18px 14px;
+      display:flex;flex-direction:column;gap:10px}
+    .composer textarea{width:100%;min-height:76px;max-height:220px;resize:none;border:0;outline:none;background:transparent;
+      padding:0;font-size:17px;line-height:26px;letter-spacing:-.2px;color:var(--fore-primary);caret-color:var(--fore-primary)}
+    .composer textarea::placeholder{color:var(--fore-secondary)}
+    .composerrow{display:flex;align-items:center;gap:10px}
+    .composerrow .hint{flex:1;text-align:right;font-size:13px;line-height:18px;color:var(--fore-secondary)}
+    .composerrow .modelmenu{left:0;margin-left:0}
+    .suggestions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:680px}
+    .suggest{padding:8px 14px;border:1px solid var(--border-soft);border-radius:var(--radius-full);
+      font-size:14px;line-height:20px;color:var(--fore-secondary);
+      transition:background var(--duration-quick) var(--ease-smooth-out),color var(--duration-quick) var(--ease-smooth-out)}
+    .suggest:hover{background:var(--back-secondary);color:var(--fore-primary)}
     .modelwrap{position:relative}
     .modelpill{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px 6px 12px;
       border:1px solid var(--border-soft);border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;background:var(--back-primary)}
     .modelpill svg{color:var(--fore-secondary)}
-    .modelmenu{position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);min-width:180px;
+    .modelmenu{position:absolute;top:calc(100% + 6px);left:50%;width:200px;margin-left:-100px;
       background:var(--back-primary);border:1px solid var(--border-fade);border-radius:var(--radius-card);
-      box-shadow:0 12px 32px rgba(12,12,12,.1);padding:6px;display:none;z-index:5}
-    .modelmenu.open{display:block}
+      box-shadow:0 12px 32px rgba(12,12,12,.1);padding:6px;z-index:5}
+    /* transitions-dev: 05-menu-dropdown */
+    .t-dropdown {
+      transform-origin: top left;
+      transform: scale(var(--dropdown-pre-scale));
+      opacity: 0;
+      pointer-events: none;
+      transition:
+        transform var(--dropdown-open-dur) var(--dropdown-ease),
+        opacity   var(--dropdown-open-dur) var(--dropdown-ease);
+      will-change: transform, opacity;
+    }
+    .t-dropdown[data-origin="top-right"]     { transform-origin: top right; }
+    .t-dropdown[data-origin="top-center"]    { transform-origin: top center; }
+    .t-dropdown[data-origin="bottom-left"]   { transform-origin: bottom left; }
+    .t-dropdown[data-origin="bottom-center"] { transform-origin: bottom center; }
+    .t-dropdown[data-origin="bottom-right"]  { transform-origin: bottom right; }
+    .t-dropdown.is-open {
+      transform: scale(1);
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .t-dropdown.is-closing {
+      transform: scale(var(--dropdown-closing-scale));
+      opacity: 0;
+      pointer-events: none;
+      transition:
+        transform var(--dropdown-close-dur) var(--dropdown-ease),
+        opacity   var(--dropdown-close-dur) var(--dropdown-ease);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .t-dropdown { transition: none !important; }
+    }
     .modelmenu button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;
       border-radius:10px;font-size:15px;line-height:20px}
     .modelmenu button:hover{background:var(--back-secondary)}
     .modelmenu button small{color:var(--fore-secondary);font-size:12px}
-    .heroinput{width:580px;max-width:calc(100vw - 48px);resize:none;overflow-y:auto;border:0;background:transparent;padding:0;
-      outline:none;text-align:center;font-size:24px;line-height:30px;letter-spacing:-.66px;color:var(--fore-primary);
-      caret-color:var(--fore-primary);height:30px;max-height:150px}
-    .heroinput::placeholder{color:var(--fore-secondary)}
     .send{display:grid;place-items:center;width:48px;height:48px;border-radius:var(--radius-full);
       background:var(--back-secondary);border:1px solid var(--border-fade);color:var(--fore-primary);transition:background .15s,color .15s}
     .send:hover{background:var(--back-inverse);color:var(--fore-inverse)}
@@ -88,12 +146,11 @@
     /* workspace (active / finished session) */
     .workspace{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:14px;overflow-y:auto;padding:4px 20px 0}
     .wsinner{width:100%;max-width:860px;display:flex;flex-direction:column;gap:14px;padding-bottom:160px}
-    .chips{display:flex;gap:2px;padding:6px;background:var(--back-primary);border:1px solid var(--border-fade);
-      border-radius:var(--radius-full);align-self:center}
+    .chips{display:flex;gap:2px;padding:4px;align-self:center;
+      --tabs-bar-bg:var(--back-secondary);--tabs-pill-bg:var(--back-primary)}
     .chip{min-height:32px;padding:6px 12px;border-radius:var(--radius-full);font-size:15px;line-height:20px;
       letter-spacing:.05px;color:var(--fore-secondary)}
     .chip:hover{color:var(--fore-primary)}
-    .chip.active{background:var(--back-secondary);color:var(--fore-primary)}
     .card{background:var(--back-primary);border:1px solid var(--border-fade);border-radius:var(--radius-card);
       box-shadow:0 1px 2px rgba(12,12,12,.03)}
     .viewcard{padding:16px;min-height:340px}
@@ -129,7 +186,10 @@
       color:var(--bad);font-size:15px;line-height:20px;flex-shrink:0}
 
     /* privacy + lab panels */
-    .panel{flex:1;min-height:0;overflow-y:auto;display:flex;justify-content:center;padding:6px 20px 0}
+    /* align-items:flex-start keeps .panelinner content-sized: stretched items
+       would compress their scroll-container children (min-size 0) when the
+       content grows taller than the viewport. */
+    .panel{flex:1;min-height:0;overflow-y:auto;display:flex;justify-content:center;align-items:flex-start;padding:6px 20px 0}
     .panelinner{width:100%;max-width:640px;display:flex;flex-direction:column;gap:14px;padding-bottom:72px}
     .panelinner>h1{margin:12px 0 0;font-size:24px;line-height:30px;letter-spacing:-.66px;font-weight:400;text-align:center}
     .panelinner>.sub{margin:0 0 6px;text-align:center;color:var(--fore-secondary);font-size:15px;line-height:22px}
@@ -200,21 +260,42 @@
     .tracechannel.reasoning{color:#3568c0}.tracechannel.action{color:var(--ok)}.tracechannel.error{color:var(--bad)}
     .tracetext{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace}
 
-    /* history tab */
-    .callrow{overflow:hidden}
-    .callhead{display:flex;align-items:center;gap:10px;width:100%;padding:14px 20px;text-align:left}
-    .callhead:hover{background:var(--back-secondary)}
-    .callhead .cid{font:500 13px/18px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fore-primary);
-      background:var(--back-secondary);border-radius:6px;padding:2px 7px;flex-shrink:0}
-    .callhead .cprev{flex:1;min-width:0;font-size:15px;line-height:20px;color:var(--fore-primary);
-      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .callhead .cmeta{display:flex;align-items:center;gap:8px;flex-shrink:0;color:var(--fore-secondary);font-size:13px;line-height:18px}
+    /* history tab: run rail + replay player */
+    .runsrail{display:flex;gap:8px;overflow-x:auto;padding:2px}
+    .runcard{flex-shrink:0;max-width:300px;text-align:left;background:var(--back-primary);border:1px solid var(--border-soft);
+      border-radius:var(--radius-card);padding:10px 14px;display:flex;flex-direction:column;gap:2px;
+      transition:background var(--duration-quick) var(--ease-smooth-out),border-color var(--duration-quick) var(--ease-smooth-out)}
+    .runcard b{font-weight:500;font-size:14px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .runcard small{color:var(--fore-secondary);font-size:12px;line-height:16px;white-space:nowrap}
+    .runcard:hover{background:var(--back-secondary)}
+    .runcard.active{background:var(--back-inverse);border-color:var(--back-inverse)}
+    .runcard.active b{color:var(--fore-inverse)}
+    .runcard.active small{color:rgba(255,255,255,.6)}
     .cstate{font-size:12px;padding:3px 9px;border-radius:var(--radius-full);border:1px solid var(--border-soft);color:var(--fore-secondary)}
     .cstate.sent{color:var(--ok);border-color:currentColor}
     .cstate.streamed{color:var(--fore-secondary)}
     .cstate.failed,.cstate.hook_failed{color:var(--bad);border-color:currentColor}
-    .calldetail{border-top:1px solid var(--border-fade);padding:16px 20px;display:flex;flex-direction:column;gap:14px}
-    .calldetail[hidden]{display:none}
+    .player{padding:14px}
+    .stage{position:relative;background:var(--back-secondary);border-radius:12px;min-height:360px;max-height:56vh;
+      display:grid;place-items:center;overflow:hidden}
+    .stage img{max-width:100%;max-height:56vh;display:none}
+    .scrubrow{display:flex;align-items:center;gap:14px;padding:14px 4px 2px}
+    .playbtn{display:grid;place-items:center;width:40px;height:40px;border-radius:var(--radius-full);
+      background:var(--back-inverse);color:var(--fore-inverse);flex-shrink:0;
+      transition:transform var(--duration-quick) var(--ease-smooth-out),opacity var(--duration-quick) var(--ease-smooth-out)}
+    .playbtn:hover{opacity:.85}
+    .playbtn:active{transform:scale(var(--scale-large))}
+    .track{position:relative;flex:1;height:28px;cursor:pointer;touch-action:none}
+    .track::before{content:"";position:absolute;left:0;right:0;top:50%;height:4px;margin-top:-2px;
+      background:var(--back-secondary);border-radius:var(--radius-full)}
+    .marker{position:absolute;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--border-soft);
+      transition:background var(--duration-quick) var(--ease-smooth-out),transform var(--duration-quick) var(--ease-smooth-out)}
+    .marker.done{background:var(--fore-secondary)}
+    .marker.active{background:var(--fore-primary);transform:scale(1.5)}
+    .playhead{position:absolute;top:50%;width:2px;height:18px;margin:-9px 0 0 -1px;background:var(--fore-primary);
+      border-radius:2px;transition:left var(--duration-fast) var(--ease-smooth-out)}
+    .timecode{font:12px/16px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fore-secondary);white-space:nowrap;flex-shrink:0}
+    .inspect{padding:16px 20px;display:flex;flex-direction:column;gap:14px}
     .callsection h4{margin:0 0 6px;font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--fore-secondary)}
     .msg{border:1px solid var(--border-fade);border-radius:12px;padding:10px 12px;margin:8px 0;display:flex;flex-direction:column;gap:8px}
     .rolechip{align-self:flex-start;font-size:12px;line-height:16px;padding:3px 10px;border-radius:var(--radius-full);
@@ -230,60 +311,124 @@
       transition:.25s;z-index:20;pointer-events:none}
     .toast.show{transform:translate(-50%,0);opacity:1}
 
-    /* motion: one spring-like ease everywhere, entrances only, respects reduced motion */
-    :root{--ease-out:cubic-bezier(.16,1,.3,1)}
-    @keyframes view-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-    @keyframes pop-in{from{opacity:0;transform:translateX(-50%) translateY(-4px) scale(.97)}to{opacity:1;transform:translateX(-50%) scale(1)}}
-    @keyframes expand-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
-    .hero,.workspace,.panel{animation:view-in .4s var(--ease-out)}
-    .dockbar{animation:view-in .45s var(--ease-out)}
-    .modelmenu.open{animation:pop-in .18s var(--ease-out)}
-    .calldetail:not([hidden]){animation:expand-in .25s var(--ease-out)}
-    .event,.finding,.callrow{animation:expand-in .3s var(--ease-out)}
-    .navbtn,.chip,.callhead,.linkbtn,.seg button,.modelpill,.stoppill{transition:background .15s,color .15s}
-    .send,.protect{transition:background .15s,color .15s,transform .12s var(--ease-out),opacity .15s}
-    .send:active:not(:disabled),.protect:active:not(:disabled){transform:scale(.94)}
-    .framewrap img{animation:view-in .35s var(--ease-out)}
+    /* motion: entrances referenced to the transitions-dev motion tokens */
+    @keyframes view-in{from{opacity:0;transform:translateY(var(--distance-base))}to{opacity:1;transform:none}}
+    /* Entrances animate structural containers only. Rows that live-update
+       during a run (events, findings, call list) render statically so the
+       poll never causes replayed-animation flicker. */
+    .hero,.workspace,.panel,.dockbar{animation:view-in var(--duration-slow) var(--ease-smooth-out)}
+    .navbtn,.chip,.callhead,.linkbtn,.seg button,.modelpill,.stoppill{transition:background var(--duration-quick) var(--ease-smooth-out),color var(--duration-quick) var(--ease-smooth-out)}
+    .send,.protect{transition:background var(--duration-quick) var(--ease-smooth-out),color var(--duration-quick) var(--ease-smooth-out),transform var(--duration-quick) var(--ease-smooth-out),opacity var(--duration-quick) var(--ease-smooth-out)}
+    .send:active:not(:disabled),.protect:active:not(:disabled){transform:scale(var(--scale-large))}
+    .framewrap img{animation:view-in var(--duration-medium) var(--ease-smooth-out)}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 
     .dockbar .modelpill{margin-bottom:4px;flex-shrink:0}
-    .dockbar .modelmenu{top:auto;bottom:calc(100% + 8px)}
-    @keyframes pop-in-up{from{opacity:0;transform:translateX(-50%) translateY(4px) scale(.97)}to{opacity:1;transform:translateX(-50%) scale(1)}}
-    .dockbar .modelmenu.open{animation:pop-in-up .18s var(--ease-out)}
+    .dockbar .modelmenu{top:auto;bottom:calc(100% + 8px);left:0;margin-left:0}
 
-    @media(max-width:760px){
-      .topbar{flex-wrap:wrap;gap:10px}
-      .beta{display:none}
-      .heroinput{font-size:20px;line-height:26px;letter-spacing:-.4px}
+    /* transitions-dev: 04-text-states-swap */
+    .t-text-swap {
+      display: inline-block;
+      transform: translateY(0);
+      filter: blur(0);
+      opacity: 1;
+      transition:
+        transform var(--text-swap-dur) var(--text-swap-ease),
+        filter    var(--text-swap-dur) var(--text-swap-ease),
+        opacity   var(--text-swap-dur) var(--text-swap-ease);
+      will-change: transform, filter, opacity;
+    }
+    .t-text-swap.is-exit {
+      transform: translateY(calc(var(--text-swap-translate-y) * -1));
+      filter: blur(var(--text-swap-blur));
+      opacity: 0;
+    }
+    .t-text-swap.is-enter-start {
+      transform: translateY(var(--text-swap-translate-y));
+      filter: blur(var(--text-swap-blur));
+      opacity: 0;
+      transition: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .t-text-swap { transition: none !important; }
+    }
+
+    /* transitions-dev: 16-tabs-sliding */
+    .t-tabs {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border-radius: 48px;
+      background: var(--tabs-bar-bg);
+    }
+    .t-tab {
+      position: relative;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      height: 30px;
+      padding: 4px 12px;
+      color: var(--tabs-text-muted);
+      cursor: pointer;
+      border-radius: 48px;
+      z-index: 1;
+      transition: color var(--tabs-dur) var(--tabs-ease);
+    }
+    .t-tab:not([aria-selected="true"]):hover,
+    .t-tab[aria-selected="true"] {
+      color: var(--tabs-text-active);
+    }
+    .t-tabs-pill {
+      position: absolute;
+      top: 3px;
+      left: 0;
+      height: 30px;
+      width: 0;
+      background: var(--tabs-pill-bg);
+      border-radius: 48px;
+      transform: translateX(0);
+      transition:
+        transform var(--tabs-dur) var(--tabs-ease),
+        width     var(--tabs-dur) var(--tabs-ease);
+      will-change: transform, width;
+      z-index: 0;
+      pointer-events: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .t-tabs-pill, .t-tab { transition: none !important; }
+    }
+    /* local metrics for this design's two tab bars */
+    .mainnav.t-tabs,.chips.t-tabs{gap:2px;padding:4px;border-radius:var(--radius-full)}
+    .mainnav .t-tab,.chips .t-tab{height:auto;min-height:32px;padding:6px 14px;font:inherit;font-size:15px;line-height:20px;letter-spacing:.05px;border-radius:var(--radius-full)}
+    .mainnav .t-tabs-pill,.chips .t-tabs-pill{top:4px;height:32px;border-radius:var(--radius-full);box-shadow:0 1px 3px rgba(12,12,12,.08)}
+
+
+    @media(max-width:860px){
+      .topbar{grid-template-columns:1fr;justify-items:center;gap:10px;padding:12px 16px}
+      .topright{justify-self:center}
+      .hero h1{font-size:26px;line-height:32px;letter-spacing:-.5px}
+      .composerrow .hint{display:none}
       .policyrow{grid-template-columns:1fr}
       .filtergrid,.legend{grid-template-columns:1fr}
-      .navbtn span{display:none}
-      .navbtn.logo span{display:inline}
     }
   </style>
 </head>
 <body>
   <div class="app">
     <header class="topbar">
-      <nav class="navpill" aria-label="Primary">
-        <button class="navbtn logo" id="logo" title="Holo">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <path d="M4 4l5 6-5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M10 4l5 6-5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity=".45"/>
-          </svg>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" style="color:var(--fore-secondary)">
-            <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-        <button class="navbtn active" data-nav="chat"><span>Chat</span></button>
-        <button class="navbtn" data-nav="history"><span>History</span></button>
-        <button class="navbtn" data-nav="privacy"><span>Privacy</span></button>
-        <button class="navbtn" data-nav="lab"><span>Lab</span></button>
+      <div class="brand"><span class="wordmark">Holo</span><span class="betachip">Beta</span></div>
+      <nav class="mainnav t-tabs" aria-label="Primary" role="tablist">
+        <span class="t-tabs-pill" aria-hidden="true"></span>
+        <button class="navbtn t-tab" data-nav="chat" role="tab" aria-selected="true"><span>Chat</span></button>
+        <button class="navbtn t-tab" data-nav="history" role="tab" aria-selected="false"><span>History</span></button>
+        <button class="navbtn t-tab" data-nav="privacy" role="tab" aria-selected="false"><span>Privacy</span></button>
+        <button class="navbtn t-tab" data-nav="lab" role="tab" aria-selected="false"><span>Lab</span></button>
       </nav>
-      <div class="beta">Beta</div>
       <div class="topright">
-        <div class="statuspill" id="status" data-state="idle"><span class="dot"></span><span id="status-label">Ready</span></div>
-        <button class="protect" id="plva-toggle" data-on="true" aria-label="PLVA protection" title="PLVA protection: redaction, policy, and vault">Protected</button>
+        <div class="statuspill" id="status" data-state="idle"><span class="dot"></span><span id="status-label" class="t-text-swap">Ready</span></div>
+        <button class="protect" id="plva-toggle" data-on="true" aria-label="PLVA protection" title="PLVA protection: redaction, policy, and vault"><span id="protect-label" class="t-text-swap">Protected</span></button>
       </div>
     </header>
     <main id="main"></main>
@@ -304,6 +449,60 @@
     async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})},cache:"no-store"});if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.detail||`Request failed (${r.status})`)}return r.json()}
     function toast(message){const t=$("#toast");t.textContent=message;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2400)}
 
+    /* transitions-dev orchestration: timings read from the :root tokens */
+    const rootStyle=getComputedStyle(document.documentElement);
+    const TEXT_SWAP_MS=parseFloat(rootStyle.getPropertyValue("--text-swap-dur"))||150;
+    const DROPDOWN_CLOSE_MS=parseFloat(rootStyle.getPropertyValue("--dropdown-close-dur"))||150;
+    function swapText(el,next){
+      if(!el||el.textContent===next)return;
+      if(el._swapping){el._next=next;return}
+      el._swapping=true;el._next=next;
+      el.classList.add("is-exit");
+      setTimeout(()=>{
+        el.textContent=el._next;delete el._next;
+        el.classList.remove("is-exit");
+        el.classList.add("is-enter-start");
+        void el.offsetHeight; // force reflow so the enter transition replays
+        el.classList.remove("is-enter-start");
+        el._swapping=false;
+      },TEXT_SWAP_MS);
+    }
+    function openDropdown(menu){if(!menu)return;menu.classList.remove("is-closing");menu.classList.add("is-open")}
+    function closeDropdown(menu){
+      if(!menu||!menu.classList.contains("is-open"))return;
+      menu.classList.remove("is-open");
+      menu.classList.add("is-closing");
+      setTimeout(()=>menu.classList.remove("is-closing"),DROPDOWN_CLOSE_MS);
+    }
+    function initTabsPill(bar){
+      if(!bar)return;
+      const pill=bar.querySelector(".t-tabs-pill");
+      const tabs=[...bar.querySelectorAll(".t-tab")];
+      if(!pill||!tabs.length)return;
+      const moveTo=(tab,animate)=>{
+        if(!tab)return;
+        if(!animate){
+          const prev=pill.style.transition;
+          pill.style.transition="none";
+          pill.style.transform=`translateX(${tab.offsetLeft}px)`;
+          pill.style.width=`${tab.offsetWidth}px`;
+          void pill.offsetWidth;
+          pill.style.transition=prev;
+        }else{
+          pill.style.transform=`translateX(${tab.offsetLeft}px)`;
+          pill.style.width=`${tab.offsetWidth}px`;
+        }
+      };
+      bar._movePill=animate=>moveTo(tabs.find(t=>t.getAttribute("aria-selected")==="true")||tabs[0],animate);
+      requestAnimationFrame(()=>bar._movePill(false));
+    }
+    window.addEventListener("resize",()=>document.querySelectorAll(".t-tabs").forEach(bar=>bar._movePill&&bar._movePill(false)));
+    function selectTab(clicked,group){
+      document.querySelectorAll(group).forEach(b=>b.setAttribute("aria-selected",String(b===clicked)));
+      const bar=clicked.closest(".t-tabs");
+      if(bar&&bar._movePill)bar._movePill(true);
+    }
+
     const chevron=`<svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     const arrowUp=`<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 14V4m0 0L4.5 8.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
@@ -318,10 +517,12 @@
 
     /* ---------- chrome ---------- */
     function renderChrome(){
-      const el=$("#status");el.dataset.state=state.status;$("#status-label").textContent=statusNames[state.status]||state.status;
+      const el=$("#status");el.dataset.state=state.status;
+      swapText($("#status-label"),statusNames[state.status]||state.status);
       const p=$("#plva-toggle");const on=state.settings.plva_enabled;
-      p.dataset.on=String(on);p.textContent=on?"Protected":"Protection off";p.disabled=state.running;
-      document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===tab));
+      p.dataset.on=String(on);p.disabled=state.running;
+      swapText($("#protect-label"),on?"Protected":"Protection off");
+      document.querySelectorAll("[data-nav]").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.nav===tab)));
     }
 
     /* ---------- chat ---------- */
@@ -330,22 +531,31 @@
     function chatSkeleton(){
       if(!sessionActive()){
         return `<div class="hero">
-          <div class="modelwrap">
-            <button class="modelpill" id="model-pill">${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}</button>
-            <div class="modelmenu" id="model-menu">${Object.entries(providerLabels).map(([v,l])=>`<button data-provider="${v}">${l}<small>${v===state.settings.provider?"Selected":""}</small></button>`).join("")}</div>
+          <h1>What should your computer do?</h1>
+          <div class="composer">
+            <textarea id="prompt" rows="3" placeholder="What can I do for you?"></textarea>
+            <div class="composerrow">
+              <div class="modelwrap">
+                <button class="modelpill" id="model-pill">${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}</button>
+                <div class="modelmenu t-dropdown" data-origin="top-left" id="model-menu">${Object.entries(providerLabels).map(([v,l])=>`<button data-provider="${v}">${l}<small>${v===state.settings.provider?"Selected":""}</small></button>`).join("")}</div>
+              </div>
+              <span class="hint">Recorded to your local audit history</span>
+              <button class="send" id="run" title="Run privately">${arrowUp}</button>
+            </div>
           </div>
-          <textarea class="heroinput" id="prompt" rows="1" placeholder="What can I do for you?"></textarea>
-          <button class="send" id="run" title="Run privately">${arrowUp}</button>
+          <div class="suggestions">
+            <button class="suggest" data-suggest>Open Calendar and find my next meeting</button>
+            <button class="suggest" data-suggest>Copy the visible email into the form</button>
+            <button class="suggest" data-suggest>Open Terminal and run: echo plva-ok</button>
+          </div>
           <div class="herohint">Runs locally behind the PLVA privacy boundary. Sensitive screen data never leaves this device.</div>
         </div>`;
       }
+      const viewChip=(view,label)=>`<button class="chip t-tab" role="tab" data-view="${view}" aria-selected="${String(activeView===view)}">${label}</button>`;
       return `<div class="workspace"><div class="wsinner">
-          <div class="chips" role="tablist">
-            <button class="chip" data-view="frame">Model view</button>
-            <button class="chip" data-view="trace">Agent trace</button>
-            <button class="chip" data-view="vault">Vault</button>
-            <button class="chip" data-view="ocr">OCR</button>
-            <button class="chip" data-view="filter">Stream guard</button>
+          <div class="chips t-tabs" role="tablist">
+            <span class="t-tabs-pill" aria-hidden="true"></span>
+            ${viewChip("frame","Model view")}${viewChip("trace","Agent trace")}${viewChip("vault","Vault")}${viewChip("ocr","OCR")}${viewChip("filter","Stream guard")}
           </div>
           <div class="card viewcard" id="viewbody"></div>
           <div class="card timelinecard">
@@ -356,7 +566,7 @@
         <div class="dock"><div class="dockbar">
           <div class="modelwrap">
             <button class="modelpill" id="model-pill">${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}</button>
-            <div class="modelmenu" id="model-menu">${Object.entries(providerLabels).map(([v,l])=>`<button data-provider="${v}">${l}<small>${v===state.settings.provider?"Selected":""}</small></button>`).join("")}</div>
+            <div class="modelmenu t-dropdown" data-origin="bottom-left" id="model-menu">${Object.entries(providerLabels).map(([v,l])=>`<button data-provider="${v}">${l}<small>${v===state.settings.provider?"Selected":""}</small></button>`).join("")}</div>
           </div>
           <textarea id="prompt" rows="1" placeholder="What can I do for you?"></textarea>
           <button class="stoppill" id="stop" hidden>Stop</button>
@@ -371,107 +581,210 @@
       const runBtn=$("#run");if(runBtn)runBtn.onclick=run;
       const stopBtn=$("#stop");if(stopBtn)stopBtn.onclick=stop;
       const pill=$("#model-pill");
-      if(pill){pill.onclick=e=>{e.stopPropagation();$("#model-menu").classList.toggle("open")};
-        document.querySelectorAll("#model-menu [data-provider]").forEach(b=>b.onclick=()=>{$("#model-menu").classList.remove("open");saveSettings({provider:b.dataset.provider})})}
-      document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{activeView=b.dataset.view;reveal=false;updateChat()});
+      if(pill){pill.onclick=e=>{e.stopPropagation();const m=$("#model-menu");m.classList.contains("is-open")?closeDropdown(m):openDropdown(m)};
+        document.querySelectorAll("#model-menu [data-provider]").forEach(b=>b.onclick=()=>{closeDropdown($("#model-menu"));saveSettings({provider:b.dataset.provider})})}
+      document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{activeView=b.dataset.view;reveal=false;selectTab(b,".chip");updateChat()});
+      document.querySelectorAll("[data-suggest]").forEach(b=>b.onclick=()=>{const box=$("#prompt");if(!box)return;box.value=b.textContent;draft=box.value;box.focus()});
+      initTabsPill(document.querySelector(".chips"));
     }
 
     async function updateChat(){
       const pill=$("#model-pill");
-      if(pill&&!$("#model-menu").classList.contains("open"))pill.innerHTML=`${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}`;
-      if(!sessionActive()){
-        const runBtn=$("#run");if(runBtn)runBtn.disabled=state.running;
-        return;
+      if(pill){
+        const label=`${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}`;
+        if(pill._label!==label){pill._label=label;pill.innerHTML=label}
       }
-      document.querySelectorAll(".chip").forEach(b=>b.classList.toggle("active",b.dataset.view===activeView));
       const runBtn=$("#run");if(runBtn)runBtn.disabled=state.running;
+      if(!sessionActive())return;
+      document.querySelectorAll(".chip").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.view===activeView)));
       const stopBtn=$("#stop");if(stopBtn)stopBtn.hidden=!state.running;
       const events=[...state.events].reverse();
-      $("#timeline").innerHTML=events.length?events.map(e=>`<div class="event"><time>${esc(e.time)}</time><i></i><div><b>${esc(e.title)}</b><small>${esc(e.detail)}</small></div></div>`).join(""):`<div class="empty">No task has run yet.</div>`;
+      const timelineHtml=events.length?events.map(e=>`<div class="event"><time>${esc(e.time)}</time><i></i><div><b>${esc(e.title)}</b><small>${esc(e.detail)}</small></div></div>`).join(""):`<div class="empty">No task has run yet.</div>`;
+      const timeline=$("#timeline");
+      if(timeline&&timeline._html!==timelineHtml){timeline._html=timelineHtml;timeline.innerHTML=timelineHtml}
       await renderView();
+    }
+
+    // Assign innerHTML only when the rendered string actually changed, so the
+    // 900ms poll never rebuilds (and never flickers) a stable view.
+    function setView(box,cls,html){
+      if(box._html===html&&box.className===cls)return false;
+      box._html=html;box.className=cls;box.innerHTML=html;
+      return true;
     }
 
     async function renderView(){
       const box=$("#viewbody");if(!box)return;
       if(activeView==="frame"){
         const s=state.stats||{};
-        box.className="card viewcard";
-        box.innerHTML=`<div class="framewrap"><div class="empty" id="frame-empty">${state.settings.plva_enabled?"The redacted frame Holo receives will appear here.":"PLVA is off for this diagnostic run."}</div><img id="frame" alt="Redacted frame sent to Holo"></div>
-          <div class="metrics"><span class="metric"><b>${s.frames_seen||0}</b> frames</span><span class="metric"><b>${s.regions||0}</b> protected regions</span><span class="metric"><b>${s.total_ms||0} ms</b> pipeline</span><span class="metric"><b>${esc(s.backend||"waiting")}</b> backend</span></div>`;
-        if(state.has_frame){const img=$("#frame");img.src=`/api/frame?t=${Date.now()}`;img.style.display="block";$("#frame-empty").style.display="none"}
+        setView(box,"card viewcard",`<div class="framewrap"><div class="empty" id="frame-empty">${state.settings.plva_enabled?"The redacted frame Holo receives will appear here.":"PLVA is off for this diagnostic run."}</div><img id="frame" alt="Redacted frame sent to Holo"></div>
+          <div class="metrics"><span class="metric"><b>${s.frames_seen||0}</b> frames</span><span class="metric"><b>${s.regions||0}</b> protected regions</span><span class="metric"><b>${s.total_ms||0} ms</b> pipeline</span><span class="metric"><b>${esc(s.backend||"waiting")}</b> backend</span></div>`);
+        if(state.has_frame){
+          const img=$("#frame");
+          // Key the frame on its content hash: the image reloads only when a
+          // genuinely new redacted frame exists, never on the poll itself.
+          const key=String(s.latest_sha12||"latest");
+          if(img.dataset.key!==key){img.dataset.key=key;img.src=`/api/frame?v=${encodeURIComponent(key)}`}
+          img.style.display="block";
+          const empty=$("#frame-empty");if(empty)empty.style.display="none";
+        }
         return;
       }
       if(activeView==="vault"){
-        let data=await api("/api/vault");let rows=data.entries||[];
-        box.className=reveal?"card viewcard revealed":"card viewcard";
-        box.innerHTML=`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local values</button></div>${rows.length?`<table><thead><tr><th>Placeholder</th><th>Class</th><th>Security</th><th>Local value</th></tr></thead><tbody>${rows.map(r=>`<tr><td><span class="token">${esc(r.placeholder)}</span></td><td>${esc(labels[r.class]||r.class)}</td><td><span class="level ${esc(r.safety_level)}">${esc(levelLabels[r.safety_level]||r.safety_level)}</span></td><td><span class="secret">${esc(r.value)}</span></td></tr>`).join("")}</tbody></table>`:`<div class="empty">The session vault is empty. Values appear only after OCR finds allowed or approval-gated PII.</div>`}`;
-        $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
+        let data=await api("/api/vault"),approvalData=await api("/api/approvals"),rows=data.entries||[];
+        const approved=new Set((approvalData.approvals||[]).map(item=>item.token));
+        const tableRows=rows.map(r=>{const action=r.safety_level==="approval"?(approved.has(r.placeholder)?`<span class="level hide_use">Approved once</span>`:`<button class="linkbtn" data-approve="${esc(r.placeholder)}">Approve one write</button>`):"—";return `<tr><td><span class="token">${esc(r.placeholder)}</span></td><td>${esc(labels[r.class]||r.class)}</td><td><span class="level ${esc(r.safety_level)}">${esc(levelLabels[r.safety_level]||r.safety_level)}</span></td><td>${action}</td><td><span class="secret">${esc(r.value)}</span></td></tr>`}).join("");
+        const changed=setView(box,reveal?"card viewcard revealed":"card viewcard",`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local values</button></div>${rows.length?`<table><thead><tr><th>Placeholder</th><th>Class</th><th>Security</th><th>Local approval</th><th>Local value</th></tr></thead><tbody>${tableRows}</tbody></table>`:`<div class="empty">The session vault is empty. Values appear only after OCR finds allowed or approval-gated PII.</div>`}`);
+        if(changed){$("#reveal").onclick=()=>{reveal=!reveal;renderView()};document.querySelectorAll("[data-approve]").forEach(button=>button.onclick=async()=>{button.disabled=true;try{await api("/api/approve",{method:"POST",body:JSON.stringify({token:button.dataset.approve})});toast("One private write approved");await renderView()}catch(error){button.disabled=false;toast(error.message)}})}
         return;
       }
       if(activeView==="ocr"){
         let data=await api("/api/findings");let rows=data.findings||[];
-        box.className=reveal?"card viewcard revealed":"card viewcard";
-        box.innerHTML=`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local OCR text</button></div>${rows.length?rows.map((r,i)=>`<div class="finding"><div class="findingtop"><b>Finding ${i+1}</b><span>${esc((r.labels||[]).join(" · ")||"Unclassified")}</span></div><p><span class="secret">${esc(r.text||"No recognized text")}</span></p></div>`).join(""):`<div class="empty">No OCR findings yet.</div>`}`;
-        $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
+        const changed=setView(box,reveal?"card viewcard revealed":"card viewcard",`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local OCR text</button></div>${rows.length?rows.map((r,i)=>`<div class="finding"><div class="findingtop"><b>Finding ${i+1}</b><span>${esc((r.labels||[]).join(" · ")||"Unclassified")}</span></div><p><span class="secret">${esc(r.text||"No recognized text")}</span></p></div>`).join(""):`<div class="empty">No OCR findings yet.</div>`}`);
+        if(changed)$("#reveal").onclick=()=>{reveal=!reveal;renderView()};
         return;
       }
       if(activeView==="trace"){
         let data=await api("/api/traces");let rows=data.entries||[];
-        box.className=reveal?"card viewcard revealed":"card viewcard";
-        box.innerHTML=`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local trace</button></div>${rows.length?`<div class="tracefeed" id="tracefeed">${rows.map(r=>`<div class="traceitem"><time>${esc(r.time)}</time><span class="tracechannel ${esc(r.channel)}">${esc(r.channel)}</span><span class="tracetext secret">${esc(r.text)}</span></div>`).join("")}</div>`:`<div class="empty">Agent reasoning and actions will appear here once the run begins.</div>`}<p class="sub" style="margin:12px 0 0;font-size:13px">Memory-only. The original prompt is excluded; resolved action values may appear, so trace text is hidden until revealed.</p>`;
-        $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
-        const feed=$("#tracefeed");if(feed)feed.scrollTop=feed.scrollHeight;
+        const changed=setView(box,reveal?"card viewcard revealed":"card viewcard",`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local trace</button></div>${rows.length?`<div class="tracefeed" id="tracefeed">${rows.map(r=>`<div class="traceitem"><time>${esc(r.time)}</time><span class="tracechannel ${esc(r.channel)}">${esc(r.channel)}</span><span class="tracetext secret">${esc(r.text)}</span></div>`).join("")}</div>`:`<div class="empty">Agent reasoning and actions will appear here once the run begins.</div>`}<p class="sub" style="margin:12px 0 0;font-size:13px">Memory-only. The original prompt is excluded; resolved action values may appear, so trace text is hidden until revealed.</p>`);
+        if(changed){
+          $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
+          const feed=$("#tracefeed");if(feed)feed.scrollTop=feed.scrollHeight;
+        }
         return;
       }
       let d=await api("/api/filter");
-      box.className="card viewcard";
-      box.innerHTML=`<div class="filtergrid"><div class="bigmetric"><strong>${esc(d.texts_scanned||0)}</strong><span>text blocks scanned</span></div><div class="bigmetric"><strong>${esc(d.semantic_hits||0)}</strong><span>semantic detections</span></div><div class="bigmetric"><strong>${esc(d.blocked_hits||0)}</strong><span>opaque blocked removals</span></div></div><div class="finding" style="margin-top:12px"><div class="findingtop"><b>Filter status</b><span class="level ${d.status==='failed'?'blocked':'hide_use'}">${esc(d.status||"idle")}</span></div><p>Exact vault matches: ${esc(d.plain_vault_hits||0)} · diagnostic: ${esc(d.error_code||"none")}. Cleartext is never shown here.</p></div>`;
+      setView(box,"card viewcard",`<div class="filtergrid"><div class="bigmetric"><strong>${esc(d.texts_scanned||0)}</strong><span>text blocks scanned</span></div><div class="bigmetric"><strong>${esc(d.plain_vault_hits||0)}</strong><span>exact vault matches</span></div><div class="bigmetric"><strong>${esc(d.semantic_hits||0)}</strong><span>semantic detections</span></div><div class="bigmetric"><strong>${esc(d.blocked_hits||0)}</strong><span>opaque blocked removals</span></div></div><div class="finding" style="margin-top:12px"><div class="findingtop"><b>Filter status</b><span class="level ${d.status==='failed'?'blocked':'hide_use'}">${esc(d.status||"idle")}</span></div><p>Diagnostic: ${esc(d.error_code||"none")}. Cleartext is never shown here; counts remain memory-only.</p></div>`);
     }
 
-    /* ---------- history panel ---------- */
-    let openCall=null,callsSig="";
+    /* ---------- history panel: run rail + replay timeline ---------- */
+    let curRun=null,runDetail=null,curIdx=0,playing=false,playTimer=null,runsSig="",detailSig="",inspectKey="";
+    const playIcon=`<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.2v9.6a.6.6 0 00.9.5l7.5-4.8a.6.6 0 000-1L5.9 2.7a.6.6 0 00-.9.5z"/></svg>`;
+    const pauseIcon=`<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>`;
     function historySkeleton(){
-      return `<div class="panel"><div class="panelinner" style="max-width:820px">
-        <h1>Model call history</h1>
-        <p class="sub">Every request the model received this session, exactly as it crossed the privacy boundary: redacted frames, scrubbed text, and injected system prompts, plus the model's raw reply before any placeholder resolution.</p>
-        <div id="call-list"><div class="empty">No model calls yet. Calls are recorded live during protected runs and stay inspectable here afterward.</div></div>
+      return `<div class="panel"><div class="panelinner" style="max-width:980px">
+        <h1>Audit timeline</h1>
+        <p class="sub">Every run is recorded to this device's local history: the redacted frames, scrubbed text, and raw placeholder replies that crossed the privacy boundary. Pick a run and scrub through its model calls like a replay.</p>
+        <div class="runsrail" id="runs-rail"></div>
+        <div id="replay"></div>
       </div></div>`;
     }
+    function resetHistoryView(){runsSig="";detailSig="";inspectKey="";stopPlay()}
     async function updateHistory(force){
-      const list=$("#call-list");if(!list)return;
-      let data;try{data=await api("/api/calls")}catch{return}
-      const calls=(data.calls||[]).slice().reverse();
-      const sig=calls.map(c=>`${c.id}:${c.state}:${c.status}`).join("|");
-      if(sig===callsSig&&!force)return;
-      callsSig=sig;
-      if(!calls.length){list.innerHTML=`<div class="empty">No model calls yet. Calls are recorded live during protected runs and stay inspectable here afterward.</div>`;return}
-      list.innerHTML=calls.map(c=>{
-        const time=new Date(c.at*1000).toLocaleTimeString();
-        const status=c.status===null||c.status===undefined?"n/a":c.status;
-        return `<div class="card callrow" style="margin-bottom:8px">
-          <button class="callhead" data-call="${c.id}">
-            <span class="cid">#${c.id}</span>
-            <span class="cprev">${esc(c.preview||"(no user text)")}</span>
-            <span class="cmeta">${esc(c.model||"")} · ${c.messages} msg · ${(c.images||[]).length} img · ${c.duration_ms} ms · HTTP ${esc(status)} · ${time}
-              <span class="cstate ${esc(c.state)}">${esc(c.state)}</span></span>
-          </button>
-          <div class="calldetail" id="call-detail-${c.id}" hidden></div>
-        </div>`;
-      }).join("");
-      list.querySelectorAll("[data-call]").forEach(b=>b.onclick=()=>toggleCall(Number(b.dataset.call)));
-      if(openCall!==null&&calls.some(c=>c.id===openCall)){const id=openCall;openCall=null;toggleCall(id)}
+      const rail=$("#runs-rail");if(!rail)return;
+      let data;try{data=await api("/api/history/runs")}catch{return}
+      const runs=data.runs||[];
+      const sig=runs.map(r=>`${r.id}:${r.status}:${r.calls}`).join("|");
+      if(sig!==runsSig||force){
+        runsSig=sig;
+        if(!runs.length){
+          rail.innerHTML=`<div class="empty">No recorded runs yet. Run a task and it will appear here, replayable call by call.</div>`;
+          $("#replay").innerHTML="";return;
+        }
+        if(!curRun||!runs.some(r=>r.id===curRun))curRun=runs[0].id;
+        rail.innerHTML=runs.map(r=>`<button class="runcard ${r.id===curRun?'active':''}" data-run="${esc(r.id)}">
+            <b>${esc(r.prompt||"(no prompt)")}</b>
+            <small>${esc(new Date((r.started_at||0)*1000).toLocaleString())} · ${r.calls} calls · ${esc(r.status||"")}</small>
+          </button>`).join("");
+        rail.querySelectorAll("[data-run]").forEach(b=>b.onclick=()=>{
+          curRun=b.dataset.run;curIdx=0;stopPlay();runsSig="";detailSig="";updateHistory(true);
+        });
+      }
+      if(!curRun)return;
+      let detail;try{detail=await api(`/api/history/runs/${curRun}`)}catch{return}
+      const dSig=`${curRun}:${(detail.calls||[]).length}:${detail.run&&detail.run.status}`;
+      if(dSig!==detailSig){
+        // Follow mode: if the playhead was on the newest call of a live run,
+        // stay pinned to the newest call as more arrive.
+        const followed=runDetail&&runDetail.calls&&curIdx>=runDetail.calls.length-1;
+        detailSig=dSig;runDetail=detail;
+        const total=(detail.calls||[]).length;
+        curIdx=followed?Math.max(0,total-1):Math.min(curIdx,Math.max(0,total-1));
+        renderReplay();
+      }
     }
-    async function toggleCall(id){
-      const box=$(`#call-detail-${id}`);if(!box)return;
-      if(openCall===id){box.hidden=true;openCall=null;return}
-      const previous=openCall===null?null:$(`#call-detail-${openCall}`);
-      if(previous)previous.hidden=true;
-      openCall=id;
-      box.hidden=false;box.innerHTML=`<div class="empty">Loading…</div>`;
-      let record;try{record=await api(`/api/call/${id}`)}catch(e){box.innerHTML=`<div class="empty">${esc(e.message)}</div>`;return}
-      box.innerHTML=renderCallDetail(record);
+    function markPos(i){
+      const calls=runDetail.calls;
+      const t0=calls[0].at,t1=calls[calls.length-1].at;
+      if(!(t1>t0))return calls.length>1?(i/(calls.length-1))*100:50;
+      return ((calls[i].at-t0)/(t1-t0))*100;
     }
-    function contentBlocks(callId,content){
+    function renderReplay(){
+      const box=$("#replay");if(!box)return;
+      const calls=(runDetail&&runDetail.calls)||[];
+      if(!calls.length){box.innerHTML=`<div class="empty">This run recorded no model calls${runDetail&&runDetail.run&&runDetail.run.status==="running"?" yet":""}.</div>`;return}
+      box.innerHTML=`<div class="card player">
+          <div class="stage" id="stage"><div class="empty" id="stage-empty">No screenshot in this call.</div><img id="stage-img" alt="Redacted frame for this step"></div>
+          <div class="scrubrow">
+            <button class="playbtn" id="play" title="Replay">${playing?pauseIcon:playIcon}</button>
+            <div class="track" id="track">${calls.map((c,i)=>`<span class="marker" data-idx="${i}" style="left:${markPos(i)}%"></span>`).join("")}<div class="playhead" id="playhead"></div></div>
+            <span class="timecode" id="timecode"></span>
+          </div>
+        </div>
+        <div class="card inspect" id="call-inspect"></div>`;
+      $("#play").onclick=togglePlay;
+      const track=$("#track");
+      const pick=e=>{
+        const rect=track.getBoundingClientRect();
+        const x=Math.min(Math.max(e.clientX-rect.left,0),rect.width);
+        let best=0,bestDist=Infinity;
+        calls.forEach((c,i)=>{const px=markPos(i)/100*rect.width;const d=Math.abs(px-x);if(d<bestDist){bestDist=d;best=i}});
+        setIdx(best);
+      };
+      track.onpointerdown=e=>{track.setPointerCapture(e.pointerId);stopPlay();pick(e);track.onpointermove=pick};
+      track.onpointerup=()=>{track.onpointermove=null};
+      setIdx(curIdx,true);
+    }
+    async function setIdx(i,force){
+      const calls=(runDetail&&runDetail.calls)||[];if(!calls.length)return;
+      i=Math.min(Math.max(i,0),calls.length-1);
+      if(i===curIdx&&!force)return;
+      curIdx=i;
+      document.querySelectorAll(".marker").forEach(m=>{
+        const idx=Number(m.dataset.idx);
+        m.classList.toggle("active",idx===i);
+        m.classList.toggle("done",idx<i);
+      });
+      const playhead=$("#playhead");if(playhead)playhead.style.left=markPos(i)+"%";
+      const c=calls[i];
+      const tc=$("#timecode");if(tc)tc.textContent=`step ${i+1}/${calls.length} · call #${c.id} · ${new Date(c.at*1000).toLocaleTimeString()}`;
+      const base=`/api/history/runs/${curRun}/calls/${c.id}`;
+      const img=$("#stage-img"),stageEmpty=$("#stage-empty");
+      const imgs=c.images||[];
+      if(img&&imgs.length){
+        // The last screenshot in a call is the current frame for that step.
+        img.src=`${base}/image/${imgs.length-1}`;img.style.display="block";
+        if(stageEmpty)stageEmpty.style.display="none";
+      }else if(img){img.style.display="none";if(stageEmpty)stageEmpty.style.display="block"}
+      const key=`${curRun}:${c.id}`;
+      if(inspectKey!==key){
+        inspectKey=key;
+        const inspect=$("#call-inspect");
+        inspect.innerHTML=`<div class="empty">Loading…</div>`;
+        try{
+          const record=await api(base);
+          if(inspectKey===key)inspect.innerHTML=renderCallDetail(record,base);
+        }catch(e){if(inspectKey===key)inspect.innerHTML=`<div class="empty">${esc(e.message)}</div>`}
+      }
+    }
+    function togglePlay(){playing?stopPlay():startPlay()}
+    function startPlay(){
+      const calls=(runDetail&&runDetail.calls)||[];if(calls.length<2)return;
+      if(curIdx>=calls.length-1)setIdx(0);
+      playing=true;const b=$("#play");if(b)b.innerHTML=pauseIcon;
+      playTimer=setInterval(()=>{
+        if(!runDetail||curIdx>=runDetail.calls.length-1)stopPlay();
+        else setIdx(curIdx+1);
+      },1200);
+    }
+    function stopPlay(){playing=false;clearInterval(playTimer);const b=$("#play");if(b)b.innerHTML=playIcon}
+    document.addEventListener("keydown",e=>{
+      if(tab!=="history"||!runDetail||e.metaKey||e.ctrlKey)return;
+      if(e.key==="ArrowRight"){e.preventDefault();stopPlay();setIdx(curIdx+1)}
+      if(e.key==="ArrowLeft"){e.preventDefault();stopPlay();setIdx(curIdx-1)}
+      if(e.key===" "&&document.activeElement===document.body){e.preventDefault();togglePlay()}
+    });
+    function contentBlocks(base,content){
       if(typeof content==="string")return `<pre class="block">${esc(content)}</pre>`;
       if(!Array.isArray(content))return `<pre class="block">${esc(JSON.stringify(content,null,2))}</pre>`;
       return content.map(part=>{
@@ -479,16 +792,17 @@
         if(part&&part.type==="image_url"){
           const url=part.image_url&&part.image_url.url||"";
           const match=/^plva:image\/(\d+)$/.exec(url);
-          if(match)return `<img class="callimg" src="/api/call/${callId}/image/${match[1]}" alt="Frame sent to the model" loading="lazy">`;
+          if(match)return `<img class="callimg" src="${base}/image/${match[1]}" alt="Frame sent to the model" loading="lazy">`;
           return `<pre class="block">${esc(url||"(image)")}</pre>`;
         }
         return `<pre class="block">${esc(JSON.stringify(part,null,2))}</pre>`;
       }).join("");
     }
-    function renderCallDetail(record){
+    function renderCallDetail(record,base){
       const messages=(record.request&&record.request.messages)||[];
-      const request=messages.map(m=>`<div class="msg"><span class="rolechip ${esc(m.role||"")}">${esc(m.role||"message")}</span>${contentBlocks(record.id,m.content)}</div>`).join("");
+      const request=messages.map(m=>`<div class="msg"><span class="rolechip ${esc(m.role||"")}">${esc(m.role||"message")}</span>${contentBlocks(base,m.content)}</div>`).join("");
       const extras={...record.request};delete extras.messages;
+      const meta=`<span class="cstate ${esc(record.state)}">${esc(record.state)}</span> HTTP ${esc(record.status??"n/a")} · ${esc(record.model||"")} · ${record.duration_ms} ms`;
       let response;
       if(!record.response){
         response=`<div class="empty" style="padding:16px">${record.state==="streamed"?"The reply streamed straight through to the agent and was not buffered.":"No response was recorded for this call."}</div>`;
@@ -500,7 +814,8 @@
         const usage=record.response.usage?` · ${record.response.usage.prompt_tokens??"?"} in / ${record.response.usage.completion_tokens??"?"} out tokens`:"";
         response=`<div class="msg"><span class="rolechip assistant">${esc(message.role||"assistant")} · ${esc(choice.finish_reason||"")}${esc(usage)}</span><pre class="block">${esc(content??JSON.stringify(record.response,null,2))}</pre></div>`;
       }
-      return `<div class="callsection"><h4>Request: what the model saw</h4>${request||'<div class="empty">No messages.</div>'}</div>
+      return `<div class="callsection"><h4>Call</h4><div style="font-size:13px;color:var(--fore-secondary)">${meta}</div></div>
+        <div class="callsection"><h4>Request: what the model saw</h4>${request||'<div class="empty">No messages.</div>'}</div>
         <div class="callsection"><h4>Request parameters</h4><pre class="block">${esc(JSON.stringify(extras,null,2))}</pre></div>
         <div class="callsection"><h4>Response: what the model returned</h4>${response}</div>`;
     }
@@ -512,7 +827,7 @@
         <p class="sub">Choose what Holo can use for each kind of sensitive information. Unknown types are always blocked. Changes apply to the next run.</p>
         <div class="legend">
           <div><b><span class="ldot" style="background:var(--ok)"></span>Hide &amp; use</b>Holo uses a token.</div>
-          <div><b><span class="ldot" style="background:var(--warn)"></span>Approval</b>Denied until a local approver exists.</div>
+          <div><b><span class="ldot" style="background:var(--warn)"></span>Approval</b>Requires a short-lived, exact local grant from the Vault view.</div>
           <div><b><span class="ldot" style="background:var(--bad)"></span>Blocked</b>No token or vault entry.</div>
         </div>
         <div class="card policycard" id="policy-list"></div>
@@ -570,7 +885,7 @@
         mode=nextMode;
         $("#main").innerHTML=tab==="chat"?chatSkeleton():tab==="history"?historySkeleton():tab==="privacy"?privacySkeleton():labSkeleton();
         if(tab==="chat")wireChat();
-        if(tab==="history")callsSig="";
+        if(tab==="history")resetHistoryView();
         renderPanel();
       }
       if(tab==="chat")updateChat();
@@ -578,9 +893,10 @@
     }
     async function refresh(){try{state=await api("/api/state");render(false)}catch(e){toast("Demo service unavailable")}}
 
-    document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>{tab=b.dataset.nav;reveal=false;render(true)});
+    document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>{tab=b.dataset.nav;reveal=false;selectTab(b,"[data-nav]");render(true)});
+    initTabsPill(document.querySelector(".mainnav"));
     $("#plva-toggle").onclick=()=>saveSettings({plva_enabled:!state.settings.plva_enabled});
-    document.addEventListener("click",e=>{const m=$("#model-menu");if(m&&!e.target.closest(".modelwrap"))m.classList.remove("open")});
+    document.addEventListener("click",e=>{const m=$("#model-menu");if(m&&!e.target.closest(".modelwrap"))closeDropdown(m)});
     document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="Enter")run()});
     refresh();setInterval(refresh,900);
   </script>

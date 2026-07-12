@@ -2,7 +2,7 @@
 
 Date: 2026-07-12
 
-Status: **LOCAL IMPLEMENTATION PASS; LIVE CUA COMPARISON STILL REQUIRED**
+Status: **IMPLEMENTATION AND CONTROLLED LIVE ACCEPTANCE PASS**
 
 ## Implemented
 
@@ -47,14 +47,16 @@ token into the frame-2 local action.
   code 0 means the requested UI postcondition was reached.
 - The current detector is release eligible. Earlier `plva-v2-baseline` snapshot metadata describes
   a superseded development artifact and must not be used to characterize the current detector.
-- `approval` tokens remain denied until the local mediator exists, and `blocked` values remain
-  intentionally unusable. Authentication tasks require an explicit policy override today.
-- A live PLVA-off versus PLVA-on task-success benchmark was not run because no controlled desktop
-  fixture/task and provider-spend authorization were supplied for this optimization pass.
+- Exact manual approval capabilities are implemented for approval-gated tokens. Automatic policy
+  decisions and steering still require the optional local mediator. `blocked` values remain
+  intentionally unusable.
+- The controlled live PLVA-on two-step task passed with independent destination verification and
+  zero observed cleartext in provider-bound frames. A larger repeated PLVA-off/on corpus remains a
+  performance-trend exercise, not a production correctness blocker.
 
 ## Next acceptance gate
 
-Run the same controlled form-fill corpus with PLVA off and on. Require zero cleartext/provider
+Expand the controlled form-fill corpus and repeat it with PLVA off and on. Require zero cleartext/provider
 leaks, 100% issued-token resolution, PLVA-on success within five percentage points of PLVA-off,
 warm p50 below 200 ms, p95 below 350 ms, and no material per-step growth from unchanged history.
 This is a CUA integration/performance gate, not a detector release-eligibility blocker.
