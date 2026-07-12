@@ -1,24 +1,39 @@
 # PLVA Blueprint — Holo CUA Privacy Environment
 
 This file specifies the **CUA-management component** of the PLVA project. It is written to be
-built by an AI coding agent (Claude Fable 5) in small, independently testable steps.
+built by an AI coding agent in small, independently testable steps.
+
+> **Revision 2026-07-12.** Reworked from the original after building Steps 0–4 and clarifying the
+> threat model with the operator. Material changes since the first draft: the threat model is now
+> explicitly *"protect against the model inference provider and anything upstream of it"* (not the
+> local desktop); per-class PII **safety levels** replace the fixed secret-tier list; an optional
+> **LLM mediator** (approvals/steering) is added; the Gradium audio work is split into an
+> **inbound** (context) and a privacy-free **outbound** (voice-read) direction; a thin **app** is
+> added; and several statements are corrected (skills are native to HoloDesktop, not a NemoClaw
+> feature; resolution scope is about leak-back, not destination). Build-step status and priority
+> now reflect what is actually built. Search for **CHANGED** / **NEW** markers.
 
 ---
 
 ## 0. How to build from this document (read first)
 
-- Build **one step at a time, in order**. After each step, stop and run the step's **Verify**
-  check. Do **not** start the next step until Verify passes.
+- Build **one step at a time, in priority order** (§9). After each step, stop and run its
+  **Verify** check. Do **not** start the next step until Verify passes. Steps marked ✅ are done.
 - Prefer the smallest change that satisfies the step. Each step must be independently runnable.
-- Treat everything under **Hard constraints** as non-negotiable. If a step seems to require
+- Treat everything under **Hard constraints** (§8) as non-negotiable. If a step seems to require
   breaking one, stop and surface it instead of proceeding.
 - **Secrets:** never commit API keys, screenshots, transcripts, or vault contents. Keys live in
   environment variables and an untracked `.env` only. Keep a safe `.env.example`.
-- **Stubs:** when a step depends on another component that is out of scope here (the PII
-  detector), build against the **stub interface** defined in §5 so this component is testable
-  before the real one exists.
-- Any fact marked **VERIFY** is an assumption to confirm empirically. If it turns out false,
-  stop and report — do not build on it.
+- **Stubs:** when a step depends on a component out of scope here (the PII detector), build against
+  the **stub interface** in §5 so this component is testable before the real one exists.
+- Any fact marked **VERIFY** is an assumption to confirm empirically. If it turns out false, stop
+  and report — do not build on it.
+- **NEW — local-model acceleration is in flight (separate agent).** The redaction detector and the
+  local models it depends on are being sped up with GPU / WebGPU and Apple **CoreML** execution
+  providers, behind a persistent warm worker (see the "Cross-cutting" note at the end of §9). Treat
+  every local-model dependency (redactor, and later local TTS and a local mediator model) as
+  *pluggable behind a client interface* whose backend may be WASM, WebGPU, or CoreML. Never hardcode
+  a backend; keep the frozen baseline as the correctness oracle; keep the interface fail-closed.
 
 ---
 
@@ -31,12 +46,28 @@ built by an AI coding agent (Claude Fable 5) in small, independently testable st
 > tell the model how to reason about placeholders → when the model returns actions, resolve each
 > placeholder back to its real value **before** the action executes.
 
-**This component covers:** running the CUA, sandboxing it, giving it skills, and **intercepting
-and modifying both directions of the model traffic** (the request to the inference provider and
-the returned actions), plus the **vault**.
+**Threat model (CHANGED — read carefully; it drives the rest of the doc).** Privacy is defined
+**against the model inference provider (Overshoot) and anything upstream of the model.** The goal
+is that the model **never *sees*** a value it should not need to know. It is *fine* for the model
+to **cause a real value to be used** — typed into a form, placed in a URL, sent somewhere — because
+that is the action the user asked for and the layer resolves the value locally, in transit, out of
+the model's view. So the discipline is not "never let a real value reach any destination"; it is
+"never let a real value reach the model or its provider." That reframing relaxes some earlier rules
+(see §8.4) and sharpens others (history leak-back, §6/§8.9, is now the load-bearing concern).
 
-**Out of scope (separate component):** the actual detection/redaction of PII pixels. Here it is a
-**pluggable dependency** with a stub for testing (see §5).
+**This component covers:**
+- running the CUA, and **intercepting and modifying both directions of the model traffic** (request
+  to the provider and returned actions) — the PLVA proxy;
+- the **vault** and a **configurable per-class PII safety policy** (NEW, §6);
+- an optional **LLM mediator** for approval-gated classes and privacy steering (NEW, §7);
+- **audio** via Gradium, in two directions (NEW, §9 Steps 9, 10, 12): inbound STT → redacted context,
+  and a privacy-free outbound **voice-read** of real values through a **local** TTS model;
+- a thin **app** that takes a typed or (lower priority) spoken prompt and runs the task (NEW, §9
+  Step 11).
+
+**Out of scope (separate component):** the actual detection/redaction of PII pixels, and its
+GPU/CoreML acceleration. Here the detector is a **pluggable dependency** with a stub (see §5). The
+detector must, however, emit recognized **values** to the vault locally — see the §5 contract note.
 
 ---
 
@@ -44,19 +75,36 @@ the returned actions), plus the **vault**.
 
 - **CUA** — computer-use agent: takes a screenshot + task, emits GUI actions (click/type/scroll).
 - **Holo3** — H Company's vision computer-use model. This project uses Overshoot's
-  **`Hcompany/Holo3-35B-A3B`** model only.
-  Consumes images + text; has **no audio input**.
+  **`Hcompany/Holo3-35B-A3B`** only. Consumes images + text; has **no native audio input** (audio
+  reaches it only as injected text, §9 Step 12).
 - **HoloDesktop CLI** — the harness (`github.com/hcompai/holo-desktop-cli`, Apache-2.0, Python/uv).
-  Its open code is the CLI/integration wrapper; it downloads a **closed `hai-agent-runtime`
-  binary** that owns the perceive→act loop (screen capture, model call, and action execution).
+  Open CLI wrapper; downloads a **closed `hai-agent-runtime`** binary that owns the perceive→act
+  loop (screen capture, model call, action execution). **CHANGED — skills:** HoloDesktop has its
+  **own** native skill mechanism (`~/.holo/skills/*/SKILL.md`, loaded into the model request by the
+  runtime). Skills are **not** a NemoClaw feature. Teaching the model about placeholders can use a
+  native skill *or* proxy injection; we prefer proxy injection for guaranteed presence (§9 Step 5).
 - **Overshoot** — the inference provider. OpenAI-compatible HTTP API.
-- **NemoClaw / OpenShell** — NVIDIA's agent stack. **OpenShell** is its sandbox (restricted
-  network + file isolation). In this project, "integrate NemoClaw" = **use OpenShell for
-  isolation and controlled network egress** (see §7).
-- **PLVA proxy** — a local OpenAI-compatible HTTP proxy we build; the single point where model
-  traffic is intercepted and rewritten.
-- **Vault** — private, in-memory, session-scoped map from placeholder → real value.
-- **Placeholder** — a stable semantic token painted over a PII value, e.g. `EMAIL_1`, `PHONE_2`.
+- **NemoClaw / OpenShell** — NVIDIA's agent stack. **OpenShell** is its sandbox (network + file
+  isolation). In this project it is used to **sandbox processes we launch** (primarily the mediator,
+  optionally the proxy / audio client) with deny-by-default egress — **not** as an orchestrator
+  brain and **not** to wrap the host runtime (it cannot). See §7.
+- **PLVA proxy** — the local OpenAI-compatible HTTP proxy we build; the single point where model
+  traffic is intercepted and rewritten. Built (Steps 1, 3, 4).
+- **Vault** — private, in-memory, session-scoped map from placeholder → real value, plus per-class
+  policy state.
+- **Placeholder** — a stable, session-nonce-namespaced semantic token painted over a PII value,
+  e.g. `EMAIL_1_a3f9`. The namespace prevents on-screen/adversarial forgery of a valid token.
+- **Safety level** (NEW) — the per-class policy that decides how a PII class is handled: hide-and-
+  use, approval-gated, blocked, etc. (§6).
+- **Mediator** (NEW) — an LLM the proxy *consults* on deterministic triggers to approve/deny
+  gated resolutions (against user-defined criteria) and to steer. A *mediator*, never an
+  orchestrator: the proxy stays in control.
+- **Gradium** — voice-AI provider: cloud **STT** (real-time, WebSocket, semantic VAD) and a
+  **local TTS** model. Cloud STT sees pre-redaction audio (trusted-boundary assumption); local TTS
+  runs on-device with no egress and is the key to the privacy-free outbound voice channel.
+- **Audio-in / audio-out** (NEW) — *in*: mic/loopback → STT → scrub → model context (must be
+  redacted before the model). *out*: vault → local TTS → speakers (never reaches the model, so it
+  may carry real values).
 
 ---
 
@@ -64,10 +112,12 @@ the returned actions), plus the **vault**.
 
 | Choice | Value | Notes |
 |---|---|---|
-| Model | **`Hcompany/Holo3-35B-A3B`** | Exact Overshoot model id selected by the user on 2026-07-11. Do **not** use Nemotron, OpenClaw, or another model/harness. |
-| Harness | **HoloDesktop CLI** | Closed `hai-agent-runtime` binary owns the loop — see §4 for why this forces a proxy. |
-| Inference provider | **Overshoot** (OpenAI-compatible) | Start on the easiest working endpoint, then move to Overshoot (Steps 1→2). |
-| NemoClaw integration | **OpenShell sandbox** | Used for network-egress control / isolation, **not** as an orchestrator brain. |
+| Model | **`Hcompany/Holo3-35B-A3B`** | Exact Overshoot model id. Do **not** use Nemotron, OpenClaw, or another model/harness. |
+| Harness | **HoloDesktop CLI** | Closed `hai-agent-runtime` owns the loop — see §4 for why this forces a proxy. |
+| Inference provider | **Overshoot** (OpenAI-compatible) | The proxy targets Overshoot by default. |
+| NemoClaw integration | **OpenShell sandbox** for the **mediator** (and optionally proxy/audio) | Isolation + controlled egress for processes we launch; not an orchestrator; cannot wrap the host runtime. |
+| Audio | **Gradium** STT (cloud) + **local** TTS | STT is trusted-boundary; local TTS enables the privacy-free voice-read (§9 Step 9). |
+| Local-model acceleration | GPU / **WebGPU** / **CoreML** behind a warm worker | In flight (separate agent). Keep every local model behind a pluggable, fail-closed client. |
 
 ---
 
@@ -75,204 +125,341 @@ the returned actions), plus the **vault**.
 
 ```
  Host machine
- ┌──────────────────────────────────────────────────────────────┐
- │  HoloDesktop CLI (open wrapper)                                │
- │      │ launches                                                │
- │      ▼                                                         │
- │  hai-agent-runtime (CLOSED binary)                             │
- │    • captures the real screen                                  │
- │    • BUILDS the model request (embeds the raw screenshot)      │
- │    • executes the returned actions on the real desktop         │
- │      │ sends OpenAI-format request to its configured base URL  │
- └──────┼─────────────────────────────────────────────────────────┘
-        ▼   (base URL points at the proxy, not at Overshoot)
- ┌──────────────────────────────────────────────────────────────┐
- │  PLVA PROXY (local, OpenAI-compatible)   ── holds the VAULT ── │
- │   REQUEST leg  (runtime → model):                              │
- │     1. redact the screenshot (call scrubber stub) + fill vault │
- │     2. scrub leaked values out of the message/text history     │
- │     3. inject any extra context (e.g. redacted audio, §9)      │
- │   RESPONSE leg (model → runtime):                              │
- │     4. parse the proposed action; resolve placeholders only in │
- │        the type-text field; forward the rewritten action       │
- └──────┼─────────────────────────────────────────────────────────┘
+ ┌───────────────────────────────────────────────────────────────────────┐
+ │  App (NEW): typed prompt, or spoken prompt via Gradium STT (low prio)   │
+ │      │ hands the task to HoloDesktop                                    │
+ │      ▼                                                                  │
+ │  HoloDesktop CLI → hai-agent-runtime (CLOSED)                           │
+ │    • captures the real screen • builds the request (raw screenshot)     │
+ │    • executes returned actions • base URL points at the PLVA proxy      │
+ └──────┼──────────────────────────────────────────────────────────────────┘
         ▼
-    Overshoot  (`Hcompany/Holo3-35B-A3B`)
+ ┌───────────────────────────────────────────────────────────────────────┐
+ │  PLVA PROXY (local, OpenAI-compatible) ── holds VAULT + safety policy ──│
+ │   REQUEST leg (runtime → model):                                        │
+ │     1. redact screenshot (detector → new frame) + store spans+values    │
+ │     2. history scrub: plain vault match, then Rampart reclassify (§6)   │
+ │     3. inject placeholder instructions + redacted audio context (§9)    │
+ │   RESPONSE leg (model → runtime):                                       │
+ │     4. parse action; resolve placeholders in executed fields (§8.4);    │
+ │        gated classes → consult MEDIATOR; route speak-actions to TTS     │
+ └───┬───────────────────────────────┬───────────────────────────┬─────────┘
+     ▼                               ▼ (deterministic trigger)     ▼ (audio-out)
+ Overshoot                    MEDIATOR (OpenShell sandbox,     Local Gradium TTS
+ (Hcompany/Holo3-35B-A3B)     local model, zero egress)        → user's speakers
 ```
 
-**Why a proxy and not "just change the request":** the closed `hai-agent-runtime` binary is what
-builds and sends the request. We cannot edit that code, so there is no point where the request
-exists as our own object to modify. The **only** knob the binary exposes is **where** it sends
-(its base URL). Pointing that at a local proxy is therefore the only way to see and rewrite the
-traffic. OpenAI-compatibility makes the proxy easy to write (we know the schema); it does not
-remove the need for it. The same reasoning applies to the response: actions flow back into the
-closed binary to be executed, so placeholder resolution must also happen in the proxy, in transit.
+**Why a proxy and not "just change the request":** the closed `hai-agent-runtime` builds and sends
+the request; we cannot edit that code, so the request never exists as our own object to modify. The
+**only** knob is **where** it sends (its base URL). Pointing that at a local proxy is the only way
+to see and rewrite the traffic. OpenAI-compatibility makes the proxy easy to write; it does not
+remove the need for it. Actions flow back into the closed binary to be executed, so placeholder
+resolution must also happen in the proxy, in transit. The proxy is likewise the only per-step seam
+for injecting live audio context and for routing speak-actions to local TTS.
 
 ---
 
-## 5. The PII scrubber interface (stub for this component)
+## 5. The PII detector interface (stub for this component)
 
-The real detector is a separate component. Build this component against a **stub** with a stable
-contract, so the pipeline is testable now and the real detector drops in later.
+The real detector is a separate component (and is being GPU/CoreML-accelerated elsewhere). Build
+against a **stub** with a stable contract so the pipeline is testable now.
 
 **`redact(frame)` → `{ redactedFrame, spans }`**
-- `frame`: raw RGBA image (the screenshot pulled from the request).
+- `frame`: the screenshot pulled from the request.
 - `redactedFrame`: a **new** image with placeholder chips painted over PII values; pixels outside
   the covered regions are byte-identical to the input.
-- `spans`: list of `{ class, value, boundingBox, placeholder }` for each detected PII value.
+- `spans`: list of `{ class, value, boundingBox, placeholder? }` for each detected PII value.
 
-**Stub behavior for testing:** deterministic and configurable — e.g. detect a hardcoded string or
-a fixed screen region, paint a chip, and return one span. It must let tests exercise the full
-store→resolve loop without a real detector. Provide a "detect nothing" mode and a "detect fixture
-X" mode.
+**CHANGED — the detector must emit recognized `value`s to the vault, locally.** Placeholder
+stability, resolution, *and* history scrub are all impossible if the detector returns geometry
+only. (The current frozen `plva-v2-baseline` is geometry-only — good enough for Step 4 obscuring,
+**not** for Steps 5+.) The vault — not the detector — **owns placeholder assignment** for stability
+(§6), so the detector emits `class/value/boundingBox` and the painter renders the vault's
+placeholder. Values never leave the device and never appear in logs.
 
-The proxy depends only on this interface, never on the detector's internals.
+**Stub behavior for testing:** deterministic and configurable — detect a hardcoded string / fixed
+region, paint a chip, return one span with its value. Provide a "detect nothing" mode and a "detect
+fixture X" mode so tests can exercise the full store→resolve→scrub loop without a real detector.
+
+The proxy depends only on this interface, never on the detector's internals or its acceleration
+backend.
 
 ---
 
-## 6. The vault (store/resolve loop)
+## 6. The vault and per-class safety policy (CHANGED)
 
-Private, in-memory, session-scoped. Two operations:
+Private, in-memory, session-scoped. Holds placeholder↔value maps plus per-class policy.
 
-- **Store (request leg):** for each detected span, canonicalize the value (normalize whitespace,
-  Unicode NFKC; keep credentials exact/case-sensitive), then look it up. Same value → **same**
-  placeholder (stability). New value → next per-class counter → new placeholder. Store
-  `placeholder → value` only for **reversible** classes.
-- **Resolve (response leg):** given a placeholder, return its value **only if** it was issued this
-  session, is a reversible class, and passes host policy.
+**Store (request leg):** for each detected span, canonicalize the value (normalize whitespace,
+Unicode NFKC; keep credentials exact/case-sensitive), then look it up. Same value → **same**
+placeholder; new value → next per-class counter → new placeholder, namespaced with a per-session
+nonce (`EMAIL_1_a3f9`) so screen/adversarial text cannot forge a valid token.
+> **CHANGED — duplicates tolerated for now.** Ideal is one stable placeholder per value across all
+> frames. For this build it is acceptable for the same value to receive different placeholders
+> across frames if stable assignment is hard; the only cost is possible multi-step incoherence
+> ("I typed `EMAIL_1`, now it's `EMAIL_2`"). Revisit for stability later.
 
-Rules:
-- **Secret-tier classes** (`PASSWORD`, `CVC`, `CARD_NUMBER`, `PRIVATE_KEY`) are **masked, never
-  stored, never resolvable.**
-- **Credential classes** (`API_KEY`, `AUTH_TOKEN`) may get a placeholder but resolution is
-  **denied** unless the host explicitly allows that class/destination.
-- Different values must **never** alias to the same placeholder; the same value must always map to
-  the same placeholder within a session.
+**Resolve (response leg):** given a placeholder, return its value **only if** it was issued this
+session and its class's safety level permits, possibly after mediator approval (below).
+
+**Per-class safety levels (NEW — replaces the fixed secret-tier list).** Each PII class maps to a
+**configurable** level (defaults shipped, user-overridable via the app, §9 Step 6):
+- **`hide_use`** — painted as a placeholder and freely resolvable. "Can use but hide." (Default for
+  low-sensitivity classes: `EMAIL`, `PHONE`, `NAME`, `ADDRESS`.)
+- **`approval`** — painted as a placeholder, but resolution is **denied until the mediator approves**
+  against **user-defined criteria** (§7). "Use only with LLM approval." (Default for `API_KEY`,
+  `AUTH_TOKEN`.)
+- **`blocked`** — masked, **never stored, never resolvable**; the model gets an opaque mask, not a
+  usable placeholder. "Cannot use." (Default for `PASSWORD`, `CVC`, `CARD_NUMBER`, `PRIVATE_KEY`.)
+- **Additional levels to consider:** `voice_approval` (user approves by voice, §9 Step 9);
+  `destination_scoped` (resolvable only toward an allowed destination); `out_of_band` (host fills a
+  secret directly from the vault; the model never even receives a placeholder — the safe path for
+  passwords, and the natural home for the voice secret-entry channel).
+
+**Invariants:**
+- Different values must **never** alias to the same placeholder (duplicates go the *other* way —
+  one value may get several placeholders for now; never one placeholder for two values).
 - **No persistence** anywhere (disk, IndexedDB, localStorage, logs, telemetry). Cleared on
   `dispose()`.
+- A denied/blocked resolution **fails closed**: the action is not executed with a real value; the
+  proxy may inform the CUA it was denied so it can adapt.
 
 ---
 
-## 7. NemoClaw / OpenShell integration
+## 7. NemoClaw / OpenShell and the mediator (CHANGED)
 
-We are **not** using OpenClaw as an orchestrator, so integration means **running under OpenShell
-for isolation and controlled network egress** — this is what makes "only the redacted frame
-leaves" an *infrastructure* guarantee, not just a code invariant.
+**Egress topology (resolved — see `docs/decisions/0001`).** OpenShell **cannot wrap the host
+runtime** (it only isolates processes it launches; no Linux `hai-agent-runtime` exists). So the
+"only redacted data leaves" guarantee is enforced by (a) the fail-closed proxy code and (b) a
+host-level packet-filter substitute on macOS, with OpenShell reserved for processes we *do* launch.
+Skills do **not** require NemoClaw (corrected — see §2).
 
-> **Open decision — resolve in Step 1 (pick one, document choice in `docs/decisions/`):**
-> - **(a) Egress-isolation (recommended to start):** the runtime drives the *host* desktop; the
->   PLVA proxy and all outbound model/web traffic are forced through OpenShell's restricted
->   network so the proxy is the only egress. Sandbox = the network boundary.
-> - **(b) Contained-desktop (stronger, more setup):** the CUA operates a desktop *inside* a
->   sandbox; screenshots and actions stay inside it; egress is controlled at the sandbox edge.
->   Stronger privacy but may fight HoloDesktop's "drives your real computer" design.
+**Primary NemoClaw role now = the mediator sandbox (NEW).** The mediator is an LLM the proxy
+**consults** when a deterministic flag trips (a resolution hits an `approval` class; a configurable
+risk condition fires). It returns `{decision: approve|deny|modify, steering?, scope?}`; the proxy
+enforces it. Control stays with the proxy — mediator, not orchestrator.
 
-> **Note:** HoloDesktop's built-in NemoClaw wiring (`holo install` → the MCP bridge) assumes an
-> **OpenClaw** sandbox with Holo exposed as a tool. We are **not** doing that. Treat wiring
-> HoloDesktop's egress under OpenShell without OpenClaw as a **spike** in Step 1, and record what
-> actually works.
+> **CRITICAL constraint.** A mediator that sees **cleartext** (real values / raw frame, needed for
+> real judgment) **must run a fully local model with zero network egress** — otherwise its own LLM
+> provider sees the secret and the leak reappears one layer up. Two allowed shapes:
+> - **local-model mediator** → may see cleartext; **no egress** (run in OpenShell, egress denied;
+>   or a local model on the host with a verified no-egress boundary);
+> - **remote-model mediator** → may see **only** redacted/placeholder context, never raw values.
+>
+> Build toward the local, zero-egress mediator so "approve a secret unlock" is actually safe.
+
+**Why OpenShell here (its genuine sweet spot):** it sandboxes a process *it launches*. Run the
+mediator in a sandbox with **deny-by-default egress** (nothing, for a local model); reach it from
+the proxy over `openshell forward service` (loopback-only gRPC); and use `openshell policy prove`
+to *verify* the "no egress" invariant rather than assert it. Optionally sandbox the proxy and the
+audio/TTS client the same way. **Caveat:** OpenShell is alpha and, if it cannot create its network
+namespace, **degrades to observation (does not enforce)** — verify enforcement (a deny-test from
+inside) before trusting it with cleartext.
+
+Fail-closed: if the mediator is unreachable or times out, **deny**.
 
 ---
 
 ## 8. Hard constraints (do not violate)
 
-1. **Fail closed.** If any stage fails, no request/response is forwarded and no raw frame ever
-   reaches the provider. There is no raw-frame fallback.
-2. **Redacted-only egress.** The provider must never receive an un-redacted screenshot or a vault
-   value through the proxy.
+1. **Fail closed.** If any stage fails, no request/response is forwarded and no raw frame or vault
+   value ever reaches the model/provider. There is no raw fallback.
+2. **Redacted-only egress *to the model*.** Overshoot must never receive an un-redacted screenshot,
+   a vault value, or un-scrubbed history. (Real values reaching a *local* executor or the user's
+   own destinations is expected — see the §1 threat model.)
 3. **New output buffer.** Redaction renders into a new image; input pixels are never mutated.
-4. **Resolution is narrow.** Placeholders are resolved **only** in the type-action text field —
-   never in prose, URLs, click targets, logs, or arbitrary JSON.
+4. **CHANGED — resolution scope is about leak-back, not destination.** Resolve placeholders in the
+   **executed action fields** (type text, URLs, click targets — wherever the user's action needs
+   the value). Do **not** resolve placeholders in the model's free-form **reasoning/thought text**:
+   that is not executed and would only re-expose the value into history on the next turn.
 5. **Privacy-safe logs.** Logs may contain class, placeholder, bounding box, backend, timings —
    **never** recognized text, real values, transcripts, or frames.
 6. **No persistence of session state.** Vault and any cache are memory-only and dropped on dispose.
-7. **Streaming-safe.** The proxy must handle **SSE / streamed** responses: buffer or incrementally
-   parse the tool call enough to resolve the action before forwarding. Never forward an
-   unresolved placeholder to the executor.
-8. **Model id is not hardcoded blindly.** Confirm the exact provider model-id string by querying
-   the provider's `/models` first (see Step 0).
+7. **Streaming-safe.** Handle **SSE / streamed** responses: buffer/parse enough to resolve the
+   action before forwarding. Never forward an unresolved placeholder to the executor. (Built §3.)
+8. **Model id is not hardcoded blindly.** Confirm the exact provider model-id via `/models` (§0).
+9. **NEW — history scrub is mandatory and load-bearing.** Because the runtime remembers the
+   *resolved* real value it executed, every outbound request's text history must be scrubbed:
+   **plain vault match first, then a Rampart semantic reclassify** as a backstop for reformatted or
+   never-vaulted PII (map hits back to the vault for a stable placeholder; fail-closed on unknown
+   PII). This is best-effort, not a proof (Rampart has finite recall) — treat it as the primary
+   residual risk and test it adversarially.
+10. **NEW — the outbound voice channel must not feed back.** Real values spoken by local TTS must
+    not be captured by audio-in (exclude our own output device / duck capture during playback) and
+    must not be rendered on-screen as captions (a caption re-enters the model via the next frame).
+11. **NEW — local acceleration stays fail-closed and offline.** A GPU/CoreML/WebGPU backend for any
+    local model must not change fail-closed behavior and must not add network egress; the frozen
+    baseline remains the correctness oracle.
 
 ---
 
-## 9. Build steps
+## 9. Build steps (priority order; status marked)
 
-Each step lists **Goal → Build → Verify**. Do not proceed past a failing Verify. After every step, pause to allow me to verify the outputs. Describe how to test the current step once done with a step.
+Each step lists **Goal → Build → Verify**. Do not proceed past a failing Verify. After each step,
+pause for operator verification and describe how to test it.
 
-### Step 0 — Setup and external-contract probe
-- **Goal:** clean repo, secrets handling, and confirmed external contracts before building.
-- **Build:** initialize the repo and `.env.example`; install HoloDesktop CLI; obtain keys for
-  Overshoot (and the fallback provider). Write a tiny throwaway probe (not committed with keys)
-  that: (a) GETs the provider `/models` list and confirms that
-  **`Hcompany/Holo3-35B-A3B`** is ready; (b)
-  sends one hardcoded screenshot as an OpenAI-format `chat/completions` request and records the
-  **exact response shape**, including whether actions come back as **tool calls** or text, and
-  whether responses are **streamed**.
-- **Verify:** you have written down (i) the exact model-id string, (ii) the action/response
-  schema, (iii) streaming yes/no. `.env` is git-ignored; `.env.example` is committed.
-- **VERIFY (critical):** confirm the runtime sends the **screenshot** through the configurable
-  base URL (point HoloDesktop at a logging stub and check the image appears in the request body).
-  If it does not, the interception proxy cannot see the frame — stop and report before continuing.
+### ✅ Step 0 — Setup and external-contract probe — **COMPLETE**
+Clean repo, secrets handling, confirmed contracts. `/models` confirmed `Hcompany/Holo3-35B-A3B`
+ready; response shape recorded (structured JSON action in `message.content`, `tool_calls` array,
+`structured_outputs` present, no native `tools`); streaming characterized. **Critical VERIFY
+passed:** the closed runtime sends its screenshot through the configurable base URL (proven against
+a loopback stub). Evidence in `Holo/verification/step-0-*`.
 
-### Step 1 — Functioning HoloDesktop agent under NemoClaw/OpenShell
-- **Goal:** HoloDesktop completes a simple terminal task, running under OpenShell isolation.
-- **Build:** get HoloDesktop running on the easiest working inference endpoint (Overshoot if not
-  much harder). Resolve the §7 **Open decision** and stand up the chosen OpenShell topology.
-  Confirm a basic task (e.g. "open a terminal and run a command") completes.
-- **Verify:** the agent finishes the task end-to-end; you can name exactly what runs inside
-  OpenShell and what its allowed egress is; the decision is recorded in `docs/decisions/`.
+### ✅ Step 1 — HoloDesktop under isolation — **BUILT; live run pending key**
+Pass-through proxy is the runtime's sole endpoint and sole provider egress. §7 egress decision
+resolved (ADR-0001). The one-command `run_step1.sh` closes the end-to-end run once the operator's
+Overshoot key is in `Holo/.env`. Live-frame streaming for that run is operator-authorized.
 
-### Step 2 — Move inference to Overshoot and measure
-- **Goal:** all inference goes to Overshoot on `Hcompany/Holo3-35B-A3B`; latency is known.
-- **Build:** set HoloDesktop's base URL / key to Overshoot using the id confirmed in Step 0.
-- **Verify:** the same task from Step 1 completes via Overshoot; you have recorded per-step and
-  end-to-end latency (p50/p95) for a fixed small task set.
+### ✅/⚙️ Step 2 — Overshoot inference + latency — **inference done; latency pending**
+The proxy targets Overshoot by default. Remaining: record per-step and end-to-end latency
+(p50/p95) for a fixed small task set from the proxy's privacy-safe timing logs.
 
-### Step 3 — Interception proxy (no redaction yet)
-- **Goal:** a local OpenAI-compatible proxy sits between the runtime and Overshoot and can apply
-  arbitrary modifications to both directions, transparently.
-- **Build:** implement the proxy; point HoloDesktop's base URL at it; forward to Overshoot.
-  Support streamed responses (constraint §8.7). Add a pass-through mode plus a **test hook** that
-  can mutate request and response (e.g. tag a header, no-op rewrite the action).
-- **Verify:** with the proxy in pass-through, the Step 2 task still completes unchanged. With the
-  test hook on, an injected request/response modification is observable and the task still runs.
-  Streamed responses work.
+### ✅ Step 3 — Interception proxy (no redaction) — **BUILT & verified**
+Loopback OpenAI-compatible proxy with a request/response mutation seam, SSE buffered→mutated→
+re-emitted, fail-closed. Verified with pass-through, the `test` hook, and a `banana` hook that
+rewrites every text the CUA types (a live proof of the response-leg action-rewrite seam that Step 5
+resolution reuses).
 
-### Step 4 — Plug in the scrubber + vault (the privacy core)
-- **Goal:** the proxy redacts the screenshot outbound and resolves placeholders inbound, using the
-  §5 stub scrubber and the §6 vault.
-- **Build:** request leg → call `redact(frame)`, replace the image with `redactedFrame`, store
-  spans in the vault, and scrub leaked values from message/text history. Response leg → parse the
-  action, resolve placeholders **only in type-text**, forward the rewritten action. Enforce all
-  §8 constraints and the §6 secret/credential rules.
-- **Verify (build fixtures):**
-  - With the stub set to "detect fixture X", the request forwarded to Overshoot contains the
-    **redacted** image and **no** real value (assert on captured request bodies).
-  - A model response containing `EMAIL_1` in a type action is resolved to the real value before
-    execution; the same placeholder in prose is **not** touched.
-  - Secret-tier fixtures are masked and their placeholders are **never** resolvable.
-  - After a value is "typed", the next request's text history no longer contains the raw value
-    (history scrub works).
-  - Every injected stage failure yields no forwarded request/response (fail-closed).
-  - No log line contains a real value, transcript, or frame.
+### ✅ Step 4 — Outbound obscuring (redaction) — **BUILT (accelerated); geometry-only**
+The proxy redacts every outbound screenshot through the detector and serves the obscured frames at
+a loopback `/viewer`; a persistent WebGPU/WASM worker keeps it warm (see Cross-cutting note).
+**Gap:** the frozen detector is geometry-only, so no values reach the vault yet — which is exactly
+what Step 5 needs.
 
-### Step 5 — (Optional) Gradium speech-to-text for computer audio
+---
+
+### 🔲 Step 5 — Vault + placeholder resolution + history scrub (the privacy core) — **HIGHEST PRIORITY**
+- **Goal:** the model works with placeholders it can reason about but never sees the real values;
+  actions resolve to real values in transit; history never re-exposes a resolved value.
+- **Build:**
+  - Detector emits `class/value/boundingBox` (§5); vault stores and assigns stable, nonce-namespaced
+    placeholders (§6); painter renders the vault's placeholder chips.
+  - **Teach the model** via proxy request-injection (preferred) or a native HoloDesktop skill:
+    "regions shown as «CLASS_N…» are real values you cannot see; to use one, emit its token
+    verbatim in an action; never guess the underlying value."
+  - **Response leg:** reuse the Step 3 seam to resolve placeholders in executed action fields only
+    (§8.4), conservatively matched (fail-closed on no confident match).
+  - **History scrub (§8.9):** plain vault match, then Rampart reclassify; fail-closed on unknown PII.
+- **Verify (fixtures):** forwarded request carries the redacted image and **no** real value; a
+  `type` action with `EMAIL_1` resolves to the real value before execution while the same token in
+  reasoning text is untouched; after a value is "typed," the next request's history no longer
+  contains it; every injected stage failure forwards nothing; no log carries a real value.
+- **VERIFY (empirical, do first):** confirm Holo3 actually honors placeholder instructions rather
+  than hallucinating the hidden value. If not, rethink before building the rest.
+
+### 🔲 Step 6 — Configurable per-class PII safety policy
+- **Goal:** the user chooses, per class, `hide_use` / `approval` / `blocked` (and later variants).
+- **Build:** a policy config (file + app UI, §9 Step 11) with sensible defaults (§6); the vault's
+  resolve gate enforces the level; `blocked` never stores; `approval` defers to Step 7.
+- **Verify:** flipping a class between levels changes behavior as specified; `blocked` values are
+  never resolvable and never stored; defaults protect secrets out of the box.
+
+### 🔲 Step 7 — LLM mediator (OpenShell) for approvals + steering
+- **Goal:** `approval`-class resolutions and configurable risk flags are decided by a mediator
+  against user-defined criteria, safely.
+- **Build:** proxy consults the mediator on a tripped flag (synchronous gate for approvals; async
+  advisor for steering); verdict `{approve|deny|modify, steering?, scope?}`; fail-closed on
+  unreachable/timeout. Mediator runs in an OpenShell sandbox — **local model, zero egress** if it
+  sees cleartext (§7) — reached via `forward service`; verify enforcement with `policy prove`.
+- **Verify:** an `approval` value resolves only after approval and only within granted scope; a
+  denied request blocks with no real value used; mediator sandbox has provably no egress; with the
+  mediator down, everything gated fails closed.
+
+### 🔲 Step 8 — SPEAK-mechanism spike (prerequisite for voice-read)
+- **Goal:** determine empirically *how*, if at all, Holo3 can signal "read this aloud" — before
+  building voice-read (Step 9). One instrumented run also captures Holo3's `structured_outputs`
+  grammar and settles the Step 5 placeholder-cooperation question, so do it once and reuse.
+- **Build:** a Step-0-style capture (non-sensitive: record the action/grammar schema, never frames
+  or values), then with prompts like *"read me the most upvoted comment on this thread"* test the
+  **top 3 candidate mechanisms**, ranked, recording for each whether the grammar permits it and
+  whether the model actually emits it:
+  1. **Structured SPEAK (text payload).** Teach the model to emit a SPEAK carrying the text to
+     speak (placeholders allowed for embedded PII). Tests whether `structured_outputs` permits a
+     novel action/field at all, and whether the model complies and reproduces the text. Weakness:
+     long-text transcription fidelity.
+  2. **Point-and-flag (SPEAK-by-reference).** Teach the model to indicate a screen location
+     (coordinates / region / DOM element) plus a "read here" flag — reusing an existing
+     coordinate-bearing action shape where possible — and have local DOM (`browser_exec get_text`)
+     or original-frame OCR do the actual reading. Tests whether the model can reliably point at the
+     intended element ("most upvoted comment") and signal read-intent in a proxy-parseable form.
+     Strength: exact text, no length limit, model emits no content.
+  3. **Free-text marker in native output.** The model embeds a recognizable marker
+     (e.g. `⟦SPEAK⟧…⟦/SPEAK⟧`) in a free-text field it already emits (thought/answer), which the
+     proxy scans. The loosest-coupling fallback: tests whether *any* smuggled convention survives
+     the grammar and is actually used.
+- **Verify:** a recorded yes/no per option on (a) grammar-permitted and (b) model-complies, the
+  captured schema, and a recommendation of which mechanism Step 9 builds — plus the fallback
+  (app/user-triggered read: the model or user selects a region, the app extracts+speaks locally) if
+  none work model-side. Nothing sensitive is recorded.
+
+### 🔲 Step 9 — Voice-read out: local Gradium TTS + placeholder resolution
+- **Goal:** the CUA can read parts of the screen aloud to the user, **including complex,
+  reasoning-selected content and PII**, without any real value reaching the model or Gradium's cloud.
+- **Build:** implement the mechanism chosen in Step 8 behind one **SPEAK contract** that carries
+  *either* inline `text` (verbatim, placeholders allowed — resolved via the vault) *or* a `ref`
+  (region / DOM element) that local `browser_exec get_text` or original-frame OCR reads exactly.
+  The response hook resolves/extracts and hands the real text to a **local** Gradium TTS client
+  (fail-closed, offline-verified), returning a benign no-op to the runtime (it has no speech
+  executor). For the `ref` path, intercept the tool *result* so extracted text goes to TTS, never
+  back into the model's context. Enforce the anti-feedback rule (§8.10). Ship the inline-`text`
+  shape first (stub TTS → real model), then add `ref` for fidelity.
+- **Verify:** "read the most upvoted comment" voices the correct text locally; a `text` SPEAK with
+  `EMAIL_1` voices the real email; the real value / extracted text appears in **no** request to
+  Overshoot and **no** Gradium cloud call; TTS output is not recaptured by audio-in.
+
+### 🔲 Step 10 — Spoken prompt input (Gradium STT) — **LOWER PRIORITY**
+- **Goal:** the user can *speak* the initial/continuing task prompt instead of typing it.
+- **Build:** mic capture → Gradium STT → scrub (any PII in the spoken prompt goes through the vault
+  before reaching the model) → hand to the app/runtime as the task. A local intent classifier
+  routes utterances: app-control (local only), CUA-steering (scrubbed→injected), mediator-approval
+  (→ Step 7).
+- **Verify:** a spoken prompt runs the task identically to the typed prompt; spoken PII is
+  placeholdered before the model sees it; "approve"-type utterances reach the mediator, not Overshoot.
+
+### 🔲 Step 11 — The app (user-facing wrapper)
+- **Goal:** one app to enter a typed prompt (or spoken, Step 10), configure per-class safety levels
+  (Step 6), toggle voice-read (Step 9), and watch the `/viewer`.
+- **Build:** thin UI over the proxy + runtime; safety-policy editor; run controls; the obscured-frame
+  viewer; audio toggles. No secret, real value, transcript, or frame is persisted or logged.
+- **Verify:** a non-technical run works end-to-end from the app; safety-level changes take effect;
+  the viewer shows exactly what the model sees; nothing sensitive is written to disk.
+
+### 🔲 Step 12 — Audio-in context: Gradium STT (loopback) → scrub → inject — **LOWER PRIORITY**
 - **Goal:** live computer audio becomes redacted text context the CUA can reason with.
-- **Build:** capture system/loopback audio (OS-specific — the fiddly part), stream to Gradium STT
-  (WebSocket), and inject **finalized** transcript segments into **each step's request** via the
-  proxy (the runtime owns the loop, so the initial task string cannot carry mid-task audio; the
-  proxy is the per-step injection seam). Run every transcript segment through the **same** text
-  scrubber + vault before injection, sharing placeholders with the screen.
-- **Verify:** a spoken value mid-task appears to the model only as a placeholder (never raw) and is
-  resolvable exactly like an on-screen value; with audio disabled, behavior is unchanged.
+- **Build:** capture system/loopback audio (OS-specific — the fiddly part; macOS needs a virtual
+  device); stream to Gradium STT (WebSocket); take **finalized** segments; run each through the
+  **same** vault + Rampart scrub (shared placeholders with the screen); inject via the proxy
+  request seam with a de-dupe cursor. Optionally sandbox the Gradium client (egress only to
+  Gradium). Note the trusted-boundary assumption: Gradium's cloud hears pre-redaction audio.
+- **Verify:** a spoken value appears to the model only as a placeholder and resolves like an
+  on-screen value; with audio disabled, behavior is unchanged.
+
+---
+
+**Cross-cutting — local-model acceleration (separate agent, keep in mind).** The redaction detector
+is being sped up with a **persistent warm worker**: the visual model runs on **WebGPU** where
+available, OCR runs concurrently on a separate WASM runtime, sessions stay warm during a CUA burst
+and release after idle, and exact repeated frames hit a bounded redacted-output-only memory cache.
+Apple **CoreML** execution is part of the same effort. **Implications for anyone continuing this
+work:** (1) local models (detector now; local TTS in Step 9; a local mediator model in Step 7) must
+sit behind a **pluggable client** with `auto|webgpu|wasm|coreml` backends — never hardcode one;
+(2) the frozen baseline stays the **correctness oracle**; (3) acceleration must not weaken
+fail-closed behavior or add egress (§8.11); (4) the accelerated worker source lives in
+`Holo/redactor-worker/` and its Python client in `Holo/src/plva_proxy/redactor.py`
+(`AcceleratedRedactor`).
 
 ---
 
 ## 10. Definition of done (this component)
 
-- HoloDesktop runs `Hcompany/Holo3-35B-A3B` via Overshoot under OpenShell isolation.
-- The proxy intercepts both directions, redacts outbound frames, resolves inbound actions, and
-  handles streaming.
-- All Step 4 fixtures pass; every §8 constraint has a direct test.
+- HoloDesktop runs `Hcompany/Holo3-35B-A3B` via Overshoot, with the proxy as sole provider egress.
+- The proxy intercepts both directions, redacts outbound frames, **resolves inbound placeholders in
+  executed fields**, scrubs history (plain + Rampart), and handles streaming.
+- Per-class **safety levels** are configurable; `blocked` classes are never resolvable; `approval`
+  classes resolve only via the **mediator**, which runs local-and-zero-egress when it sees cleartext.
+- **Voice-read** speaks real values locally with none reaching the model or Gradium's cloud; audio-in
+  context is placeholdered before the model; the app runs a task from a typed (or spoken) prompt.
+- Every §8 constraint has a direct test; the history-scrub weak point is tested adversarially.
 - No key, real value, transcript, or frame is ever committed or logged.
-- The scrubber remains a clean plug-in seam (real detector can replace the stub with no proxy
-  changes).
+- The detector remains a clean plug-in seam (real, accelerated detector replaces the stub with no
+  proxy changes), and all local models stay behind pluggable, fail-closed, offline clients.
