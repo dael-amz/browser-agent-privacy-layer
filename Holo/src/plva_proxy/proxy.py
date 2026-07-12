@@ -17,11 +17,17 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
+import functools
+import hashlib
 import io
 import json
 import logging
 import os
+import shutil
+import threading
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -31,10 +37,12 @@ from typing import Any, Final
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from PIL import Image
+from starlette.concurrency import run_in_threadpool
 
 from plva_proxy.contract_probe import API_BASE_URL
+from plva_proxy.redactor import PROFILES, RedactorConfig, redact_png
 from plva_proxy.runtime_capture import LOOPBACK_HOST
 
 DEFAULT_PORT: Final = 18081
@@ -147,6 +155,160 @@ def image_replacement_hook(image_path: Path) -> RequestHook:
         return rewritten, headers
 
     return replace
+
+
+class FrameStore:
+    """Memory-only ring buffer of the redacted frames sent upstream.
+
+    Feeds the loopback operator viewer. Never persisted anywhere; dropped
+    with the process (§8.6). Holds only post-redaction pixels — exactly what
+    the model sees.
+    """
+
+    def __init__(self, capacity: int = 8) -> None:
+        self._lock = threading.Lock()
+        self._frames: deque[bytes] = deque(maxlen=capacity)
+        self._total = 0
+        self._latest_sha12 = ""
+        self._latest_at = 0
+
+    def add(self, png: bytes) -> None:
+        with self._lock:
+            self._frames.append(png)
+            self._total += 1
+            self._latest_sha12 = hashlib.sha256(png).hexdigest()[:12]
+            self._latest_at = int(time.time())
+
+    def latest(self) -> bytes | None:
+        with self._lock:
+            return self._frames[-1] if self._frames else None
+
+    def stats(self) -> dict[str, int | str]:
+        with self._lock:
+            return {
+                "frames_seen": self._total,
+                "buffered": len(self._frames),
+                "latest_sha12": self._latest_sha12,
+                "latest_at": self._latest_at,
+            }
+
+
+_VIEWER_HTML: Final = """<!doctype html>
+<html><head><title>PLVA — what the model sees</title><style>
+body{background:#111;color:#ddd;font:14px system-ui;margin:2rem;text-align:center}
+img{max-width:96vw;max-height:80vh;border:1px solid #444;margin-top:1rem}
+#meta{color:#8b8}
+</style></head><body>
+<h2>PLVA viewer — redacted frames the model sees</h2>
+<p id="meta">waiting for the first redacted frame…</p>
+<img id="frame" alt="">
+<script>
+let lastSha = '';
+async function tick(){
+  try{
+    const s = await fetch('/viewer/stats'); const st = await s.json();
+    if(st.frames_seen > 0){
+      const at = st.latest_at ? new Date(st.latest_at * 1000).toLocaleTimeString() : '';
+      document.getElementById('meta').textContent =
+        'frame #' + st.frames_seen + ' · sha ' + st.latest_sha12 + ' · at ' + at;
+      if(st.latest_sha12 !== lastSha){
+        lastSha = st.latest_sha12;
+        const r = await fetch('/viewer/frame?t=' + Date.now());
+        if(r.ok){
+          const img = document.getElementById('frame');
+          const old = img.src;
+          img.src = URL.createObjectURL(await r.blob());
+          if(old) URL.revokeObjectURL(old);
+        }
+      }
+    }
+  }catch(e){}
+  setTimeout(tick, 1000);
+}
+tick();
+</script></body></html>
+"""
+
+
+def _to_png(image_bytes: bytes) -> bytes:
+    """Return the image as PNG bytes, converting only when necessary."""
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            if (image.format or "") == "PNG":
+                return image_bytes
+            buffer = io.BytesIO()
+            image.convert("RGB").save(buffer, format="PNG")
+            return buffer.getvalue()
+    except (OSError, ValueError) as exc:
+        raise HookError("screenshot bytes are not a decodable image") from exc
+
+
+def _redact_data_url(
+    image_url: Any, redact: Callable[[bytes], bytes], store: FrameStore | None
+) -> str:
+    url = image_url.get("url") if isinstance(image_url, dict) else image_url
+    if not isinstance(url, str):
+        raise HookError("screenshot has no URL")
+    header, separator, encoded = url.partition(",")
+    if not separator or not header.startswith("data:") or not header.endswith(";base64"):
+        raise HookError("screenshot is not an inline base64 data URL")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HookError("screenshot base64 is invalid") from exc
+    try:
+        redacted = redact(_to_png(raw))
+    except HookError:
+        raise
+    except Exception as exc:
+        # Whatever went wrong in the redactor, the raw frame must not leave.
+        raise HookError("frame redaction failed") from exc
+    if store is not None:
+        store.add(redacted)
+    _LOGGER.info(
+        "frame in=%s (%d bytes) out=%s (%d bytes)",
+        hashlib.sha256(raw).hexdigest()[:12],
+        len(raw),
+        hashlib.sha256(redacted).hexdigest()[:12],
+        len(redacted),
+    )
+    return "data:image/png;base64," + base64.b64encode(redacted).decode("ascii")
+
+
+def frame_redaction_hook(
+    redact: Callable[[bytes], bytes], store: FrameStore | None = None
+) -> RequestHook:
+    """Build a request hook that redacts every outbound screenshot (§8.2).
+
+    Each screenshot is decoded, converted to PNG when needed, run through
+    ``redact``, and swapped for the redacted PNG (a copy — input pixels are
+    never mutated, §8.3). Requests without a screenshot pass through
+    untouched; any redaction failure raises so no raw frame can ever leave.
+    """
+
+    def apply(
+        document: dict[str, Any], headers: dict[str, str]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        rewritten: dict[str, Any] = json.loads(json.dumps(document))
+        redacted = 0
+        for message in rewritten.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    part["image_url"] = {
+                        "url": _redact_data_url(part.get("image_url"), redact, store)
+                    }
+                    redacted += 1
+        if redacted:
+            _LOGGER.info("redaction hook processed %d screenshot(s)", redacted)
+        return rewritten, headers
+
+    return apply
 
 
 def _chain_request_hooks(
@@ -288,6 +450,7 @@ def create_app(
     config: ProxyConfig,
     *,
     hooks: Hooks | None = None,
+    frame_store: FrameStore | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
     """Create the loopback relay application around one upstream client."""
@@ -322,7 +485,9 @@ def create_app(
                 document = json.loads(body)
                 if not isinstance(document, dict):
                     raise HookError("request body is not a JSON object")
-                document, headers = request_hook(document, headers)
+                # Threadpool keeps the loop responsive while slow hooks
+                # (e.g. frame redaction) work on the request.
+                document, headers = await run_in_threadpool(request_hook, document, headers)
                 body = json.dumps(document, separators=(",", ":")).encode()
             except (HookError, ValueError) as exc:
                 _LOGGER.warning("request hook failed closed: %s", type(exc).__name__)
@@ -407,7 +572,29 @@ def create_app(
     async def chat_completions(request: Request) -> Response:
         return await _relay(request, "POST", "/chat/completions", use_hooks=True)
 
+    if frame_store is not None:
+        add_viewer_routes(app, frame_store)
+
     return app
+
+
+def add_viewer_routes(app: FastAPI, store: FrameStore) -> None:
+    """Attach the loopback-only obscured-frame viewer to an application."""
+
+    @app.get("/viewer")
+    async def viewer_page() -> HTMLResponse:
+        return HTMLResponse(_VIEWER_HTML)
+
+    @app.get("/viewer/frame")
+    async def viewer_frame() -> Response:
+        png = store.latest()
+        if png is None:
+            raise HTTPException(status_code=404, detail="no redacted frame yet")
+        return Response(content=png, media_type="image/png", headers={"cache-control": "no-store"})
+
+    @app.get("/viewer/stats")
+    async def viewer_stats() -> dict[str, int | str]:
+        return store.stats()
 
 
 def _env_file_value(path: Path, key: str) -> str | None:
@@ -447,6 +634,19 @@ def main() -> None:
         help="replace every outbound screenshot with this static PNG/JPEG/WebP "
         "(fails closed if a request has no screenshot)",
     )
+    parser.add_argument(
+        "--redact",
+        type=Path,
+        default=None,
+        help="redact every outbound screenshot through this plva-v2-baseline "
+        "directory (or its bin/plva-v2.mjs); enables the /viewer page",
+    )
+    parser.add_argument(
+        "--redact-profile",
+        choices=PROFILES,
+        default="high-recall",
+        help="detector profile for --redact",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
@@ -462,19 +662,38 @@ def main() -> None:
             image_hook = image_replacement_hook(args.hook_image)
         except (OSError, ValueError) as exc:
             parser.error(f"--hook-image is unusable: {exc}")
-    hooks = TEST_HOOKS if args.hook == "test" else None
-    if image_hook is not None:
-        prior = hooks if hooks is not None else Hooks()
-        hooks = Hooks(
-            on_request=_chain_request_hooks(prior.on_request, image_hook),
-            on_response=prior.on_response,
+
+    redact_hook: RequestHook | None = None
+    frame_store: FrameStore | None = None
+    if args.redact is not None:
+        cli_path = args.redact / "bin" / "plva-v2.mjs" if args.redact.is_dir() else args.redact
+        if not cli_path.is_file():
+            parser.error(f"--redact CLI not found: {cli_path}")
+        if shutil.which("node") is None:
+            parser.error("--redact requires node on PATH")
+        frame_store = FrameStore()
+        redactor_config = RedactorConfig(cli_path=cli_path, profile=args.redact_profile)
+        redact_hook = frame_redaction_hook(
+            functools.partial(redact_png, redactor_config), frame_store
         )
 
+    hooks = TEST_HOOKS if args.hook == "test" else None
+    for extra_hook in (image_hook, redact_hook):
+        if extra_hook is not None:
+            prior = hooks if hooks is not None else Hooks()
+            hooks = Hooks(
+                on_request=_chain_request_hooks(prior.on_request, extra_hook),
+                on_response=prior.on_response,
+            )
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    if frame_store is not None:
+        _LOGGER.info("viewer: http://127.0.0.1:%d/viewer", args.port)
     uvicorn.run(
         create_app(
             ProxyConfig(upstream_base_url=args.upstream, api_key=api_key),
             hooks=hooks,
+            frame_store=frame_store,
         ),
         host=LOOPBACK_HOST,
         port=args.port,

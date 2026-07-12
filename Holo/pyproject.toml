@@ -12,6 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
+plva-live = "plva_proxy.live:main"
 plva-probe = "plva_proxy.contract_probe:main"
 plva-proxy = "plva_proxy.proxy:main"
 plva-runtime-capture = "plva_proxy.runtime_capture:main"

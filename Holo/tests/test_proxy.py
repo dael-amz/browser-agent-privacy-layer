@@ -245,10 +245,11 @@ def test_main_runs_uvicorn_on_loopback_with_env_file_key(
         config: ProxyConfig,
         *,
         hooks: proxy.Hooks | None = None,
+        frame_store: proxy.FrameStore | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> FastAPI:
         configs.append(config)
-        return real_create_app(config, hooks=hooks, transport=transport)
+        return real_create_app(config, hooks=hooks, frame_store=frame_store, transport=transport)
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     monkeypatch.setattr(proxy, "create_app", spy_create_app)

@@ -16,7 +16,8 @@ Hackathon/
 └── Holo/                                Active run (renamed from Codex_RUn on 2026-07-11)
     ├── PROJECT_MAP.md                   This living directory and status guide
     ├── README.md                        Active project overview and safety warning
-    ├── run_step1.sh                     One-command Step 1 run (proxy + preflight + task + cleanup)
+    ├── run_step1.sh                     One-command live run (proxy + preflight + task + cleanup)
+    ├── plva-v2-baseline/                Frozen v2 detector harness (operator-supplied, AGPL, dev-only)
     ├── pyproject.toml                   Package metadata, dependencies, commands, and quality gates
     ├── uv.lock                          Exact reproducible Python dependency lock
     ├── .python-version                  Required Python version for local tooling
@@ -26,12 +27,15 @@ Hackathon/
     │   └── plva_proxy/
     │       ├── __init__.py              Python package marker
     │       ├── contract_probe.py        Privacy-safe Overshoot model/JSON/SSE contract probe
-    │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks (fail-closed, SSE-safe)
+    │       ├── live.py                  Continuous local capture→redact→viewer loop (no upstream)
+    │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks + viewer (fail-closed, SSE-safe)
+    │       ├── redactor.py              Subprocess wrapper around the frozen plva-v2 CLI (fail-closed)
     │       └── runtime_capture.py       Loopback-only Holo screenshot-transport capture stub (+ /health)
     ├── tests/
     │   ├── test_contract_probe.py       Provider probe, failure, CLI, and safe-output tests
     │   ├── test_proxy.py                Relay fidelity, credential, SSE, fail-closed, and log-hygiene tests
     │   ├── test_proxy_hooks.py          Step 3 hook seam: mutation, SSE re-emit, and fail-closed tests
+    │   ├── test_redaction.py            Redaction hook, FrameStore/viewer, and redactor wrapper tests
     │   └── test_runtime_capture.py      Capture validation, JSON/SSE, health, privacy, and bind tests
     ├── docs/
     │   ├── decisions/
@@ -45,7 +49,8 @@ Hackathon/
         ├── step-0-runtime-capture.md    PASS: real runtime screenshot traversed the base URL
         ├── step-1-status.md             §7 decision recorded; resume notes: ready to run
         ├── step-1-runbook.md            One-pass instructions to close Step 1 once the key exists
-        └── step-3-status.md             Interception hooks built; local verify PASS, live verify pending
+        ├── step-3-status.md             Interception hooks built; local verify PASS, live verify pending
+        └── step-4-obscuring.md          Real obscuring via frozen v2 detector + /viewer; vault not built
 ```
 
 ## What each area is for
@@ -75,7 +80,12 @@ instruction): the proxy now exposes a request/response mutation hook seam (`--ho
 the blueprint's test hooks; default remains pass-through), with SSE responses buffered,
 reconstructed, mutated, and re-emitted under a response hook, and every hook/parse failure failing
 closed. Its live verify (the Step 1/2 task running unchanged through pass-through and hook modes)
-rides on the pending live run. Step 2 (Overshoot latency measurement) and Step 4 have not started.
+rides on the pending live run. **Step 4 is PARTIAL** (2026-07-11): real *obscuring* works — the
+operator-supplied frozen `plva-v2-baseline/` detector is wired into the request-hook seam
+(`--redact`, fail-closed, threadpooled) with a memory-only loopback `/viewer` showing the
+obscured frames the model sees — but the report is geometry-only, so the vault / placeholders /
+resolution / history-scrub half of Step 4 is not built. See `verification/step-4-obscuring.md`.
+Step 2 (Overshoot latency measurement) has not started.
 
 Completed evidence:
 
@@ -110,8 +120,9 @@ Active blockers / open items:
 
 | Command | Purpose |
 |---|---|
+| `plva-live` | Continuous local screen redaction demo: capture → redact → `http://127.0.0.1:18082/viewer`; no provider, no key. |
 | `plva-probe` | Run the live synthetic Overshoot contract probe when `API_KEY` is supplied. |
-| `plva-proxy` | Loopback interception proxy to Overshoot; reads `API_KEY` from env or `./.env`; `--hook test` enables the Step 3 test hooks, `--hook-image <path>` swaps every outbound screenshot for a static image (default: pass-through). |
+| `plva-proxy` | Loopback interception proxy to Overshoot; reads `API_KEY` from env or `./.env`; `--hook test` enables the Step 3 test hooks, `--hook-image <path>` swaps every outbound screenshot for a static image, `--redact plva-v2-baseline` obscures screenshots through the frozen v2 detector and serves them at `/viewer` (default: pass-through). |
 | `plva-runtime-capture` | Start the metadata-only capture stub on `127.0.0.1`; it never contacts a provider. |
 
 `plva-proxy` is the runtime's sole endpoint and the sole provider egress (Step 1/ADR-0001 role),

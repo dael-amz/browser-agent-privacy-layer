@@ -35,6 +35,8 @@ fi
 #    PLVA_HOOK=test enables the Step 3 test hooks for the hook-mode verify.
 #    PLVA_HOOK_IMAGE=/path/to.png replaces every outbound screenshot with that
 #    static image (no real desktop pixels egress; fails closed if no frame).
+#    PLVA_REDACT=1 redacts every outbound screenshot through plva-v2-baseline
+#    and serves the obscured frames at http://127.0.0.1:$PORT/viewer.
 PROXY_LOG=/tmp/plva-proxy-step1.log
 HOOK_ARGS=(--hook "${PLVA_HOOK:-none}")
 if [[ -n "${PLVA_HOOK_IMAGE:-}" ]]; then
@@ -43,6 +45,10 @@ if [[ -n "${PLVA_HOOK_IMAGE:-}" ]]; then
     exit 1
   fi
   HOOK_ARGS+=(--hook-image "$PLVA_HOOK_IMAGE")
+fi
+if [[ -n "${PLVA_REDACT:-}" ]]; then
+  HOOK_ARGS+=(--redact plva-v2-baseline)
+  echo "--- redaction ON; watch the obscured frames at http://127.0.0.1:$PORT/viewer"
 fi
 .venv/bin/plva-proxy --port "$PORT" "${HOOK_ARGS[@]}" >"$PROXY_LOG" 2>&1 &
 PROXY_PID=$!
