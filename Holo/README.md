@@ -62,6 +62,37 @@ The H Company preset uses `https://api.hcompany.ai/v1` and `holo3-1-35b-a3b`. Ov
 with `PLVA_MODEL` or either preset's URL with `PLVA_UPSTREAM` when testing another compatible
 deployment.
 
+## Audited CUA run
+
+Use audit mode when you want to prompt the real desktop agent and inspect every redacted image
+included in its model requests:
+
+```bash
+PLVA_PROVIDER=hcompany \
+PLVA_REDACT=1 \
+PLVA_REDACT_ENGINE=vision \
+PLVA_REDACT_LIFECYCLE=eager \
+PLVA_AUDIT=1 \
+./run_step1.sh "Open Terminal, run: echo plva-audit-ok, then report the output"
+```
+
+Write prompts as a concrete visible task with a success condition. Good prompts name the app,
+the exact action, and what evidence should be reported at the end. Avoid putting passwords,
+API keys, personal data, or other secrets in the prompt itself; the prompt is model input.
+
+Open `http://127.0.0.1:18081/viewer` during or after the task. It is a memory-only ledger of the
+redacted pixels sent in each upstream request, including frame number, SHA-256 prefix, mask count,
+redaction latency, delivery state, and upstream HTTP status. Select any buffered frame to inspect
+it. `http://127.0.0.1:18081/viewer/frames` exposes the same value-free metadata as JSON. Audit mode
+keeps the viewer alive after Holo exits; press Ctrl-C in the launch terminal to discard the buffer.
+Increase or reduce its in-memory ring with `PLVA_AUDIT_CAPACITY` (default `32`).
+
+The launch terminal is the privacy-safe event log: it reports task status, loopback-only runtime
+connections, request/response byte counts, HTTP statuses, and timings without bodies or pixels.
+Holo's frame-bearing run directory is created under `/tmp` and shredded before audit mode waits.
+Do not use `/viewer/findings` for a no-PII audit: that separate local diagnostic intentionally
+contains the latest cleartext OCR/vault candidates and is never loaded by the safe viewer.
+
 With the Vision engine, `run_step1.sh` enables the Step 5 privacy core by default. The same OCR
 finding supplies the recognized value and bounding box to the in-memory vault and to the visible
 `«CLASS_N_nonce»` chip. Executed action fields resolve locally; reasoning remains placeholdered;
@@ -96,8 +127,9 @@ skill. Disabling history scrub or resolution is unsafe with real data; use these
 synthetic screens. A manifest requires current-frame chips, so `PLVA_PRIVACY_CHIPS=0` also makes
 the manifest absent even when its own switch remains enabled.
 
-Watch exactly what the model receives at `http://127.0.0.1:18081/viewer`. The latest memory-only
-OCR candidates are at `/viewer/findings`, the local vault is at `/viewer/vault`, and privacy-safe
+Watch exactly what the model receives at `http://127.0.0.1:18081/viewer`. The buffered memory-only
+sent-frame history and delivery metadata are available there. The latest memory-only OCR
+candidates are at `/viewer/findings`, the local vault is at `/viewer/vault`, and privacy-safe
 history-filter counters are at `/viewer/filter`. The findings and vault endpoints contain
 sensitive cleartext and are never persisted or logged. `PLVA_VISION_MODE=cascade` is the default:
 it runs fast OCR over the frame and accurate OCR only over sensitive or uncertain regions.

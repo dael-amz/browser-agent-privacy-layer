@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -225,6 +226,36 @@ def test_request_hook_scrubs_history_and_injects_placeholder_instructions() -> N
         hook({}, {})
 
 
+def test_request_hook_merges_all_system_messages_for_hcompany_compatibility() -> None:
+    scrubber = HistoryScrubber(
+        SessionVault(nonce="a3f9"),
+        lambda texts: [{"sensitive": False, "values": []} for _ in texts],
+    )
+    document, _ = privacy_request_hook(scrubber)(
+        {
+            "messages": [
+                {"role": "system", "content": "Holo base prompt"},
+                {"role": "system", "content": "Additional policy"},
+                {"role": "user", "content": "Observe"},
+            ]
+        },
+        {},
+    )
+
+    system_messages = [
+        message for message in document["messages"] if message.get("role") == "system"
+    ]
+    assert len(system_messages) == 1
+    assert "Holo base prompt\n\nAdditional policy" in system_messages[0]["content"]
+    assert system_messages[0]["content"].count("[PLVA_PLACEHOLDERS_BEGIN]") == 1
+    assert PLACEHOLDER_INSTRUCTIONS in system_messages[0]["content"]
+    assert document["messages"][0] is system_messages[0]
+
+    repeated, _ = privacy_request_hook(scrubber)(document, {})
+    serialized = json.dumps(repeated)
+    assert serialized.count("[PLVA_PLACEHOLDERS_BEGIN]") == 1
+
+
 def test_request_hook_injects_only_current_manifest_and_removes_stale_teaching() -> None:
     scrubber = HistoryScrubber(
         SessionVault(nonce="a3f9"),
@@ -422,7 +453,7 @@ def test_response_resolves_only_executed_fields_not_reasoning(shape: str) -> Non
     vault = SessionVault(nonce="a3f9")
     token = vault.store("EMAIL", "alice@example.com")
     call = {"tool_name": "write", "content": token}
-    action = {"note": token, "thought": f"Use {token}"}
+    action: dict[str, Any] = {"note": token, "thought": f"Use {token}"}
     if shape == "singular":
         action["tool_call"] = call
     else:

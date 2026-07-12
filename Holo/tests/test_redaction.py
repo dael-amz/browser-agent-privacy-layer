@@ -115,7 +115,9 @@ async def test_redaction_hook_converts_jpeg_to_png_and_swaps_in_redacted_frame()
     jpeg_url = "data:image/jpeg;base64," + base64.b64encode(jpeg_bytes).decode("ascii")
     payload = image_chat_payload(jpeg_url)
 
-    async with make_proxy_client(httpx.ASGITransport(app=upstream_app), hooks=hooks) as client:
+    async with make_proxy_client(
+        httpx.ASGITransport(app=upstream_app), hooks=hooks, frame_store=store
+    ) as client:
         response = await client.post("/v1/chat/completions", json=payload)
 
     assert response.status_code == 200
@@ -130,6 +132,7 @@ async def test_redaction_hook_converts_jpeg_to_png_and_swaps_in_redacted_frame()
     expected_url = "data:image/png;base64," + base64.b64encode(redacted_png).decode("ascii")
     assert parts[1] == {"type": "image_url", "image_url": {"url": expected_url}}
     assert store.stats().items() >= {"frames_seen": 1, "buffered": 1}.items()
+    assert store.entries()[0].items() >= {"state": "sent", "upstream_status": 200}.items()
 
 
 async def test_redaction_hook_passes_imageless_requests_through_unchanged() -> None:
@@ -203,6 +206,36 @@ def test_frame_store_evicts_oldest_beyond_capacity_and_tracks_totals() -> None:
 
     assert store.stats().items() >= {"frames_seen": 4, "buffered": 3}.items()
     assert store.latest() == b"frame-3"
+    assert [entry["id"] for entry in store.entries()] == [2, 3, 4]
+
+
+def test_frame_store_tracks_delivery_without_exposing_findings_values() -> None:
+    store = FrameStore(capacity=3)
+    frame_id = store.add(
+        b"redacted",
+        {
+            "backend": "vision-cascade",
+            "counts": {"fused": 2},
+            "timings": {"workerTotalMs": 41.2},
+            "findings": [{"text": "must-not-enter-audit", "labels": ["EMAIL"]}],
+        },
+    )
+    assert store.entries()[0]["state"] == "prepared"
+
+    store.mark_sent((frame_id,), 200)
+    entry = store.entries()[0]
+    assert (
+        entry.items()
+        >= {
+            "id": frame_id,
+            "state": "sent",
+            "upstream_status": 200,
+            "regions": 2,
+            "ocr_findings": 1,
+            "total_ms": 41,
+        }.items()
+    )
+    assert "must-not-enter-audit" not in json.dumps(entry)
 
 
 # --- viewer endpoints ---
@@ -230,6 +263,14 @@ async def test_viewer_endpoints_serve_html_latest_frame_and_stats() -> None:
         assert frame.headers["cache-control"] == "no-store"
         assert frame.content == b"redacted-png-bytes"
 
+        frames = await client.get("/viewer/frames")
+        assert frames.headers["cache-control"] == "no-store"
+        frame_id = frames.json()["frames"][0]["id"]
+        selected = await client.get(f"/viewer/frame/{frame_id}")
+        assert selected.content == b"redacted-png-bytes"
+        missing = await client.get("/viewer/frame/999")
+        assert missing.status_code == 404
+
         stats_after = await client.get("/viewer/stats")
         assert stats_after.json().items() >= {"frames_seen": 1, "buffered": 1}.items()
 
@@ -253,12 +294,15 @@ async def test_viewer_exposes_memory_only_worker_findings_and_timings() -> None:
         stats = (await client.get("/viewer/stats")).json()
         response = await client.get("/viewer/findings")
 
-    assert stats.items() >= {
-        "backend": "vision-cascade",
-        "regions": 1,
-        "ocr_findings": 1,
-        "total_ms": 87,
-    }.items()
+    assert (
+        stats.items()
+        >= {
+            "backend": "vision-cascade",
+            "regions": 1,
+            "ocr_findings": 1,
+            "total_ms": 87,
+        }.items()
+    )
     assert response.json() == analysis
 
 

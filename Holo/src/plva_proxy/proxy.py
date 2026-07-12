@@ -65,6 +65,7 @@ from plva_proxy.redactor import (
 from plva_proxy.runtime_capture import LOOPBACK_HOST
 
 DEFAULT_PORT: Final = 18081
+FRAME_AUDIT_IDS_KEY: Final = "_plva_frame_audit_ids"
 _FORWARDED_REQUEST_HEADERS: Final = frozenset({"accept", "content-type"})
 _UPSTREAM_TIMEOUT: Final = httpx.Timeout(10.0, read=300.0, write=60.0, pool=10.0)
 
@@ -267,6 +268,18 @@ def image_replacement_hook(image_path: Path) -> RequestHook:
     return replace
 
 
+@dataclass(slots=True)
+class FrameRecord:
+    frame_id: int
+    png: bytes
+    sha12: str
+    created_at: int
+    analysis: dict[str, Any]
+    state: str = "prepared"
+    upstream_status: int | None = None
+    sent_at: int = 0
+
+
 class FrameStore:
     """Memory-only ring buffer of the redacted frames sent upstream.
 
@@ -275,85 +288,347 @@ class FrameStore:
     the model sees.
     """
 
-    def __init__(self, capacity: int = 8) -> None:
+    def __init__(self, capacity: int = 32) -> None:
+        if capacity < 1:
+            raise ValueError("frame store capacity must be positive")
         self._lock = threading.Lock()
-        self._frames: deque[bytes] = deque(maxlen=capacity)
+        self._capacity = capacity
+        self._frames: deque[FrameRecord] = deque(maxlen=capacity)
         self._total = 0
-        self._latest_sha12 = ""
-        self._latest_at = 0
-        self._analysis: dict[str, Any] = {}
 
-    def add(self, png: bytes, analysis: dict[str, Any] | None = None) -> None:
+    def add(self, png: bytes, analysis: dict[str, Any] | None = None) -> int:
         with self._lock:
-            self._frames.append(png)
             self._total += 1
-            self._latest_sha12 = hashlib.sha256(png).hexdigest()[:12]
-            self._latest_at = int(time.time())
-            self._analysis = copy.deepcopy(analysis) if analysis is not None else {}
+            record = FrameRecord(
+                frame_id=self._total,
+                png=png,
+                sha12=hashlib.sha256(png).hexdigest()[:12],
+                created_at=int(time.time()),
+                analysis=copy.deepcopy(analysis) if analysis is not None else {},
+            )
+            self._frames.append(record)
+            return record.frame_id
 
     def latest(self) -> bytes | None:
         with self._lock:
-            return self._frames[-1] if self._frames else None
+            return self._frames[-1].png if self._frames else None
+
+    def frame(self, frame_id: int) -> bytes | None:
+        with self._lock:
+            record = next((item for item in self._frames if item.frame_id == frame_id), None)
+            return record.png if record is not None else None
+
+    def mark_sent(self, frame_ids: tuple[int, ...], status_code: int) -> None:
+        now = int(time.time())
+        targets = set(frame_ids)
+        with self._lock:
+            for record in self._frames:
+                if record.frame_id in targets:
+                    record.state = "sent"
+                    record.upstream_status = status_code
+                    record.sent_at = now
+
+    def mark_failed(self, frame_ids: tuple[int, ...]) -> None:
+        targets = set(frame_ids)
+        with self._lock:
+            for record in self._frames:
+                if record.frame_id in targets:
+                    record.state = "failed"
+
+    def entries(self) -> list[dict[str, int | str | None]]:
+        with self._lock:
+            return [self._metadata(record) for record in self._frames]
 
     def findings(self) -> dict[str, Any]:
         with self._lock:
-            return copy.deepcopy(self._analysis)
+            return copy.deepcopy(self._frames[-1].analysis) if self._frames else {}
 
     def stats(self) -> dict[str, int | str]:
         with self._lock:
-            counts = self._analysis.get("counts")
-            timings = self._analysis.get("timings")
-            findings = self._analysis.get("findings")
-            duration = (
-                timings.get("workerTotalMs", timings.get("total_ms", 0))
-                if isinstance(timings, dict)
-                else 0
-            )
+            latest = self._frames[-1] if self._frames else None
+            metadata = self._metadata(latest) if latest is not None else {}
             return {
                 "frames_seen": self._total,
                 "buffered": len(self._frames),
-                "latest_sha12": self._latest_sha12,
-                "latest_at": self._latest_at,
-                "backend": str(self._analysis.get("backend", "")),
-                "regions": int(counts.get("fused", 0)) if isinstance(counts, dict) else 0,
-                "ocr_findings": len(findings) if isinstance(findings, list) else 0,
-                "total_ms": round(duration) if isinstance(duration, int | float) else 0,
+                "capacity": self._capacity,
+                "latest_sha12": str(metadata.get("sha12", "")),
+                "latest_at": int(metadata.get("created_at", 0)),
+                "backend": str(metadata.get("backend", "")),
+                "regions": int(metadata.get("regions", 0)),
+                "ocr_findings": int(metadata.get("ocr_findings", 0)),
+                "total_ms": int(metadata.get("total_ms", 0)),
+                "latest_state": str(metadata.get("state", "waiting")),
             }
+
+    @staticmethod
+    def _metadata(record: FrameRecord) -> dict[str, Any]:
+        counts = record.analysis.get("counts")
+        timings = record.analysis.get("timings")
+        findings = record.analysis.get("findings")
+        duration = (
+            timings.get("workerTotalMs", timings.get("total_ms", 0))
+            if isinstance(timings, dict)
+            else 0
+        )
+        return {
+            "id": record.frame_id,
+            "sha12": record.sha12,
+            "created_at": record.created_at,
+            "sent_at": record.sent_at,
+            "state": record.state,
+            "upstream_status": record.upstream_status,
+            "backend": str(record.analysis.get("backend", "")),
+            "regions": int(counts.get("fused", 0)) if isinstance(counts, dict) else 0,
+            "ocr_findings": len(findings) if isinstance(findings, list) else 0,
+            "total_ms": round(duration) if isinstance(duration, int | float) else 0,
+        }
+
+
+def _preview_text(document: dict[str, Any]) -> str:
+    """Short value-free-enough preview: the last user text, post-scrub."""
+
+    preview = ""
+    for message in document.get("messages") or []:
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            preview = content
+        elif isinstance(content, list):
+            texts = [
+                part.get("text")
+                for part in content
+                if isinstance(part, dict) and isinstance(part.get("text"), str)
+            ]
+            if texts:
+                preview = " ".join(texts)
+    return " ".join(preview.split())[:160]
+
+
+def _decode_data_url(url: Any) -> tuple[str, bytes] | None:
+    """Return (media_type, bytes) for an inline base64 data URL, else None."""
+
+    if not isinstance(url, str) or not url.startswith("data:"):
+        return None
+    header, separator, encoded = url.partition(",")
+    if not separator or not header.endswith(";base64"):
+        return None
+    media_type = header[len("data:") : -len(";base64")] or "application/octet-stream"
+    try:
+        return media_type, base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+@dataclass(slots=True)
+class CallRecord:
+    call_id: int
+    at: int
+    duration_ms: int
+    status: int | None
+    state: str
+    request: dict[str, Any]
+    response: dict[str, Any] | None
+    images: tuple[tuple[str, bytes], ...]
+
+
+class CallStore:
+    """Memory-only ring buffer of upstream model calls for the history viewer.
+
+    Each record holds the request exactly as it was sent upstream — after the
+    hook chain, so frames are redacted, history is scrubbed, and injected
+    system prompts are visible — and the completion exactly as the model
+    returned it, before placeholder resolution reinserts local values. Inline
+    screenshots are pulled out of the document and kept as bytes so the
+    viewer can render them without re-shipping base64 on every poll. Never
+    persisted anywhere; dropped with the process (§8.6).
+    """
+
+    def __init__(self, capacity: int = 32) -> None:
+        if capacity < 1:
+            raise ValueError("call store capacity must be positive")
+        self._lock = threading.Lock()
+        self._calls: deque[CallRecord] = deque(maxlen=capacity)
+        self._total = 0
+
+    def record(
+        self,
+        document: dict[str, Any],
+        *,
+        status: int | None,
+        response: dict[str, Any] | None,
+        duration_ms: int,
+        state: str,
+    ) -> int:
+        request: dict[str, Any] = json.loads(json.dumps(document))
+        images: list[tuple[str, bytes]] = []
+        for message in request.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if not isinstance(part, dict) or part.get("type") != "image_url":
+                    continue
+                image_url = part.get("image_url")
+                url = image_url.get("url") if isinstance(image_url, dict) else image_url
+                decoded = _decode_data_url(url)
+                if decoded is None:
+                    part["image_url"] = {"url": "(external image)"}
+                    continue
+                part["image_url"] = {"url": f"plva:image/{len(images)}"}
+                images.append(decoded)
+        with self._lock:
+            self._total += 1
+            self._calls.append(
+                CallRecord(
+                    call_id=self._total,
+                    at=int(time.time()),
+                    duration_ms=duration_ms,
+                    status=status,
+                    state=state,
+                    request=request,
+                    response=json.loads(json.dumps(response)) if response is not None else None,
+                    images=tuple(images),
+                )
+            )
+            return self._total
+
+    def entries(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [self._summary(record) for record in self._calls]
+
+    def full(self, call_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            record = self._find(call_id)
+            if record is None:
+                return None
+            return {
+                **self._summary(record),
+                "request": copy.deepcopy(record.request),
+                "response": copy.deepcopy(record.response),
+            }
+
+    def image(self, call_id: int, index: int) -> tuple[str, bytes] | None:
+        with self._lock:
+            record = self._find(call_id)
+            if record is None or not 0 <= index < len(record.images):
+                return None
+            return record.images[index]
+
+    def _find(self, call_id: int) -> CallRecord | None:
+        return next((item for item in self._calls if item.call_id == call_id), None)
+
+    @staticmethod
+    def _summary(record: CallRecord) -> dict[str, Any]:
+        messages = record.request.get("messages")
+        return {
+            "id": record.call_id,
+            "at": record.at,
+            "duration_ms": record.duration_ms,
+            "status": record.status,
+            "state": record.state,
+            "model": str(record.request.get("model", "")),
+            "messages": len(messages) if isinstance(messages, list) else 0,
+            "images": [media_type for media_type, _ in record.images],
+            "preview": _preview_text(record.request),
+        }
 
 
 _VIEWER_HTML: Final = """<!doctype html>
-<html><head><title>PLVA — what the model sees</title><style>
-body{background:#111;color:#ddd;font:14px system-ui;margin:2rem;text-align:center}
-img{max-width:96vw;max-height:80vh;border:1px solid #444;margin-top:1rem}
-#meta{color:#8b8}
-</style></head><body>
-<h2>PLVA viewer — redacted frames the model sees</h2>
+<html><head>
+<meta name="viewport" content="width=device-width">
+<title>PLVA — sent-frame audit</title>
+<style>
+:root {
+  color-scheme:dark; font:14px system-ui; background:#0d0f12; color:#e6e8eb;
+}
+* { box-sizing:border-box; }
+body { margin:0; display:grid; grid-template-columns:290px 1fr; min-height:100vh; }
+aside { border-right:1px solid #2b3038; padding:18px; overflow:auto; background:#12151a; }
+main { padding:22px; text-align:center; min-width:0; }
+h1 { font-size:18px; margin:0 0 8px; }
+p { color:#a7adb7; line-height:1.45; }
+#safe { color:#8ed4a6; font-size:12px; }
+#frames { display:grid; gap:8px; margin-top:18px; }
+button {
+  appearance:none; text-align:left; border:1px solid #343b45; background:#1a1f26;
+  color:#e6e8eb; border-radius:8px; padding:10px; cursor:pointer;
+}
+button:hover, button.active { border-color:#77c990; background:#202a25; }
+.sub { display:block; color:#9da5b0; font-size:11px; margin-top:4px; }
+#meta { color:#9fdaa9; min-height:22px; }
+img {
+  display:none; max-width:100%; max-height:82vh; border:1px solid #343b45;
+  background:#08090b;
+}
+#empty { margin-top:30vh; color:#7d8590; }
+@media(max-width:760px) {
+  body { display:block; }
+  aside { border-right:0; border-bottom:1px solid #2b3038; max-height:38vh; }
+}
+</style></head><body><aside>
+<h1>PLVA sent-frame audit</h1>
+<p id="safe">Memory-only. This page loads only redacted pixels and value-free metadata.</p>
+<p>Each row is one image included in an upstream request. <b>sent</b> means the provider
+returned an HTTP response; <b>prepared</b> means it never left the hook chain.</p>
+<div id="frames"></div>
+</aside><main>
 <p id="meta">waiting for the first redacted frame…</p>
-<img id="frame" alt="">
-<script>
-let lastSha = '';
-async function tick(){
-  try{
-    const s = await fetch('/viewer/stats'); const st = await s.json();
-    if(st.frames_seen > 0){
-      const at = st.latest_at ? new Date(st.latest_at * 1000).toLocaleTimeString() : '';
-      document.getElementById('meta').textContent =
-        'frame #' + st.frames_seen + ' · ' + (st.backend || 'baseline') +
-        ' · ' + st.total_ms + ' ms · ' + st.regions + ' masks · ' +
-        st.ocr_findings + ' OCR findings · sha ' + st.latest_sha12 + ' · at ' + at;
-      if(st.latest_sha12 !== lastSha){
-        lastSha = st.latest_sha12;
-        const r = await fetch('/viewer/frame?t=' + Date.now());
-        if(r.ok){
-          const img = document.getElementById('frame');
-          const old = img.src;
-          img.src = URL.createObjectURL(await r.blob());
-          if(old) URL.revokeObjectURL(old);
-        }
-      }
+<div id="empty">No frames captured yet.</div>
+<img id="frame" alt="Selected redacted frame sent to the model">
+</main><script>
+let selected = null, followLatest = true, rendered = '';
+const esc = value => String(value ?? '').replace(
+  /[&<>"']/g,
+  char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]),
+);
+function label(item) {
+  const http = item.upstream_status === null ? '' : ` · HTTP ${item.upstream_status}`;
+  return `<b>#${item.id} · ${esc(item.state)}</b><span class="sub">` +
+    `${esc(item.backend || 'baseline')} · ${item.regions} masks · ` +
+    `${item.total_ms} ms${http}<br>sha ${esc(item.sha12)}</span>`;
+}
+async function show(item) {
+  selected = item.id;
+  document.querySelectorAll('button').forEach(button => button.classList.toggle(
+    'active', Number(button.dataset.id) === selected,
+  ));
+  const at = item.sent_at || item.created_at;
+  document.getElementById('meta').textContent =
+    `frame #${item.id} · ${item.state} · ${item.regions} masks · ` +
+    `${item.ocr_findings} OCR findings · sha ${item.sha12} · ` +
+    new Date(at * 1000).toLocaleTimeString();
+  const key = `${item.id}:${item.state}:${item.upstream_status}`;
+  if (key !== rendered) {
+    rendered = key;
+    const image = document.getElementById('frame');
+    image.src = `/viewer/frame/${item.id}?t=${Date.now()}`;
+    image.style.display = 'inline-block';
+    document.getElementById('empty').style.display = 'none';
+  }
+}
+async function tick() {
+  try {
+    const response = await fetch('/viewer/frames', {cache:'no-store'});
+    const data = await response.json();
+    const items = data.frames || [];
+    const list = document.getElementById('frames');
+    list.innerHTML = items.slice().reverse().map(
+      item => `<button data-id="${item.id}">${label(item)}</button>`,
+    ).join('');
+    list.querySelectorAll('button').forEach(button => button.onclick = () => {
+      followLatest = false;
+      const item = items.find(value => value.id === Number(button.dataset.id));
+      if (item) show(item);
+    });
+    if (items.length) {
+      const selectedItem = items.find(value => value.id === selected);
+      show(followLatest ? items[items.length - 1] : selectedItem || items[items.length - 1]);
     }
-  }catch(e){}
-  setTimeout(tick, 250);
+  } catch (error) {}
+  setTimeout(tick, 500);
 }
 tick();
 </script></body></html>
@@ -380,7 +655,7 @@ def _redact_data_url(
     store: FrameStore | None,
     *,
     capture_manifest: bool = False,
-) -> tuple[str, tuple[dict[str, str], ...]]:
+) -> tuple[str, tuple[dict[str, str], ...], int | None]:
     url = image_url.get("url") if isinstance(image_url, dict) else image_url
     if not isinstance(url, str):
         raise HookError("screenshot has no URL")
@@ -406,13 +681,15 @@ def _redact_data_url(
     except Exception as exc:
         # Whatever went wrong in the redactor, the raw frame must not leave.
         raise HookError("frame redaction failed") from exc
+    frame_id: int | None = None
     if store is not None:
         analysis = getattr(redact, "latest_analysis", None)
-        store.add(redacted, analysis if isinstance(analysis, dict) else None)
+        frame_id = store.add(redacted, analysis if isinstance(analysis, dict) else None)
     _LOGGER.info("frame in_bytes=%d out_bytes=%d", len(raw), len(redacted))
     return (
         "data:image/png;base64," + base64.b64encode(redacted).decode("ascii"),
         manifest,
+        frame_id,
     )
 
 
@@ -434,7 +711,10 @@ def frame_redaction_hook(
         document: dict[str, Any], headers: dict[str, str]
     ) -> tuple[dict[str, Any], dict[str, str]]:
         rewritten: dict[str, Any] = json.loads(json.dumps(document))
+        if rewritten.pop(FRAME_AUDIT_IDS_KEY, None) is not None:
+            raise HookError("request forged internal frame audit metadata")
         redacted = 0
+        frame_ids: list[int] = []
         manifests: dict[int, list[dict[str, str]]] = {}
         for message_index, message in enumerate(rewritten.get("messages") or []):
             if not isinstance(message, dict):
@@ -444,13 +724,15 @@ def frame_redaction_hook(
                 continue
             for part in content:
                 if isinstance(part, dict) and part.get("type") == "image_url":
-                    redacted_url, manifest = _redact_data_url(
+                    redacted_url, manifest, frame_id = _redact_data_url(
                         part.get("image_url"),
                         redact,
                         store,
                         capture_manifest=include_placeholder_manifest,
                     )
                     part["image_url"] = {"url": redacted_url}
+                    if frame_id is not None:
+                        frame_ids.append(frame_id)
                     if include_placeholder_manifest:
                         target = manifests.setdefault(message_index, [])
                         known = {item["token"] for item in target}
@@ -477,6 +759,8 @@ def frame_redaction_hook(
                     redacted += 1
         if redacted:
             _LOGGER.info("redaction hook processed %d screenshot(s)", redacted)
+        if frame_ids:
+            rewritten[FRAME_AUDIT_IDS_KEY] = frame_ids
         if include_placeholder_manifest and manifests:
             current_index = max(manifests)
             rewritten[PLACEHOLDER_MANIFEST_KEY] = {
@@ -655,6 +939,7 @@ def create_app(
     *,
     hooks: Hooks | None = None,
     frame_store: FrameStore | None = None,
+    call_store: CallStore | None = None,
     vault: SessionVault | None = None,
     scrubber: HistoryScrubber | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
@@ -690,6 +975,21 @@ def create_app(
         started = time.monotonic()
         body = await request.body()
         headers = _upstream_headers(request, config.api_key)
+        frame_ids: tuple[int, ...] = ()
+        call_document: dict[str, Any] | None = None
+
+        def record_call(
+            status: int | None, response_document: dict[str, Any] | None, state: str
+        ) -> None:
+            if call_store is None or call_document is None:
+                return
+            call_store.record(
+                call_document,
+                status=status,
+                response=response_document,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                state=state,
+            )
 
         request_hook = active_hooks.on_request if use_hooks else None
         if request_hook is not None:
@@ -700,7 +1000,16 @@ def create_app(
                 # Threadpool keeps the loop responsive while slow hooks
                 # (e.g. frame redaction) work on the request.
                 document, headers = await run_in_threadpool(request_hook, document, headers)
+                raw_frame_ids = document.pop(FRAME_AUDIT_IDS_KEY, [])
+                if not isinstance(raw_frame_ids, list) or any(
+                    not isinstance(frame_id, int) for frame_id in raw_frame_ids
+                ):
+                    raise HookError("frame audit metadata is invalid")
+                frame_ids = tuple(raw_frame_ids)
                 body = json.dumps(document, separators=(",", ":")).encode()
+                # Post-hook only: what leaves here is redacted and scrubbed,
+                # so it is the only version the history viewer may hold.
+                call_document = document
             except (HookError, PrivacyError, ValueError) as exc:
                 _LOGGER.warning("request hook failed closed: %s", type(exc).__name__)
                 raise HTTPException(status_code=502, detail="request hook failed") from exc
@@ -709,8 +1018,13 @@ def create_app(
         try:
             upstream = await client.send(upstream_request, stream=True)
         except httpx.HTTPError as exc:
+            if frame_store is not None and frame_ids:
+                frame_store.mark_failed(frame_ids)
+            record_call(None, None, "failed")
             _LOGGER.warning("upstream request failed: %s", type(exc).__name__)
             raise HTTPException(status_code=502, detail="upstream request failed") from exc
+        if frame_store is not None and frame_ids:
+            frame_store.mark_sent(frame_ids, upstream.status_code)
 
         content_type = upstream.headers.get("content-type", "application/octet-stream")
         is_sse = content_type.lower().startswith("text/event-stream")
@@ -718,6 +1032,7 @@ def create_app(
         hook_applies = response_hook is not None and upstream.status_code == 200
 
         if is_sse and not hook_applies:
+            record_call(upstream.status_code, None, "streamed")
             return StreamingResponse(
                 _relay_stream(upstream, started),
                 status_code=upstream.status_code,
@@ -726,18 +1041,26 @@ def create_app(
         try:
             payload = await upstream.aread()
         except httpx.HTTPError as exc:
+            record_call(upstream.status_code, None, "failed")
             _LOGGER.warning("upstream read failed: %s", type(exc).__name__)
             raise HTTPException(status_code=502, detail="upstream response failed") from exc
         finally:
             await upstream.aclose()
 
         if response_hook is not None and upstream.status_code == 200:
+            recorded = False
             try:
                 document = _assemble_sse_completion(payload) if is_sse else json.loads(payload)
                 if not isinstance(document, dict):
                     raise HookError("completion body is not a JSON object")
+                # Pre-resolution: the model's own output still carries
+                # placeholders, never the restored local values.
+                record_call(200, document, "sent")
+                recorded = True
                 mutated = response_hook(document)
             except (HookError, PrivacyError, ValueError) as exc:
+                if not recorded:
+                    record_call(200, None, "hook_failed")
                 _LOGGER.warning("response hook failed closed: %s", type(exc).__name__)
                 raise HTTPException(status_code=502, detail="response hook failed") from exc
             _LOGGER.info(
@@ -759,6 +1082,15 @@ def create_app(
                 headers=hook_header,
             )
 
+        if call_store is not None and call_document is not None:
+            response_document: dict[str, Any] | None = None
+            try:
+                parsed = _assemble_sse_completion(payload) if is_sse else json.loads(payload)
+                if isinstance(parsed, dict):
+                    response_document = parsed
+            except (HookError, ValueError, UnicodeDecodeError):
+                response_document = None
+            record_call(upstream.status_code, response_document, "sent")
         _LOGGER.info(
             "relay %s status=%d request_bytes=%d response_bytes=%d duration_ms=%d",
             path,
@@ -785,7 +1117,7 @@ def create_app(
         return await _relay(request, "POST", "/chat/completions", use_hooks=True)
 
     if frame_store is not None:
-        add_viewer_routes(app, frame_store, vault=vault, scrubber=scrubber)
+        add_viewer_routes(app, frame_store, calls=call_store, vault=vault, scrubber=scrubber)
 
     return app
 
@@ -794,6 +1126,7 @@ def add_viewer_routes(
     app: FastAPI,
     store: FrameStore,
     *,
+    calls: CallStore | None = None,
     vault: SessionVault | None = None,
     scrubber: HistoryScrubber | None = None,
 ) -> None:
@@ -809,6 +1142,21 @@ def add_viewer_routes(
         if png is None:
             raise HTTPException(status_code=404, detail="no redacted frame yet")
         return Response(content=png, media_type="image/png", headers={"cache-control": "no-store"})
+
+    @app.get("/viewer/frame/{frame_id}")
+    async def viewer_frame_by_id(frame_id: int) -> Response:
+        png = store.frame(frame_id)
+        if png is None:
+            raise HTTPException(status_code=404, detail="redacted frame is no longer buffered")
+        return Response(content=png, media_type="image/png", headers={"cache-control": "no-store"})
+
+    @app.get("/viewer/frames")
+    async def viewer_frames() -> Response:
+        return Response(
+            content=json.dumps({"frames": store.entries()}, separators=(",", ":")),
+            media_type="application/json",
+            headers={"cache-control": "no-store"},
+        )
 
     @app.get("/viewer/stats")
     async def viewer_stats() -> dict[str, int | str]:
@@ -843,6 +1191,34 @@ def add_viewer_routes(
             media_type="application/json",
             headers={"cache-control": "no-store"},
         )
+
+    @app.get("/viewer/calls")
+    async def viewer_calls() -> Response:
+        payload = {"calls": calls.entries() if calls is not None else []}
+        return Response(
+            content=json.dumps(payload, separators=(",", ":")),
+            media_type="application/json",
+            headers={"cache-control": "no-store"},
+        )
+
+    @app.get("/viewer/call/{call_id}")
+    async def viewer_call(call_id: int) -> Response:
+        record = calls.full(call_id) if calls is not None else None
+        if record is None:
+            raise HTTPException(status_code=404, detail="call is no longer buffered")
+        return Response(
+            content=json.dumps(record, separators=(",", ":")),
+            media_type="application/json",
+            headers={"cache-control": "no-store"},
+        )
+
+    @app.get("/viewer/call/{call_id}/image/{index}")
+    async def viewer_call_image(call_id: int, index: int) -> Response:
+        image = calls.image(call_id, index) if calls is not None else None
+        if image is None:
+            raise HTTPException(status_code=404, detail="call image is no longer buffered")
+        media_type, data = image
+        return Response(content=data, media_type=media_type, headers={"cache-control": "no-store"})
 
 
 def _env_file_value(path: Path, key: str) -> str | None:
@@ -1008,6 +1384,12 @@ def main() -> None:
         default=os.environ.get("PLVA_POLICY_JSON", ""),
         help="JSON object mapping PII classes to hide_use, approval, or blocked",
     )
+    parser.add_argument(
+        "--audit-capacity",
+        type=int,
+        default=int(os.environ.get("PLVA_AUDIT_CAPACITY", "32")),
+        help="maximum redacted sent-frame records kept in memory (default: 32)",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
@@ -1019,6 +1401,8 @@ def main() -> None:
         parser.error("--upstream must be an http(s) URL")
     if args.redact_idle_seconds < 0:
         parser.error("--redact-idle-seconds cannot be negative")
+    if args.audit_capacity < 1:
+        parser.error("--audit-capacity must be positive")
     if args.privacy and (args.redact is None or args.redact_engine != "vision"):
         parser.error("--privacy requires --redact with --redact-engine vision")
     try:
@@ -1055,6 +1439,7 @@ def main() -> None:
     vault_store: SessionVault | None = None
     history_scrubber: HistoryScrubber | None = None
     frame_store: FrameStore | None = None
+    call_store: CallStore | None = None
     cleanup_callbacks: tuple[Callable[[], None], ...] = ()
     startup_callbacks: tuple[Callable[[], None], ...] = ()
     if args.redact is not None:
@@ -1063,7 +1448,8 @@ def main() -> None:
             parser.error(f"--redact CLI not found: {cli_path}")
         if args.redact_engine != "vision" and shutil.which("node") is None:
             parser.error("--redact requires node on PATH")
-        frame_store = FrameStore()
+        frame_store = FrameStore(capacity=args.audit_capacity)
+        call_store = CallStore(capacity=args.audit_capacity)
         if args.redact_engine in {"accelerated", "vision"}:
             lifecycle = {
                 "adaptive": args.redact_idle_seconds,
@@ -1178,6 +1564,7 @@ def main() -> None:
     app_options: dict[str, Any] = {
         "hooks": hooks,
         "frame_store": frame_store,
+        "call_store": call_store,
         "startup_callbacks": startup_callbacks,
         "cleanup_callbacks": cleanup_callbacks,
     }

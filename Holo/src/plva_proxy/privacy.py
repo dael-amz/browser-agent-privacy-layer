@@ -576,14 +576,34 @@ def _inject_placeholder_instructions(
     observation: dict[str, Any] | None,
 ) -> None:
     wrapped = f"{PLACEHOLDER_SYSTEM_BEGIN}\n{instructions}\n{PLACEHOLDER_SYSTEM_END}"
-    for message in messages:
-        if (
-            isinstance(message, dict)
-            and message.get("role") == "system"
-            and isinstance(message.get("content"), str)
-        ):
-            message["content"] = message["content"].rstrip() + "\n\n" + wrapped
-            return
+    system_messages = [
+        message
+        for message in messages
+        if isinstance(message, dict) and message.get("role") == "system"
+    ]
+    if system_messages:
+        contents: list[str] = []
+        for message in system_messages:
+            content = message.get("content")
+            if not isinstance(content, str):
+                raise PrivacyError("system prompt is not text")
+            if content.strip():
+                contents.append(content.rstrip())
+        primary = system_messages[0]
+        primary["content"] = "\n\n".join((*contents, wrapped))
+        messages[:] = [
+            message
+            for message in messages
+            if not (
+                isinstance(message, dict)
+                and message.get("role") == "system"
+                and message is not primary
+            )
+        ]
+        if messages[0] is not primary:
+            messages.remove(primary)
+            messages.insert(0, primary)
+        return
     target = observation or next(
         (
             message

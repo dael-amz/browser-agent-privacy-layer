@@ -3,63 +3,568 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>PLVA — Private computer use</title>
+  <title>Holo: Private computer use</title>
   <style>
-    :root{color-scheme:dark;--bg:#07100e;--panel:#0e1b18;--panel2:#12231f;--line:#233a34;--ink:#f2f7f4;--muted:#98aaa4;--green:#80f0b6;--green2:#36c884;--amber:#ffc86a;--red:#ff8178;--blue:#79b9ff;--shadow:0 24px 70px rgba(0,0,0,.3)}
-    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 18% -10%,#173e31 0,transparent 35%),linear-gradient(180deg,#07100e,#091310 70%);color:var(--ink);font:14px/1.45 Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
-    button,textarea,select{font:inherit} button{cursor:pointer}.shell{max-width:1480px;margin:auto;padding:22px 28px 48px}.topbar{height:62px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:34px}.brand{display:flex;align-items:center;gap:12px}.mark{width:38px;height:42px;display:grid;place-items:center;background:linear-gradient(145deg,var(--green),#4cd998);clip-path:polygon(50% 0,94% 16%,88% 72%,50% 100%,12% 72%,6% 16%);color:#052318;font-weight:900;letter-spacing:-1px}.brand strong{font-size:18px;letter-spacing:.14em}.brand span{display:block;color:var(--muted);font-size:11px;letter-spacing:.05em}.secure{display:flex;align-items:center;gap:10px;color:#b9c9c3}.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 18px var(--green)}
-    .hero{display:flex;justify-content:space-between;gap:30px;align-items:flex-end;margin:0 0 25px}.eyebrow{color:var(--green);font-size:12px;text-transform:uppercase;letter-spacing:.16em;font-weight:700}.hero h1{font-size:clamp(34px,4vw,58px);letter-spacing:-.045em;line-height:1.02;margin:8px 0 9px;max-width:780px}.hero p{margin:0;color:var(--muted);font-size:16px;max-width:650px}.master{background:rgba(128,240,182,.07);border:1px solid rgba(128,240,182,.24);padding:14px 16px;border-radius:17px;min-width:245px;display:flex;align-items:center;justify-content:space-between}.master b{display:block}.master small{color:var(--muted)}
-    .switch{position:relative;width:48px;height:28px}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;inset:0;border-radius:30px;background:#31423e;transition:.2s}.slider:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;border-radius:50%;background:white;transition:.2s;box-shadow:0 3px 8px #0005}.switch input:checked+.slider{background:var(--green2)}.switch input:checked+.slider:before{transform:translateX(20px)}
-    .grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(390px,.8fr);gap:20px}.stack{display:grid;gap:20px}.card{background:linear-gradient(145deg,rgba(18,35,31,.96),rgba(12,25,22,.96));border:1px solid rgba(255,255,255,.09);border-radius:24px;box-shadow:var(--shadow)}.compose{padding:24px}.cardhead{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}.cardhead h2{margin:0;font-size:17px;letter-spacing:-.01em}.status{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:#0a1714;padding:7px 11px;border-radius:99px;color:#c8d5d0;font-size:12px}.status[data-state=running],.status[data-state=starting]{border-color:#3f8c69;color:var(--green)}.status[data-state=failed]{border-color:#8b403c;color:var(--red)}
-    textarea{width:100%;min-height:126px;resize:vertical;border:1px solid var(--line);border-radius:17px;background:#091512;color:var(--ink);padding:17px 18px;outline:none;font-size:16px;transition:.2s}textarea:focus{border-color:#4dc58b;box-shadow:0 0 0 4px rgba(77,197,139,.11)}textarea::placeholder{color:#647771}.actions{display:flex;justify-content:space-between;align-items:center;margin-top:15px;gap:14px}.hint{color:var(--muted);font-size:12px}.buttons{display:flex;gap:9px}.primary,.secondary{border:0;border-radius:13px;padding:11px 18px;font-weight:750}.primary{background:var(--green);color:#06241a;box-shadow:0 8px 24px rgba(80,220,150,.2)}.primary:hover{filter:brightness(1.06)}.primary:disabled{opacity:.45;cursor:not-allowed}.secondary{background:#20312d;color:#dce8e3;border:1px solid #304740}.secondary.danger{color:#ffc1bc}
-    .viewer{overflow:hidden}.tabs{display:flex;gap:5px;padding:14px 16px 0;border-bottom:1px solid rgba(255,255,255,.07)}.tab{border:0;background:transparent;color:var(--muted);padding:10px 13px;border-bottom:2px solid transparent}.tab.active{color:var(--ink);border-color:var(--green)}.viewbody{min-height:430px;padding:18px}.framewrap{background:#030706;border:1px solid var(--line);border-radius:17px;min-height:370px;display:grid;place-items:center;overflow:hidden;position:relative}.framewrap img{max-width:100%;max-height:510px;display:none}.empty{color:#71827d;text-align:center;padding:45px}.empty svg{display:block;margin:0 auto 15px;opacity:.65}.metrics{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.metric{background:#0a1714;border:1px solid var(--line);border-radius:10px;padding:7px 10px;color:var(--muted);font-size:12px}.metric b{color:var(--ink)}
-    .policy{padding:22px;max-height:900px;overflow:auto}.policyintro{color:var(--muted);margin:-7px 0 17px}.legend{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:18px}.legend div{padding:10px;border-radius:12px;background:#0a1714;border:1px solid var(--line);font-size:11px}.legend b{display:block;margin-bottom:2px}.l-use b{color:var(--green)}.l-approval b{color:var(--amber)}.l-blocked b{color:var(--red)}.policygroup{margin-top:18px}.policygroup h3{color:#7e938c;font-size:11px;letter-spacing:.13em;text-transform:uppercase;margin:0 0 8px}.policyrow{display:grid;grid-template-columns:1fr 176px;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.055)}.policyrow:last-child{border:0}.pname{font-weight:650}.pname small{display:block;color:var(--muted);font-weight:400}.seg{display:grid;grid-template-columns:repeat(3,1fr);background:#081310;border:1px solid var(--line);border-radius:10px;padding:3px}.seg button{border:0;background:transparent;color:#71847e;border-radius:7px;padding:7px 4px;font-size:10px;font-weight:750}.seg button.active[data-level=hide_use]{background:#174b36;color:var(--green)}.seg button.active[data-level=approval]{background:#513d1d;color:var(--amber)}.seg button.active[data-level=blocked]{background:#522825;color:var(--red)}
-    details.advanced{padding:0 22px}details.advanced>summary{list-style:none;padding:18px 0;cursor:pointer;display:flex;justify-content:space-between;font-weight:650}details.advanced>summary::-webkit-details-marker{display:none}.advancedbody{border-top:1px solid var(--line);padding:18px 0 22px}.setting{display:flex;justify-content:space-between;align-items:center;margin:11px 0;color:#cad7d2}.setting small{display:block;color:var(--muted)}select{background:#0a1714;color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:7px 9px}.tiny .switch{transform:scale(.78);transform-origin:right}.warning{margin-top:14px;border:1px solid #6b5125;background:#372a16;color:#ffd99b;border-radius:12px;padding:10px 12px;font-size:12px}
-    table{width:100%;border-collapse:collapse}th{text-align:left;color:#71847e;font-size:10px;text-transform:uppercase;letter-spacing:.11em;padding:10px}td{padding:12px 10px;border-top:1px solid var(--line);vertical-align:top}.token{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--green)}.level{font-size:10px;padding:4px 7px;border-radius:99px;border:1px solid}.level.hide_use{color:var(--green);border-color:#2e7555}.level.approval{color:var(--amber);border-color:#765b2e}.level.blocked{color:var(--red);border-color:#7a3c38}.secret{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;filter:blur(5px);user-select:none}.revealed .secret{filter:none;user-select:text}.toolbar{display:flex;justify-content:flex-end;margin-bottom:10px}.linkbtn{border:1px solid var(--line);background:#0a1714;color:#c9d6d1;border-radius:9px;padding:6px 10px;font-size:11px}.finding{padding:12px;border:1px solid var(--line);border-radius:12px;margin:8px 0;background:#0a1714}.findingtop{display:flex;justify-content:space-between;gap:8px}.finding p{color:var(--muted);margin:7px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.filtergrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.bigmetric{background:#0a1714;border:1px solid var(--line);border-radius:16px;padding:18px}.bigmetric strong{font-size:32px;display:block}.bigmetric span{color:var(--muted)}.timeline{margin-top:18px}.event{display:grid;grid-template-columns:56px 10px 1fr;gap:10px;padding:8px 0}.event time{color:#657872;font-size:11px}.event i{width:7px;height:7px;border-radius:50%;background:var(--green);margin-top:6px}.event b{display:block}.event small{color:var(--muted)}
-    .toast{position:fixed;right:24px;bottom:24px;background:#edf8f2;color:#143126;padding:12px 16px;border-radius:12px;box-shadow:0 16px 50px #0008;transform:translateY(100px);opacity:0;transition:.25s;z-index:10}.toast.show{transform:none;opacity:1}
-    @media(max-width:1050px){.grid{grid-template-columns:1fr}.policy{max-height:none}.hero{align-items:flex-start;flex-direction:column}.master{width:100%}}@media(max-width:650px){.shell{padding:14px}.hero h1{font-size:38px}.actions{align-items:stretch;flex-direction:column}.buttons button{flex:1}.policyrow{grid-template-columns:1fr}.filtergrid{grid-template-columns:1fr}.brand span{display:none}}
+    /* Design tokens matched to lightcone.ai/chat (2026-07). ABC Diatype is a
+       licensed Dinamo typeface: it is referenced by name and used when installed
+       locally; otherwise the stack falls back to close system grotesques. */
+    :root{
+      color-scheme:light;
+      --back-primary:#ffffff;
+      --back-secondary:#f3f3f3;
+      --back-inverse:#181818;
+      --fore-primary:#0c0c0c;
+      --fore-secondary:#868686;
+      --fore-inverse:#ffffff;
+      --border-fade:rgba(12,12,12,.05);
+      --border-soft:rgba(12,12,12,.1);
+      --radius-full:999px;
+      --radius-card:16px;
+      --ok:#0a8a4f;--warn:#b97e0f;--bad:#d13438;
+      --font:"ABC Diatype","ABC Diatype Variable",Diatype,Inter,-apple-system,"SF Pro Text","Helvetica Neue","Segoe UI",Arial,sans-serif;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--back-primary);color:var(--fore-primary);
+      font:400 16px/24px var(--font);-webkit-font-smoothing:antialiased;overflow:hidden}
+    button,textarea,input{font:inherit;color:inherit}
+    button{cursor:pointer;border:0;background:none;padding:0}
+    .app{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+
+    /* ---------- top bar ---------- */
+    .topbar{position:relative;display:flex;align-items:flex-start;justify-content:space-between;padding:20px;flex-shrink:0}
+    .navpill{display:flex;align-items:flex-start;gap:2px;padding:8px;background:var(--back-primary);
+      border:1px solid var(--border-fade);border-radius:var(--radius-full);box-shadow:0 1px 2px rgba(12,12,12,.03)}
+    .navbtn{display:flex;align-items:center;justify-content:center;gap:2px;min-height:32px;padding:6px 12px;
+      border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;color:var(--fore-secondary);
+      transition:background .15s,color .15s;flex-shrink:0}
+    .navbtn:hover{color:var(--fore-primary)}
+    .navbtn.active{background:var(--back-secondary);color:var(--fore-primary)}
+    .navbtn.logo{padding:6px 10px 6px 12px;color:var(--fore-primary)}
+    .beta{position:absolute;top:0;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;justify-content:center;
+      padding:6px 16px;background:var(--back-primary);border:1px solid var(--border-fade);border-top:0;
+      border-radius:0 0 12px 12px;font-size:13px;line-height:18px;color:var(--fore-primary)}
+    .topright{display:flex;align-items:center;gap:8px;padding:8px;background:var(--back-primary);
+      border:1px solid var(--border-fade);border-radius:var(--radius-full)}
+    .statuspill{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:6px 12px;border-radius:var(--radius-full);
+      font-size:15px;line-height:20px;letter-spacing:.05px;color:var(--fore-secondary)}
+    .statuspill .dot{width:7px;height:7px;border-radius:50%;background:var(--fore-secondary);transition:background .2s}
+    .statuspill[data-state=running] .dot,.statuspill[data-state=starting] .dot{background:var(--ok)}
+    .statuspill[data-state=running],.statuspill[data-state=starting]{color:var(--fore-primary)}
+    .statuspill[data-state=failed] .dot{background:var(--bad)}
+    .statuspill[data-state=failed]{color:var(--bad)}
+    .protect{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:6px 12px;border-radius:var(--radius-full);
+      font-size:15px;line-height:20px;letter-spacing:.05px;background:var(--back-inverse);color:var(--fore-inverse);transition:opacity .15s}
+    .protect[data-on=false]{background:var(--back-secondary);color:var(--fore-primary)}
+    .protect:disabled{opacity:.5;cursor:not-allowed}
+
+    /* ---------- main ---------- */
+    main{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+
+    /* hero (empty chat) */
+    .hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:20px}
+    .modelwrap{position:relative}
+    .modelpill{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px 6px 12px;
+      border:1px solid var(--border-soft);border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;background:var(--back-primary)}
+    .modelpill svg{color:var(--fore-secondary)}
+    .modelmenu{position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);min-width:180px;
+      background:var(--back-primary);border:1px solid var(--border-fade);border-radius:var(--radius-card);
+      box-shadow:0 12px 32px rgba(12,12,12,.1);padding:6px;display:none;z-index:5}
+    .modelmenu.open{display:block}
+    .modelmenu button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;
+      border-radius:10px;font-size:15px;line-height:20px}
+    .modelmenu button:hover{background:var(--back-secondary)}
+    .modelmenu button small{color:var(--fore-secondary);font-size:12px}
+    .heroinput{width:580px;max-width:calc(100vw - 48px);resize:none;overflow-y:auto;border:0;background:transparent;padding:0;
+      outline:none;text-align:center;font-size:24px;line-height:30px;letter-spacing:-.66px;color:var(--fore-primary);
+      caret-color:var(--fore-primary);height:30px;max-height:150px}
+    .heroinput::placeholder{color:var(--fore-secondary)}
+    .send{display:grid;place-items:center;width:48px;height:48px;border-radius:var(--radius-full);
+      background:var(--back-secondary);border:1px solid var(--border-fade);color:var(--fore-primary);transition:background .15s,color .15s}
+    .send:hover{background:var(--back-inverse);color:var(--fore-inverse)}
+    .send:disabled{opacity:.45;cursor:not-allowed}
+    .herohint{font-size:13px;line-height:18px;color:var(--fore-secondary)}
+
+    /* workspace (active / finished session) */
+    .workspace{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:14px;overflow-y:auto;padding:4px 20px 0}
+    .wsinner{width:100%;max-width:860px;display:flex;flex-direction:column;gap:14px;padding-bottom:160px}
+    .chips{display:flex;gap:2px;padding:6px;background:var(--back-primary);border:1px solid var(--border-fade);
+      border-radius:var(--radius-full);align-self:center}
+    .chip{min-height:32px;padding:6px 12px;border-radius:var(--radius-full);font-size:15px;line-height:20px;
+      letter-spacing:.05px;color:var(--fore-secondary)}
+    .chip:hover{color:var(--fore-primary)}
+    .chip.active{background:var(--back-secondary);color:var(--fore-primary)}
+    .card{background:var(--back-primary);border:1px solid var(--border-fade);border-radius:var(--radius-card);
+      box-shadow:0 1px 2px rgba(12,12,12,.03)}
+    .viewcard{padding:16px;min-height:340px}
+    .framewrap{background:var(--back-secondary);border-radius:12px;min-height:320px;display:grid;place-items:center;overflow:hidden}
+    .framewrap img{max-width:100%;max-height:480px;display:none;border-radius:12px}
+    .empty{color:var(--fore-secondary);text-align:center;padding:48px 24px;font-size:15px;line-height:22px}
+    .metrics{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+    .metric{background:var(--back-secondary);border-radius:var(--radius-full);padding:6px 12px;
+      color:var(--fore-secondary);font-size:13px;line-height:18px}
+    .metric b{color:var(--fore-primary);font-weight:500}
+    .timelinecard{padding:16px 20px}
+    .cardhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+    .cardhead h2{margin:0;font-size:15px;line-height:20px;font-weight:500}
+    .cardhead small{color:var(--fore-secondary);font-size:13px}
+    .event{display:grid;grid-template-columns:60px 10px 1fr;gap:10px;padding:8px 0;border-top:1px solid var(--border-fade)}
+    .event:first-child{border-top:0}
+    .event time{color:var(--fore-secondary);font-size:12px;line-height:20px}
+    .event i{width:6px;height:6px;border-radius:50%;background:var(--fore-primary);margin-top:7px}
+    .event b{display:block;font-weight:500;font-size:15px;line-height:20px}
+    .event small{color:var(--fore-secondary);font-size:13px;line-height:18px}
+
+    /* docked composer */
+    .dock{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;padding:0 20px 24px;pointer-events:none;
+      background:linear-gradient(180deg,rgba(255,255,255,0),var(--back-primary) 60%)}
+    .dockbar{pointer-events:auto;display:flex;align-items:flex-end;gap:8px;width:100%;max-width:720px;
+      background:var(--back-primary);border:1px solid var(--border-fade);border-radius:24px;
+      box-shadow:0 12px 40px rgba(12,12,12,.08);padding:12px 12px 12px 20px}
+    .dockbar textarea{flex:1;resize:none;border:0;background:transparent;outline:none;padding:8px 0;
+      font-size:16px;line-height:24px;color:var(--fore-primary);caret-color:var(--fore-primary);height:40px;max-height:120px}
+    .dockbar textarea::placeholder{color:var(--fore-secondary)}
+    .dockbar .send{width:40px;height:40px;flex-shrink:0}
+    .stoppill{min-height:40px;padding:8px 16px;border-radius:var(--radius-full);background:var(--back-secondary);
+      color:var(--bad);font-size:15px;line-height:20px;flex-shrink:0}
+
+    /* privacy + lab panels */
+    .panel{flex:1;min-height:0;overflow-y:auto;display:flex;justify-content:center;padding:6px 20px 0}
+    .panelinner{width:100%;max-width:640px;display:flex;flex-direction:column;gap:14px;padding-bottom:72px}
+    .panelinner>h1{margin:12px 0 0;font-size:24px;line-height:30px;letter-spacing:-.66px;font-weight:400;text-align:center}
+    .panelinner>.sub{margin:0 0 6px;text-align:center;color:var(--fore-secondary);font-size:15px;line-height:22px}
+    .legend{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .legend div{padding:12px;border-radius:var(--radius-card);background:var(--back-secondary);font-size:13px;line-height:18px;color:var(--fore-secondary)}
+    .legend b{display:flex;align-items:center;gap:6px;margin-bottom:2px;color:var(--fore-primary);font-weight:500;font-size:14px}
+    .ldot{width:7px;height:7px;border-radius:50%}
+    .policycard{padding:8px 20px 16px}
+    .policygroup h3{color:var(--fore-secondary);font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:500;margin:18px 0 4px}
+    .policyrow{display:grid;grid-template-columns:1fr 186px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-fade)}
+    .policygroup:last-child .policyrow:last-child{border-bottom:0}
+    .pname{font-size:15px;line-height:20px}
+    .pname small{display:block;color:var(--fore-secondary);font-size:12px}
+    .seg{display:grid;grid-template-columns:repeat(3,1fr);background:var(--back-secondary);border-radius:var(--radius-full);padding:3px}
+    .seg button{display:flex;align-items:center;justify-content:center;gap:5px;border-radius:var(--radius-full);
+      padding:6px 4px;font-size:13px;line-height:18px;color:var(--fore-secondary)}
+    .seg button.active{background:var(--back-primary);color:var(--fore-primary);box-shadow:0 1px 3px rgba(12,12,12,.08)}
+    .seg .sdot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.35}
+    .seg button.active[data-level=hide_use] .sdot{background:var(--ok);opacity:1}
+    .seg button.active[data-level=approval] .sdot{background:var(--warn);opacity:1}
+    .seg button.active[data-level=blocked] .sdot{background:var(--bad);opacity:1}
+    .setting{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border-fade)}
+    .setting:last-child{border-bottom:0}
+    .setting .about{font-size:15px;line-height:20px}
+    .setting .about small{display:block;color:var(--fore-secondary);font-size:13px;line-height:18px}
+    .labcard{padding:8px 20px}
+    .warning{border-radius:var(--radius-card);background:var(--back-secondary);color:var(--fore-secondary);
+      padding:12px 16px;font-size:13px;line-height:18px}
+    .switch{position:relative;width:44px;height:26px;flex-shrink:0}
+    .switch input{opacity:0;width:0;height:0}
+    .slider{position:absolute;inset:0;border-radius:var(--radius-full);background:var(--back-secondary);transition:.2s;border:1px solid var(--border-fade)}
+    .slider:before{content:"";position:absolute;width:20px;height:20px;left:2px;top:2px;border-radius:50%;
+      background:var(--back-primary);box-shadow:0 1px 3px rgba(12,12,12,.2);transition:.2s}
+    .switch input:checked+.slider{background:var(--back-inverse)}
+    .switch input:checked+.slider:before{transform:translateX(18px)}
+
+    /* tables + findings */
+    table{width:100%;border-collapse:collapse}
+    th{text-align:left;color:var(--fore-secondary);font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;padding:8px 10px}
+    td{padding:12px 10px;border-top:1px solid var(--border-fade);vertical-align:top;font-size:15px;line-height:20px}
+    .token{font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fore-primary);background:var(--back-secondary);
+      border-radius:6px;padding:2px 6px}
+    .level{font-size:12px;padding:3px 9px;border-radius:var(--radius-full);border:1px solid var(--border-soft);color:var(--fore-secondary)}
+    .level.hide_use{color:var(--ok);border-color:currentColor}
+    .level.approval{color:var(--warn);border-color:currentColor}
+    .level.blocked{color:var(--bad);border-color:currentColor}
+    .secret{font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace;filter:blur(5px);user-select:none}
+    .revealed .secret{filter:none;user-select:text}
+    .toolbar{display:flex;justify-content:flex-end;margin-bottom:10px}
+    .linkbtn{border:1px solid var(--border-soft);border-radius:var(--radius-full);padding:5px 12px;font-size:13px;line-height:18px;color:var(--fore-primary)}
+    .linkbtn:hover{background:var(--back-secondary)}
+    .finding{padding:12px 14px;border:1px solid var(--border-fade);border-radius:12px;margin:8px 0;background:var(--back-primary)}
+    .findingtop{display:flex;justify-content:space-between;gap:8px;font-size:14px}
+    .findingtop b{font-weight:500}
+    .findingtop span{color:var(--fore-secondary);font-size:13px}
+    .finding p{color:var(--fore-secondary);margin:6px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .filtergrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .bigmetric{background:var(--back-secondary);border-radius:var(--radius-card);padding:18px}
+    .bigmetric strong{font-size:30px;line-height:36px;letter-spacing:-.66px;display:block;font-weight:400}
+    .bigmetric span{color:var(--fore-secondary);font-size:13px}
+
+    /* history tab */
+    .callrow{overflow:hidden}
+    .callhead{display:flex;align-items:center;gap:10px;width:100%;padding:14px 20px;text-align:left}
+    .callhead:hover{background:var(--back-secondary)}
+    .callhead .cid{font:500 13px/18px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fore-primary);
+      background:var(--back-secondary);border-radius:6px;padding:2px 7px;flex-shrink:0}
+    .callhead .cprev{flex:1;min-width:0;font-size:15px;line-height:20px;color:var(--fore-primary);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .callhead .cmeta{display:flex;align-items:center;gap:8px;flex-shrink:0;color:var(--fore-secondary);font-size:13px;line-height:18px}
+    .cstate{font-size:12px;padding:3px 9px;border-radius:var(--radius-full);border:1px solid var(--border-soft);color:var(--fore-secondary)}
+    .cstate.sent{color:var(--ok);border-color:currentColor}
+    .cstate.streamed{color:var(--fore-secondary)}
+    .cstate.failed,.cstate.hook_failed{color:var(--bad);border-color:currentColor}
+    .calldetail{border-top:1px solid var(--border-fade);padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+    .calldetail[hidden]{display:none}
+    .callsection h4{margin:0 0 6px;font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--fore-secondary)}
+    .msg{border:1px solid var(--border-fade);border-radius:12px;padding:10px 12px;margin:8px 0;display:flex;flex-direction:column;gap:8px}
+    .rolechip{align-self:flex-start;font-size:12px;line-height:16px;padding:3px 10px;border-radius:var(--radius-full);
+      background:var(--back-secondary);color:var(--fore-primary)}
+    .rolechip.system{background:var(--back-inverse);color:var(--fore-inverse)}
+    .rolechip.assistant{background:transparent;border:1px solid var(--border-soft)}
+    .block{margin:0;background:var(--back-secondary);border-radius:10px;padding:10px 12px;
+      font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fore-primary);
+      white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto}
+    .callimg{max-width:100%;border-radius:10px;border:1px solid var(--border-fade)}
+    .toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,90px);opacity:0;background:var(--back-inverse);
+      color:var(--fore-inverse);padding:10px 18px;border-radius:var(--radius-full);font-size:15px;line-height:20px;
+      transition:.25s;z-index:20;pointer-events:none}
+    .toast.show{transform:translate(-50%,0);opacity:1}
+
+    /* motion: one spring-like ease everywhere, entrances only, respects reduced motion */
+    :root{--ease-out:cubic-bezier(.16,1,.3,1)}
+    @keyframes view-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+    @keyframes pop-in{from{opacity:0;transform:translateX(-50%) translateY(-4px) scale(.97)}to{opacity:1;transform:translateX(-50%) scale(1)}}
+    @keyframes expand-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+    .hero,.workspace,.panel{animation:view-in .4s var(--ease-out)}
+    .dockbar{animation:view-in .45s var(--ease-out)}
+    .modelmenu.open{animation:pop-in .18s var(--ease-out)}
+    .calldetail:not([hidden]){animation:expand-in .25s var(--ease-out)}
+    .event,.finding,.callrow{animation:expand-in .3s var(--ease-out)}
+    .navbtn,.chip,.callhead,.linkbtn,.seg button,.modelpill,.stoppill{transition:background .15s,color .15s}
+    .send,.protect{transition:background .15s,color .15s,transform .12s var(--ease-out),opacity .15s}
+    .send:active:not(:disabled),.protect:active:not(:disabled){transform:scale(.94)}
+    .framewrap img{animation:view-in .35s var(--ease-out)}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+    .dockbar .modelpill{margin-bottom:4px;flex-shrink:0}
+    .dockbar .modelmenu{top:auto;bottom:calc(100% + 8px)}
+    @keyframes pop-in-up{from{opacity:0;transform:translateX(-50%) translateY(4px) scale(.97)}to{opacity:1;transform:translateX(-50%) scale(1)}}
+    .dockbar .modelmenu.open{animation:pop-in-up .18s var(--ease-out)}
+
+    @media(max-width:760px){
+      .topbar{flex-wrap:wrap;gap:10px}
+      .beta{display:none}
+      .heroinput{font-size:20px;line-height:26px;letter-spacing:-.4px}
+      .policyrow{grid-template-columns:1fr}
+      .filtergrid,.legend{grid-template-columns:1fr}
+      .navbtn span{display:none}
+      .navbtn.logo span{display:inline}
+    }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar"><div class="brand"><div class="mark">P</div><div><strong>PLVA</strong><span>PRIVATE LAYER FOR VISUAL AGENTS</span></div></div><div class="secure"><span class="dot"></span><span>Local privacy boundary</span></div></header>
-    <section class="hero"><div><div class="eyebrow">Private computer use</div><h1>Ask your computer.<br>Keep the details local.</h1><p>PLVA hides sensitive screen data before Holo sees it, then safely restores approved values only when an action needs them.</p></div><div class="master"><div><b>PLVA protection</b><small id="master-copy">Redaction and vault enabled</small></div><label class="switch"><input id="plva-toggle" type="checkbox" checked><span class="slider"></span></label></div></section>
-    <main class="grid">
-      <section class="stack">
-        <article class="card compose"><div class="cardhead"><h2>What should your computer do?</h2><div class="status" id="status" data-state="idle"><span class="dot"></span><span>Ready</span></div></div><textarea id="prompt" placeholder="Try “Open Calendar and find my next meeting” or “Copy the visible email into the form.”"></textarea><div class="actions"><div class="hint">Your prompt is held in memory for this run only.</div><div class="buttons"><button class="secondary danger" id="stop" hidden>Stop</button><button class="primary" id="run">Run privately&nbsp; →</button></div></div></article>
-        <article class="card viewer"><nav class="tabs"><button class="tab active" data-tab="frame">Model view</button><button class="tab" data-tab="vault">Vault</button><button class="tab" data-tab="ocr">OCR</button><button class="tab" data-tab="filter">Stream guard</button></nav><div class="viewbody" id="viewbody"></div></article>
-        <article class="card compose"><div class="cardhead"><h2>Private session activity</h2><span class="hint">Safe metadata only</span></div><div class="timeline" id="timeline"><div class="empty">No task has run yet.</div></div></article>
-      </section>
-      <aside class="stack">
-        <article class="card policy"><div class="cardhead"><h2>Privacy controls</h2><span class="status">Applies next run</span></div><p class="policyintro">Choose what Holo can use for each kind of sensitive information. Unknown types are always blocked.</p><div class="legend"><div class="l-use"><b>Hide & use</b>Holo uses a token.</div><div class="l-approval"><b>Approval</b>Denied until a local approver exists.</div><div class="l-blocked"><b>Blocked</b>No token or vault entry.</div></div><div id="policy-list"></div></article>
-        <article class="card"><details class="advanced"><summary><span>Advanced lab</span><span>Testing & diagnostics&nbsp;⌄</span></summary><div class="advancedbody"><div class="setting"><div>Provider<small>Inference endpoint</small></div><select id="provider"><option value="hcompany">H Company</option><option value="overshoot">Overshoot</option></select></div><div class="setting"><div>Vision mode<small>OCR quality / latency</small></div><select id="vision_mode"><option value="fast">Fast</option><option value="cascade">Cascade</option><option value="accurate">Accurate</option></select></div><div class="setting"><div>Worker lifecycle<small>Startup versus idle memory</small></div><select id="lifecycle"><option value="eager">Eager</option><option value="adaptive">Adaptive</option><option value="cold">Cold</option></select></div><div id="feature-list"></div><div class="warning">Disabling chips, history scrub, or resolution weakens privacy. Use synthetic data in the advanced lab.</div></div></details></article>
-      </aside>
-    </main>
-  </div><div class="toast" id="toast"></div>
+  <div class="app">
+    <header class="topbar">
+      <nav class="navpill" aria-label="Primary">
+        <button class="navbtn logo" id="logo" title="Holo">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M4 4l5 6-5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M10 4l5 6-5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity=".45"/>
+          </svg>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" style="color:var(--fore-secondary)">
+            <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button class="navbtn active" data-nav="chat"><span>Chat</span></button>
+        <button class="navbtn" data-nav="history"><span>History</span></button>
+        <button class="navbtn" data-nav="privacy"><span>Privacy</span></button>
+        <button class="navbtn" data-nav="lab"><span>Lab</span></button>
+      </nav>
+      <div class="beta">Beta</div>
+      <div class="topright">
+        <div class="statuspill" id="status" data-state="idle"><span class="dot"></span><span id="status-label">Ready</span></div>
+        <button class="protect" id="plva-toggle" data-on="true" aria-label="PLVA protection" title="PLVA protection: redaction, policy, and vault">Protected</button>
+      </div>
+    </header>
+    <main id="main"></main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
   <script>
     const groups={"Identity":["NAME","DOB","GOV_ID","SSN"],"Contact":["EMAIL","PHONE","ADDRESS"],"Financial":["BANK_ACCOUNT","CARD_NUMBER","CVC"],"Credentials":["PASSWORD","API_KEY","AUTH_TOKEN","PRIVATE_KEY","SECRET"]};
     const labels={NAME:"Name",DOB:"Date of birth",GOV_ID:"Government ID",SSN:"Social Security number",EMAIL:"Email",PHONE:"Phone",ADDRESS:"Postal address",BANK_ACCOUNT:"Bank account",CARD_NUMBER:"Card number",CVC:"Card security code",PASSWORD:"Password",API_KEY:"API key",AUTH_TOKEN:"Authentication token",PRIVATE_KEY:"Private key",SECRET:"Other secret"};
     const levelLabels={hide_use:"Use",approval:"Ask",blocked:"Block"};
+    const providerLabels={hcompany:"Holo-1",overshoot:"Overshoot"};
     const featureLabels={chips:["Placeholder chips","Paint and vault current findings"],history_scrub:["History scrub","Remove values before the next model call"],scheme:["Scheme prompt","Teach Holo how placeholders work"],duplicate_warning:["Duplicate warning","Explain rare duplicate tokens"],manifest:["Frame manifest","List tokens visible right now"],resolution:["Action resolution","Restore values only in executed actions"],policy_teaching:["Policy prompt","Teach Holo each class security level"],skill:["Native skill","Reinforce the static scheme"]};
-    let state=null,activeTab="frame",reveal=false,lastFrame="";
+    const statusNames={idle:"Ready",starting:"Starting privately",running:"Holo is working",stopping:"Stopping",stopped:"Stopped",completed:"Complete",failed:"Needs attention"};
+
+    let state=null,tab="chat",mode="",activeView="frame",reveal=false,draft="";
     const $=s=>document.querySelector(s), esc=v=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+
     async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})},cache:"no-store"});if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.detail||`Request failed (${r.status})`)}return r.json()}
-    function toast(message){const t=$("#toast");t.textContent=message;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2400)}
-    function renderPolicy(){let html="";for(const [group,classes] of Object.entries(groups)){html+=`<section class="policygroup"><h3>${group}</h3>`;for(const cls of classes){const selected=state.policy[cls];html+=`<div class="policyrow"><div class="pname">${labels[cls]}<small>${cls}</small></div><div class="seg">${Object.keys(levelLabels).map(level=>`<button data-class="${cls}" data-level="${level}" class="${selected===level?'active':''}">${levelLabels[level]}</button>`).join("")}</div></div>`}html+="</section>"}$("#policy-list").innerHTML=html;document.querySelectorAll(".seg button").forEach(b=>b.onclick=()=>setPolicy(b.dataset.class,b.dataset.level))}
-    async function setPolicy(cls,level){if(state.running)return toast("Stop the task before changing policy");const next={...state.policy,[cls]:level};try{const result=await api("/api/policy",{method:"PUT",body:JSON.stringify(next)});state.policy=result.policy;renderPolicy();toast(`${labels[cls]} set to ${levelLabels[level]}`)}catch(e){toast(e.message)}}
-    function renderFeatures(){const f=state.settings.features;$("#feature-list").innerHTML=Object.entries(featureLabels).map(([key,[title,detail]])=>`<div class="setting tiny"><div>${title}<small>${detail}</small></div><label class="switch"><input type="checkbox" data-feature="${key}" ${f[key]?'checked':''}><span class="slider"></span></label></div>`).join("");document.querySelectorAll("[data-feature]").forEach(i=>i.onchange=saveSettings)}
-    async function saveSettings(){if(!state||state.running){renderAll();return toast("Stop the task before changing settings")}const features={};document.querySelectorAll("[data-feature]").forEach(i=>features[i.dataset.feature]=i.checked);const settings={plva_enabled:$("#plva-toggle").checked,provider:$("#provider").value,vision_mode:$("#vision_mode").value,lifecycle:$("#lifecycle").value,features};try{const r=await api("/api/settings",{method:"PUT",body:JSON.stringify(settings)});state.settings=r.settings;renderAll()}catch(e){toast(e.message)}}
-    async function run(){const prompt=$("#prompt").value.trim();if(!prompt)return toast("Enter a task first");try{await api("/api/run",{method:"POST",body:JSON.stringify({prompt})});$("#prompt").value="";await refresh()}catch(e){toast(e.message)}}
+    function toast(message){const t=$("#toast");t.textContent=message;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2400)}
+
+    const chevron=`<svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const arrowUp=`<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 14V4m0 0L4.5 8.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+    /* ---------- actions ---------- */
+    async function run(){const box=$("#prompt");const prompt=(box?box.value:"").trim();if(!prompt)return toast("Enter a task first");try{await api("/api/run",{method:"POST",body:JSON.stringify({prompt})});draft="";if(box)box.value="";await refresh()}catch(e){toast(e.message)}}
     async function stop(){try{await api("/api/stop",{method:"POST",body:"{}"});await refresh()}catch(e){toast(e.message)}}
-    function renderStatus(){const names={idle:"Ready",starting:"Starting privately",running:"Holo is working",stopping:"Stopping",stopped:"Stopped",completed:"Complete",failed:"Needs attention"};const el=$("#status");el.dataset.state=state.status;el.querySelector("span:last-child").textContent=names[state.status]||state.status;$("#run").disabled=state.running;$("#stop").hidden=!state.running;$("#plva-toggle").disabled=state.running;$("#master-copy").textContent=state.settings.plva_enabled?"Redaction, policy, and vault enabled":"Diagnostic bypass — protection off"}
-    function renderTimeline(){const events=[...state.events].reverse();$("#timeline").innerHTML=events.length?events.map(e=>`<div class="event"><time>${esc(e.time)}</time><i></i><div><b>${esc(e.title)}</b><small>${esc(e.detail)}</small></div></div>`).join(""):`<div class="empty">No task has run yet.</div>`}
-    async function renderView(){const box=$("#viewbody");if(activeTab==="frame"){const s=state.stats||{};box.innerHTML=`<div class="framewrap"><div class="empty" id="frame-empty">${state.settings.plva_enabled?"The redacted frame Holo receives will appear here.":"PLVA is off for this diagnostic run."}</div><img id="frame" alt="Redacted frame sent to Holo"></div><div class="metrics"><span class="metric"><b>${s.frames_seen||0}</b> frames</span><span class="metric"><b>${s.regions||0}</b> protected regions</span><span class="metric"><b>${s.total_ms||0} ms</b> pipeline</span><span class="metric"><b>${esc(s.backend||"waiting")}</b> backend</span></div>`;if(state.has_frame){const img=$("#frame");img.src=`/api/frame?t=${Date.now()}`;img.style.display="block";$("#frame-empty").style.display="none"}return}
-      if(activeTab==="vault"){let data=await api("/api/vault");let rows=data.entries||[];box.className=reveal?"viewbody revealed":"viewbody";box.innerHTML=`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local values</button></div>${rows.length?`<table><thead><tr><th>Placeholder</th><th>Class</th><th>Security</th><th>Local value</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="token">${esc(r.placeholder)}</td><td>${esc(labels[r.class]||r.class)}</td><td><span class="level ${esc(r.safety_level)}">${esc(levelLabels[r.safety_level]||r.safety_level)}</span></td><td><span class="secret">${esc(r.value)}</span></td></tr>`).join("")}</tbody></table>`:`<div class="empty">The session vault is empty. Values appear only after OCR finds allowed or approval-gated PII.</div>`}`;$("#reveal").onclick=()=>{reveal=!reveal;renderView()};return}
-      if(activeTab==="ocr"){let data=await api("/api/findings");let rows=data.findings||[];box.className=reveal?"viewbody revealed":"viewbody";box.innerHTML=`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local OCR text</button></div>${rows.length?rows.map((r,i)=>`<div class="finding"><div class="findingtop"><b>Finding ${i+1}</b><span>${esc((r.labels||[]).join(" · ")||"Unclassified")}</span></div><p><span class="secret">${esc(r.text||"No recognized text")}</span></p></div>`).join(""):`<div class="empty">No OCR findings yet.</div>`}`;$("#reveal").onclick=()=>{reveal=!reveal;renderView()};return}
-      let d=await api("/api/filter");box.innerHTML=`<div class="filtergrid"><div class="bigmetric"><strong>${esc(d.texts_scanned||0)}</strong><span>text blocks scanned</span></div><div class="bigmetric"><strong>${esc(d.plain_vault_hits||0)}</strong><span>exact vault matches</span></div><div class="bigmetric"><strong>${esc(d.semantic_hits||0)}</strong><span>semantic detections</span></div></div><div class="finding" style="margin-top:14px"><div class="findingtop"><b>Filter status</b><span class="level ${d.status==='failed'?'blocked':'hide_use'}">${esc(d.status||"idle")}</span></div><p>Cleartext is never shown in this diagnostic. Counts are memory-only.</p></div>`}
-    function renderAll(){renderStatus();renderTimeline();$("#provider").value=state.settings.provider;$("#vision_mode").value=state.settings.vision_mode;$("#lifecycle").value=state.settings.lifecycle;$("#plva-toggle").checked=state.settings.plva_enabled;renderPolicy();renderFeatures();renderView()}
-    async function refresh(){try{state=await api("/api/state");renderAll()}catch(e){toast("Demo service unavailable")}}
-    document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");activeTab=b.dataset.tab;reveal=false;renderView()});$("#run").onclick=run;$("#stop").onclick=stop;$("#plva-toggle").onchange=saveSettings;["provider","vision_mode","lifecycle"].forEach(id=>$("#"+id).onchange=saveSettings);$("#prompt").onkeydown=e=>{if((e.metaKey||e.ctrlKey)&&e.key==="Enter")run()};refresh();setInterval(refresh,900);
+    async function setPolicy(cls,level){if(state.running)return toast("Stop the task before changing policy");const next={...state.policy,[cls]:level};try{const result=await api("/api/policy",{method:"PUT",body:JSON.stringify(next)});state.policy=result.policy;renderPanel();toast(`${labels[cls]} set to ${levelLabels[level]}`)}catch(e){toast(e.message)}}
+    async function saveSettings(patch){if(!state)return;if(state.running){render(true);return toast("Stop the task before changing settings")}
+      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,vision_mode:s.vision_mode,lifecycle:s.lifecycle,features:{...s.features},...patch};
+      if(patch&&patch.features)settings.features={...s.features,...patch.features};
+      try{const r=await api("/api/settings",{method:"PUT",body:JSON.stringify(settings)});state.settings=r.settings;render(true)}catch(e){toast(e.message);render(true)}}
+
+    /* ---------- chrome ---------- */
+    function renderChrome(){
+      const el=$("#status");el.dataset.state=state.status;$("#status-label").textContent=statusNames[state.status]||state.status;
+      const p=$("#plva-toggle");const on=state.settings.plva_enabled;
+      p.dataset.on=String(on);p.textContent=on?"Protected":"Protection off";p.disabled=state.running;
+      document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===tab));
+    }
+
+    /* ---------- chat ---------- */
+    function sessionActive(){return state.running||state.has_frame||state.events.length>0}
+
+    function chatSkeleton(){
+      if(!sessionActive()){
+        return `<div class="hero">
+          <div class="modelwrap">
+            <button class="modelpill" id="model-pill">${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}</button>
+            <div class="modelmenu" id="model-menu">${Object.entries(providerLabels).map(([v,l])=>`<button data-provider="${v}">${l}<small>${v===state.settings.provider?"Selected":""}</small></button>`).join("")}</div>
+          </div>
+          <textarea class="heroinput" id="prompt" rows="1" placeholder="What can I do for you?"></textarea>
+          <button class="send" id="run" title="Run privately">${arrowUp}</button>
+          <div class="herohint">Runs locally behind the PLVA privacy boundary. Sensitive screen data never leaves this device.</div>
+        </div>`;
+      }
+      return `<div class="workspace"><div class="wsinner">
+          <div class="chips" role="tablist">
+            <button class="chip" data-view="frame">Model view</button>
+            <button class="chip" data-view="vault">Vault</button>
+            <button class="chip" data-view="ocr">OCR</button>
+            <button class="chip" data-view="filter">Stream guard</button>
+          </div>
+          <div class="card viewcard" id="viewbody"></div>
+          <div class="card timelinecard">
+            <div class="cardhead"><h2>Private session activity</h2><small>Safe metadata only</small></div>
+            <div id="timeline"></div>
+          </div>
+        </div></div>
+        <div class="dock"><div class="dockbar">
+          <div class="modelwrap">
+            <button class="modelpill" id="model-pill">${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}</button>
+            <div class="modelmenu" id="model-menu">${Object.entries(providerLabels).map(([v,l])=>`<button data-provider="${v}">${l}<small>${v===state.settings.provider?"Selected":""}</small></button>`).join("")}</div>
+          </div>
+          <textarea id="prompt" rows="1" placeholder="What can I do for you?"></textarea>
+          <button class="stoppill" id="stop" hidden>Stop</button>
+          <button class="send" id="run" title="Run privately">${arrowUp}</button>
+        </div></div>`;
+    }
+
+    function wireChat(){
+      const box=$("#prompt");
+      if(box){box.value=draft;box.oninput=()=>{draft=box.value};
+        box.onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();run()}}}
+      const runBtn=$("#run");if(runBtn)runBtn.onclick=run;
+      const stopBtn=$("#stop");if(stopBtn)stopBtn.onclick=stop;
+      const pill=$("#model-pill");
+      if(pill){pill.onclick=e=>{e.stopPropagation();$("#model-menu").classList.toggle("open")};
+        document.querySelectorAll("#model-menu [data-provider]").forEach(b=>b.onclick=()=>{$("#model-menu").classList.remove("open");saveSettings({provider:b.dataset.provider})})}
+      document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{activeView=b.dataset.view;reveal=false;updateChat()});
+    }
+
+    async function updateChat(){
+      const pill=$("#model-pill");
+      if(pill&&!$("#model-menu").classList.contains("open"))pill.innerHTML=`${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}`;
+      if(!sessionActive()){
+        const runBtn=$("#run");if(runBtn)runBtn.disabled=state.running;
+        return;
+      }
+      document.querySelectorAll(".chip").forEach(b=>b.classList.toggle("active",b.dataset.view===activeView));
+      const runBtn=$("#run");if(runBtn)runBtn.disabled=state.running;
+      const stopBtn=$("#stop");if(stopBtn)stopBtn.hidden=!state.running;
+      const events=[...state.events].reverse();
+      $("#timeline").innerHTML=events.length?events.map(e=>`<div class="event"><time>${esc(e.time)}</time><i></i><div><b>${esc(e.title)}</b><small>${esc(e.detail)}</small></div></div>`).join(""):`<div class="empty">No task has run yet.</div>`;
+      await renderView();
+    }
+
+    async function renderView(){
+      const box=$("#viewbody");if(!box)return;
+      if(activeView==="frame"){
+        const s=state.stats||{};
+        box.className="card viewcard";
+        box.innerHTML=`<div class="framewrap"><div class="empty" id="frame-empty">${state.settings.plva_enabled?"The redacted frame Holo receives will appear here.":"PLVA is off for this diagnostic run."}</div><img id="frame" alt="Redacted frame sent to Holo"></div>
+          <div class="metrics"><span class="metric"><b>${s.frames_seen||0}</b> frames</span><span class="metric"><b>${s.regions||0}</b> protected regions</span><span class="metric"><b>${s.total_ms||0} ms</b> pipeline</span><span class="metric"><b>${esc(s.backend||"waiting")}</b> backend</span></div>`;
+        if(state.has_frame){const img=$("#frame");img.src=`/api/frame?t=${Date.now()}`;img.style.display="block";$("#frame-empty").style.display="none"}
+        return;
+      }
+      if(activeView==="vault"){
+        let data=await api("/api/vault");let rows=data.entries||[];
+        box.className=reveal?"card viewcard revealed":"card viewcard";
+        box.innerHTML=`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local values</button></div>${rows.length?`<table><thead><tr><th>Placeholder</th><th>Class</th><th>Security</th><th>Local value</th></tr></thead><tbody>${rows.map(r=>`<tr><td><span class="token">${esc(r.placeholder)}</span></td><td>${esc(labels[r.class]||r.class)}</td><td><span class="level ${esc(r.safety_level)}">${esc(levelLabels[r.safety_level]||r.safety_level)}</span></td><td><span class="secret">${esc(r.value)}</span></td></tr>`).join("")}</tbody></table>`:`<div class="empty">The session vault is empty. Values appear only after OCR finds allowed or approval-gated PII.</div>`}`;
+        $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
+        return;
+      }
+      if(activeView==="ocr"){
+        let data=await api("/api/findings");let rows=data.findings||[];
+        box.className=reveal?"card viewcard revealed":"card viewcard";
+        box.innerHTML=`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local OCR text</button></div>${rows.length?rows.map((r,i)=>`<div class="finding"><div class="findingtop"><b>Finding ${i+1}</b><span>${esc((r.labels||[]).join(" · ")||"Unclassified")}</span></div><p><span class="secret">${esc(r.text||"No recognized text")}</span></p></div>`).join(""):`<div class="empty">No OCR findings yet.</div>`}`;
+        $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
+        return;
+      }
+      let d=await api("/api/filter");
+      box.className="card viewcard";
+      box.innerHTML=`<div class="filtergrid"><div class="bigmetric"><strong>${esc(d.texts_scanned||0)}</strong><span>text blocks scanned</span></div><div class="bigmetric"><strong>${esc(d.plain_vault_hits||0)}</strong><span>exact vault matches</span></div><div class="bigmetric"><strong>${esc(d.semantic_hits||0)}</strong><span>semantic detections</span></div></div><div class="finding" style="margin-top:12px"><div class="findingtop"><b>Filter status</b><span class="level ${d.status==='failed'?'blocked':'hide_use'}">${esc(d.status||"idle")}</span></div><p>Cleartext is never shown in this diagnostic. Counts are memory-only.</p></div>`;
+    }
+
+    /* ---------- history panel ---------- */
+    let openCall=null,callsSig="";
+    function historySkeleton(){
+      return `<div class="panel"><div class="panelinner" style="max-width:820px">
+        <h1>Model call history</h1>
+        <p class="sub">Every request the model received this session, exactly as it crossed the privacy boundary: redacted frames, scrubbed text, and injected system prompts, plus the model's raw reply before any placeholder resolution.</p>
+        <div id="call-list"><div class="empty">No model calls yet. Calls are recorded live during protected runs and stay inspectable here afterward.</div></div>
+      </div></div>`;
+    }
+    async function updateHistory(force){
+      const list=$("#call-list");if(!list)return;
+      let data;try{data=await api("/api/calls")}catch{return}
+      const calls=(data.calls||[]).slice().reverse();
+      const sig=calls.map(c=>`${c.id}:${c.state}:${c.status}`).join("|");
+      if(sig===callsSig&&!force)return;
+      callsSig=sig;
+      if(!calls.length){list.innerHTML=`<div class="empty">No model calls yet. Calls are recorded live during protected runs and stay inspectable here afterward.</div>`;return}
+      list.innerHTML=calls.map(c=>{
+        const time=new Date(c.at*1000).toLocaleTimeString();
+        const status=c.status===null||c.status===undefined?"n/a":c.status;
+        return `<div class="card callrow" style="margin-bottom:8px">
+          <button class="callhead" data-call="${c.id}">
+            <span class="cid">#${c.id}</span>
+            <span class="cprev">${esc(c.preview||"(no user text)")}</span>
+            <span class="cmeta">${esc(c.model||"")} · ${c.messages} msg · ${(c.images||[]).length} img · ${c.duration_ms} ms · HTTP ${esc(status)} · ${time}
+              <span class="cstate ${esc(c.state)}">${esc(c.state)}</span></span>
+          </button>
+          <div class="calldetail" id="call-detail-${c.id}" hidden></div>
+        </div>`;
+      }).join("");
+      list.querySelectorAll("[data-call]").forEach(b=>b.onclick=()=>toggleCall(Number(b.dataset.call)));
+      if(openCall!==null&&calls.some(c=>c.id===openCall)){const id=openCall;openCall=null;toggleCall(id)}
+    }
+    async function toggleCall(id){
+      const box=$(`#call-detail-${id}`);if(!box)return;
+      if(openCall===id){box.hidden=true;openCall=null;return}
+      const previous=openCall===null?null:$(`#call-detail-${openCall}`);
+      if(previous)previous.hidden=true;
+      openCall=id;
+      box.hidden=false;box.innerHTML=`<div class="empty">Loading…</div>`;
+      let record;try{record=await api(`/api/call/${id}`)}catch(e){box.innerHTML=`<div class="empty">${esc(e.message)}</div>`;return}
+      box.innerHTML=renderCallDetail(record);
+    }
+    function contentBlocks(callId,content){
+      if(typeof content==="string")return `<pre class="block">${esc(content)}</pre>`;
+      if(!Array.isArray(content))return `<pre class="block">${esc(JSON.stringify(content,null,2))}</pre>`;
+      return content.map(part=>{
+        if(part&&part.type==="text")return `<pre class="block">${esc(part.text)}</pre>`;
+        if(part&&part.type==="image_url"){
+          const url=part.image_url&&part.image_url.url||"";
+          const match=/^plva:image\/(\d+)$/.exec(url);
+          if(match)return `<img class="callimg" src="/api/call/${callId}/image/${match[1]}" alt="Frame sent to the model" loading="lazy">`;
+          return `<pre class="block">${esc(url||"(image)")}</pre>`;
+        }
+        return `<pre class="block">${esc(JSON.stringify(part,null,2))}</pre>`;
+      }).join("");
+    }
+    function renderCallDetail(record){
+      const messages=(record.request&&record.request.messages)||[];
+      const request=messages.map(m=>`<div class="msg"><span class="rolechip ${esc(m.role||"")}">${esc(m.role||"message")}</span>${contentBlocks(record.id,m.content)}</div>`).join("");
+      const extras={...record.request};delete extras.messages;
+      let response;
+      if(!record.response){
+        response=`<div class="empty" style="padding:16px">${record.state==="streamed"?"The reply streamed straight through to the agent and was not buffered.":"No response was recorded for this call."}</div>`;
+      }else{
+        const choice=(record.response.choices||[])[0]||{};
+        const message=choice.message||{};
+        let content=message.content;
+        try{content=JSON.stringify(JSON.parse(content),null,2)}catch{}
+        const usage=record.response.usage?` · ${record.response.usage.prompt_tokens??"?"} in / ${record.response.usage.completion_tokens??"?"} out tokens`:"";
+        response=`<div class="msg"><span class="rolechip assistant">${esc(message.role||"assistant")} · ${esc(choice.finish_reason||"")}${esc(usage)}</span><pre class="block">${esc(content??JSON.stringify(record.response,null,2))}</pre></div>`;
+      }
+      return `<div class="callsection"><h4>Request: what the model saw</h4>${request||'<div class="empty">No messages.</div>'}</div>
+        <div class="callsection"><h4>Request parameters</h4><pre class="block">${esc(JSON.stringify(extras,null,2))}</pre></div>
+        <div class="callsection"><h4>Response: what the model returned</h4>${response}</div>`;
+    }
+
+    /* ---------- privacy panel ---------- */
+    function privacySkeleton(){
+      return `<div class="panel"><div class="panelinner">
+        <h1>Privacy controls</h1>
+        <p class="sub">Choose what Holo can use for each kind of sensitive information. Unknown types are always blocked. Changes apply to the next run.</p>
+        <div class="legend">
+          <div><b><span class="ldot" style="background:var(--ok)"></span>Hide &amp; use</b>Holo uses a token.</div>
+          <div><b><span class="ldot" style="background:var(--warn)"></span>Approval</b>Denied until a local approver exists.</div>
+          <div><b><span class="ldot" style="background:var(--bad)"></span>Blocked</b>No token or vault entry.</div>
+        </div>
+        <div class="card policycard" id="policy-list"></div>
+      </div></div>`;
+    }
+    function renderPanel(){
+      if(tab==="privacy"){
+        let html="";
+        for(const [group,classes] of Object.entries(groups)){
+          html+=`<section class="policygroup"><h3>${group}</h3>`;
+          for(const cls of classes){
+            const selected=state.policy[cls];
+            html+=`<div class="policyrow"><div class="pname">${labels[cls]}<small>${cls}</small></div><div class="seg">${Object.keys(levelLabels).map(level=>`<button data-class="${cls}" data-level="${level}" class="${selected===level?'active':''}"><span class="sdot"></span>${levelLabels[level]}</button>`).join("")}</div></div>`;
+          }
+          html+="</section>";
+        }
+        $("#policy-list").innerHTML=html;
+        document.querySelectorAll(".seg button").forEach(b=>b.onclick=()=>setPolicy(b.dataset.class,b.dataset.level));
+        return;
+      }
+      if(tab==="lab")renderLab();
+    }
+
+    /* ---------- lab panel ---------- */
+    function labSkeleton(){
+      return `<div class="panel"><div class="panelinner">
+        <h1>Advanced lab</h1>
+        <p class="sub">Testing and diagnostics. Weakening these settings weakens privacy, so use synthetic data here.</p>
+        <div class="card labcard" id="lab-selects"></div>
+        <div class="card labcard" id="feature-list"></div>
+        <div class="warning">Disabling chips, history scrub, or resolution weakens privacy. Use synthetic data in the advanced lab.</div>
+      </div></div>`;
+    }
+    function segRow(title,detail,key,options){
+      const current=state.settings[key];
+      return `<div class="setting"><div class="about">${title}<small>${detail}</small></div><div class="seg" style="min-width:210px">${options.map(([v,l])=>`<button data-setting="${key}" data-value="${v}" class="${current===v?'active':''}">${l}</button>`).join("")}</div></div>`;
+    }
+    function renderLab(){
+      $("#lab-selects").innerHTML=
+        segRow("Provider","Inference endpoint","provider",[["hcompany","Holo-1"],["overshoot","Overshoot"]])+
+        segRow("Vision mode","OCR quality / latency","vision_mode",[["fast","Fast"],["cascade","Cascade"],["accurate","Accurate"]])+
+        segRow("Worker lifecycle","Startup versus idle memory","lifecycle",[["eager","Eager"],["adaptive","Adaptive"],["cold","Cold"]]);
+      document.querySelectorAll("[data-setting]").forEach(b=>b.onclick=()=>saveSettings({[b.dataset.setting]:b.dataset.value}));
+      const f=state.settings.features;
+      $("#feature-list").innerHTML=Object.entries(featureLabels).map(([key,[title,detail]])=>`<div class="setting"><div class="about">${title}<small>${detail}</small></div><label class="switch"><input type="checkbox" data-feature="${key}" ${f[key]?'checked':''}><span class="slider"></span></label></div>`).join("");
+      document.querySelectorAll("[data-feature]").forEach(i=>i.onchange=()=>saveSettings({features:{[i.dataset.feature]:i.checked}}));
+    }
+
+    /* ---------- render loop ---------- */
+    function render(force){
+      if(!state)return;
+      renderChrome();
+      const nextMode=tab==="chat"?(sessionActive()?"chat-work":"chat-hero"):tab;
+      if(nextMode!==mode||force){
+        mode=nextMode;
+        $("#main").innerHTML=tab==="chat"?chatSkeleton():tab==="history"?historySkeleton():tab==="privacy"?privacySkeleton():labSkeleton();
+        if(tab==="chat")wireChat();
+        if(tab==="history")callsSig="";
+        renderPanel();
+      }
+      if(tab==="chat")updateChat();
+      if(tab==="history")updateHistory(false);
+    }
+    async function refresh(){try{state=await api("/api/state");render(false)}catch(e){toast("Demo service unavailable")}}
+
+    document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>{tab=b.dataset.nav;reveal=false;render(true)});
+    $("#plva-toggle").onclick=()=>saveSettings({plva_enabled:!state.settings.plva_enabled});
+    document.addEventListener("click",e=>{const m=$("#model-menu");if(m&&!e.target.closest(".modelwrap"))m.classList.remove("open")});
+    document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="Enter")run()});
+    refresh();setInterval(refresh,900);
   </script>
 </body>
 </html>

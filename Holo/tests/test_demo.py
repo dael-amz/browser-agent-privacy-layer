@@ -207,7 +207,7 @@ async def test_demo_api_serves_ui_controls_and_memory_viewers(
         run = await client.post("/api/run", json={"prompt": "synthetic task"})
         invalid = await client.put("/api/policy", json={"EMAIL": "invalid"})
 
-    assert page.status_code == 200 and "Ask your computer" in page.text
+    assert page.status_code == 200 and "What can I do for you?" in page.text
     assert state.json()["settings"]["plva_enabled"] is True
     assert frame.content == b"synthetic-png"
     assert vault.json()["entries"][0]["placeholder"] == "EMAIL_1_test"

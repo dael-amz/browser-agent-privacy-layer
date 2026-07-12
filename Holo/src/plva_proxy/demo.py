@@ -75,6 +75,8 @@ class DemoController:
         self._findings: dict[str, Any] = {}
         self._filter: dict[str, Any] = {"status": "idle"}
         self._stats: dict[str, Any] = {}
+        self._calls: dict[int, dict[str, Any]] = {}
+        self._call_images: dict[tuple[int, int], tuple[str, bytes]] = {}
         self._policy = _load_policy().snapshot()
         self._settings: dict[str, Any] = {
             "plva_enabled": True,
@@ -99,6 +101,7 @@ class DemoController:
                 "stats": dict(self._stats),
                 "has_frame": self._frame is not None,
                 "vault_count": len(self._vault.get("entries", [])),
+                "call_count": len(self._calls),
                 "filter": dict(self._filter),
             }
 
@@ -161,6 +164,8 @@ class DemoController:
             self._findings = {}
             self._filter = {"status": "idle"}
             self._stats = {}
+            self._calls = {}
+            self._call_images = {}
             self._event("Preparing private session", "Nothing has left the device yet.")
             environment = self._run_environment()
             try:
@@ -213,6 +218,24 @@ class DemoController:
     def filter_diagnostics(self) -> dict[str, Any]:
         with self._lock:
             return dict(self._filter)
+
+    def calls(self) -> list[dict[str, Any]]:
+        """Value-light call summaries, newest last, for the History tab list."""
+
+        with self._lock:
+            return [
+                {key: value for key, value in record.items() if key not in {"request", "response"}}
+                for _, record in sorted(self._calls.items())
+            ]
+
+    def call(self, call_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            record = self._calls.get(call_id)
+            return copy.deepcopy(record) if record is not None else None
+
+    def call_image(self, call_id: int, index: int) -> tuple[str, bytes] | None:
+        with self._lock:
+            return self._call_images.get((call_id, index))
 
     def _require_idle(self) -> None:
         if self._process is not None and self._process.poll() is None:
@@ -282,7 +305,52 @@ class DemoController:
                     self._vault = vault
                 if filter_report is not None:
                     self._filter = filter_report
+            self._mirror_calls()
             time.sleep(0.35)
+
+    def _mirror_calls(self) -> None:
+        """Copy new proxy call records into memory so history outlives the run.
+
+        The proxy buffer is the source of truth while it lives; a call is
+        mirrored only once its images are all fetched, so a partially copied
+        record is retried on the next tick instead of appearing broken.
+        """
+
+        index = _fetch_json("/viewer/calls")
+        if index is None:
+            return
+        with self._lock:
+            known = set(self._calls)
+        for item in index.get("calls", []) if isinstance(index.get("calls"), list) else []:
+            call_id = item.get("id")
+            if not isinstance(call_id, int) or call_id in known:
+                continue
+            record = _fetch_json(f"/viewer/call/{call_id}")
+            if record is None:
+                continue
+            image_types = record.get("images")
+            images: list[tuple[str, bytes]] = []
+            complete = True
+            for image_index, media_type in enumerate(
+                image_types if isinstance(image_types, list) else []
+            ):
+                blob = _fetch_bytes(f"/viewer/call/{call_id}/image/{image_index}")
+                if blob is None:
+                    complete = False
+                    break
+                images.append((str(media_type), blob))
+            if not complete:
+                continue
+            with self._lock:
+                self._calls[call_id] = record
+                for image_index, image in enumerate(images):
+                    self._call_images[(call_id, image_index)] = image
+                while len(self._calls) > 48:
+                    oldest = min(self._calls)
+                    del self._calls[oldest]
+                    self._call_images = {
+                        key: value for key, value in self._call_images.items() if key[0] != oldest
+                    }
 
     def _event(self, title: str, detail: str) -> None:
         self._events.append({"title": title, "detail": detail, "time": time.strftime("%H:%M:%S")})
@@ -396,6 +464,25 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
     @app.get("/api/filter")
     async def filter_report() -> Response:
         return _json_response(active.filter_diagnostics())
+
+    @app.get("/api/calls")
+    async def calls() -> Response:
+        return _json_response({"calls": active.calls()})
+
+    @app.get("/api/call/{call_id}")
+    async def call(call_id: int) -> Response:
+        record = active.call(call_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="call not found")
+        return _json_response(record)
+
+    @app.get("/api/call/{call_id}/image/{index}")
+    async def call_image(call_id: int, index: int) -> Response:
+        image = active.call_image(call_id, index)
+        if image is None:
+            raise HTTPException(status_code=404, detail="call image not found")
+        media_type, data = image
+        return Response(data, media_type=media_type, headers={"cache-control": "no-store"})
 
     return app
 

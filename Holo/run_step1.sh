@@ -3,6 +3,7 @@
 #
 #   ./run_step1.sh                          # default terminal task
 #   ./run_step1.sh "your own task prompt"   # custom task for the agent
+#   PLVA_AUDIT=1 ./run_step1.sh "task"       # keep the memory-only viewer alive afterward
 #   Press Esc twice during the run to abort it.
 #
 # Prereq: Holo/.env containing API_KEY=<Overshoot key>, or HAI_API_KEY=<H Company key>
@@ -19,6 +20,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "usage: $0 [\"task prompt for the agent\"]"
   echo "  default task: $DEFAULT_TASK"
   echo "  provider: PLVA_PROVIDER=overshoot (default) or hcompany"
+  echo "  PLVA_AUDIT=1 keeps the redacted sent-frame viewer alive until Ctrl-C"
   echo "  during the run: press Esc twice to abort"
   exit 0
 fi
@@ -28,6 +30,14 @@ UV="${UV:-$HOME/.local/bin/uv}"
 TASK="${1:-$DEFAULT_TASK}"
 PROVIDER="${PLVA_PROVIDER:-overshoot}"
 REDACT_ENGINE="${PLVA_REDACT_ENGINE:-accelerated}"
+case "${PLVA_AUDIT:-0}" in
+  1|true|TRUE|yes|YES|on|ON) AUDIT_MODE=1 ;;
+  0|false|FALSE|no|NO|off|OFF|"") AUDIT_MODE=0 ;;
+  *)
+    echo "ERROR: PLVA_AUDIT must be an on/off value" >&2
+    exit 1
+    ;;
+esac
 
 parse_on_off() {
   local destination="$1" value="$2" label="$3"
@@ -115,9 +125,10 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
     --vision-mode "${PLVA_VISION_MODE:-cascade}"
     --redact-lifecycle "${PLVA_REDACT_LIFECYCLE:-adaptive}"
     --redact-idle-seconds "${PLVA_REDACT_IDLE_SECONDS:-60}"
+    --audit-capacity "${PLVA_AUDIT_CAPACITY:-32}"
   )
   if [[ "$REDACT_ENGINE" == "vision" ]]; then
-    VISUAL_MODEL="${PLVA_VISUAL_MODEL:-plvas-v3/harness/plva-v2-baseline/runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx}"
+    VISUAL_MODEL="${PLVA_VISUAL_MODEL:-plva-v2-baseline/runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx}"
     if [[ ! -f "$VISUAL_MODEL" ]]; then
       echo "ERROR: visual detector not found: $VISUAL_MODEL" >&2
       exit 1
@@ -146,6 +157,10 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
     fi
   fi
 else
+  if [[ "$AUDIT_MODE" == 1 ]]; then
+    echo "ERROR: PLVA_AUDIT=1 requires PLVA_REDACT=1" >&2
+    exit 1
+  fi
   echo "--- redaction OFF"
 fi
 parse_on_off PRIVACY_SKILL "${PLVA_PRIVACY_SKILL:-$PRIVACY_ENABLED}" PLVA_PRIVACY_SKILL
@@ -267,5 +282,13 @@ if [[ -n "$ABORTED" ]]; then
   echo "--- run aborted by Esc Esc"
 else
   echo "--- holo exit: $HOLO_EXIT (0 = Step 1 task completed end-to-end)"
+fi
+if [[ "$AUDIT_MODE" == 1 ]]; then
+  echo "--- safe sent-frame audit remains at http://127.0.0.1:$PORT/viewer"
+  echo "--- JSON metadata: http://127.0.0.1:$PORT/viewer/frames"
+  echo "--- press Ctrl-C when finished auditing; all buffered frames will be discarded"
+  while kill -0 "$PROXY_PID" 2>/dev/null; do
+    sleep 1
+  done
 fi
 exit "$HOLO_EXIT"

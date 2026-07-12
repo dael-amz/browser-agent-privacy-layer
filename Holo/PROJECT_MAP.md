@@ -52,7 +52,7 @@ Hackathon/
     │       ├── contract_probe.py        Privacy-safe Overshoot model/JSON/SSE contract probe
     │       ├── live.py                  Continuous local capture→redact→viewer loop (no upstream)
     │       ├── privacy.py               Session vault, chip painter, resolver, and history scrub
-    │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks + viewer (fail-closed, SSE-safe)
+    │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks + memory-only sent-frame audit viewer (fail-closed, SSE-safe)
     │       ├── providers.py             Overshoot and H Company endpoint/model/key presets
     │       ├── redactor.py              Persistent accelerated worker client + frozen CLI fallback
     │       └── runtime_capture.py       Loopback-only Holo screenshot-transport capture stub (+ /health)
@@ -168,7 +168,9 @@ Active blockers / open items:
 `plva-proxy` is the runtime's sole endpoint and the sole provider egress (Step 1/ADR-0001 role),
 now with the Step 3 mutation seam (`Hooks`): request hooks rewrite body + upstream headers,
 response hooks rewrite the completion (JSON and SSE). Step 4 plugs redaction and placeholder
-resolution into that seam.
+resolution into that seam. Its loopback viewer keeps a bounded memory-only ledger of each
+post-redaction image included in an upstream request, with value-free delivery metadata and
+selectable frame history; `PLVA_AUDIT=1` keeps that buffer available after a CUA task exits.
 
 ## Local verification commands
 
