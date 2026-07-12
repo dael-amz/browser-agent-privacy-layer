@@ -63,6 +63,12 @@ from plva_proxy.redactor import (
     redact_png,
 )
 from plva_proxy.runtime_capture import LOOPBACK_HOST
+from plva_proxy.tools import (
+    ToolError,
+    ToolLoop,
+    ToolRegistry,
+    tool_teaching_request_hook,
+)
 
 DEFAULT_PORT: Final = 18081
 FRAME_AUDIT_IDS_KEY: Final = "_plva_frame_audit_ids"
@@ -267,6 +273,44 @@ def image_replacement_hook(image_path: Path) -> RequestHook:
         return rewritten, headers
 
     return replace
+
+
+def grammar_capture_hook(out_path: Path) -> RequestHook:
+    """Snapshot the first request's action grammar to a file — schema only, never messages.
+
+    Step 6.5 needs the runtime's ``structured_outputs`` value to judge whether a
+    novel tool action is even grammatically admissible. The snapshot records
+    request keys, model id, ``structured_outputs``, and ``chat_template_kwargs``
+    and deliberately nothing else (§8.5): the message history — the only part
+    that can carry frames or values — is never written.
+    """
+
+    lock = threading.Lock()
+    captured = False
+
+    def capture(
+        document: dict[str, Any], headers: dict[str, str]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        nonlocal captured
+        with lock:
+            first = not captured
+            captured = True
+        if first:
+            request_keys = sorted(document)
+            snapshot = {
+                "request_keys": request_keys,
+                "model": document.get("model"),
+                "structured_outputs": document.get("structured_outputs"),
+                "chat_template_kwargs": document.get("chat_template_kwargs"),
+            }
+            try:
+                out_path.write_text(json.dumps(snapshot, indent=2) + "\n")
+            except OSError as exc:
+                raise HookError("grammar snapshot could not be written") from exc
+            _LOGGER.info("grammar snapshot written: keys=%d", len(request_keys))
+        return document, headers
+
+    return capture
 
 
 @dataclass(slots=True)
@@ -945,6 +989,7 @@ def create_app(
     call_store: CallStore | None = None,
     vault: SessionVault | None = None,
     scrubber: HistoryScrubber | None = None,
+    tool_loop: ToolLoop | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     startup_callbacks: tuple[Callable[[], None], ...] = (),
     cleanup_callbacks: tuple[Callable[[], None], ...] = (),
@@ -1013,7 +1058,7 @@ def create_app(
                 # Post-hook only: what leaves here is redacted and scrubbed,
                 # so it is the only version the history viewer may hold.
                 call_document = document
-            except (HookError, PrivacyError, ValueError) as exc:
+            except (HookError, PrivacyError, ToolError, ValueError) as exc:
                 # Hook/Privacy errors are deliberately value-free fixed messages;
                 # include them so live fail-closed loops are diagnosable without
                 # ever logging request content or vault values.
@@ -1035,7 +1080,44 @@ def create_app(
         content_type = upstream.headers.get("content-type", "application/octet-stream")
         is_sse = content_type.lower().startswith("text/event-stream")
         response_hook = active_hooks.on_response if use_hooks else None
-        hook_applies = response_hook is not None and upstream.status_code == 200
+        active_tool_loop = tool_loop if use_hooks else None
+        hook_applies = (
+            response_hook is not None or active_tool_loop is not None
+        ) and upstream.status_code == 200
+
+        async def _run_tool_loop(loop: ToolLoop, completion: dict[str, Any]) -> dict[str, Any]:
+            request_document = json.loads(body)
+            if not isinstance(request_document, dict):
+                raise HookError("request body is not a JSON object")
+            rounds = 0
+            call = loop.detect(completion)
+            while call is not None:
+                rounds += 1
+                if rounds > loop.max_rounds:
+                    raise HookError("tool loop exceeded max rounds")
+                result = await run_in_threadpool(loop.execute, call)
+                request_document = loop.continuation(request_document, completion, call, result)
+                continuation_body = json.dumps(request_document, separators=(",", ":")).encode()
+                follow_request = client.build_request(
+                    "POST", path, content=continuation_body, headers=headers
+                )
+                try:
+                    follow = await client.send(follow_request)
+                except httpx.HTTPError as exc:
+                    raise HookError("tool continuation request failed") from exc
+                if follow.status_code != 200:
+                    raise HookError(f"tool continuation status {follow.status_code}")
+                try:
+                    parsed = json.loads(follow.content)
+                except ValueError as exc:
+                    raise HookError("tool continuation response is not JSON") from exc
+                if not isinstance(parsed, dict):
+                    raise HookError("tool continuation response is not an object")
+                completion = parsed
+                call = loop.detect(completion)
+            if rounds:
+                _LOGGER.info("tool loop completed: rounds=%d", rounds)
+            return completion
 
         if is_sse and not hook_applies:
             record_call(upstream.status_code, None, "streamed")
@@ -1053,7 +1135,7 @@ def create_app(
         finally:
             await upstream.aclose()
 
-        if response_hook is not None and upstream.status_code == 200:
+        if hook_applies:
             recorded = False
             try:
                 document = _assemble_sse_completion(payload) if is_sse else json.loads(payload)
@@ -1063,8 +1145,10 @@ def create_app(
                 # placeholders, never the restored local values.
                 record_call(200, document, "sent")
                 recorded = True
-                mutated = response_hook(document)
-            except (HookError, PrivacyError, ValueError) as exc:
+                if active_tool_loop is not None:
+                    document = await _run_tool_loop(active_tool_loop, document)
+                mutated = response_hook(document) if response_hook is not None else document
+            except (HookError, PrivacyError, ToolError, ValueError) as exc:
                 if not recorded:
                     record_call(200, None, "hook_failed")
                 _LOGGER.warning("response hook failed closed: %s: %s", type(exc).__name__, str(exc))
@@ -1485,6 +1569,12 @@ def main() -> None:
         default=int(os.environ.get("PLVA_AUDIT_CAPACITY", "32")),
         help="maximum redacted sent-frame records kept in memory (default: 32)",
     )
+    parser.add_argument(
+        "--capture-grammar",
+        type=Path,
+        default=None,
+        help="write the first request's structured_outputs schema (never messages) to this file",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
@@ -1648,6 +1738,8 @@ def main() -> None:
         if extra_hook is not None:
             hooks = _combine_hooks(hooks, Hooks(on_request=extra_hook))
     hooks = _combine_hooks(hooks, privacy_hooks)
+    if args.capture_grammar is not None:
+        hooks = _combine_hooks(Hooks(on_request=grammar_capture_hook(args.capture_grammar)), hooks)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     if args.privacy:

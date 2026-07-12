@@ -67,6 +67,9 @@ class AcceleratedRedactorConfig:
     cache_root: Path | None = None
     vision_mode: str = "cascade"
     visual_model: Path | None = None
+    ocr_engine: str = "apple"
+    visual_enabled: bool = True
+    semantic_engine: str = "rampart"
 
 
 class AcceleratedRedactor:
@@ -92,6 +95,14 @@ class AcceleratedRedactor:
             "accurate",
         }:
             raise ValueError("vision_mode must be fast, cascade, or accurate")
+        if config.worker_kind == "vision" and config.ocr_engine not in {"apple", "rapidocr"}:
+            raise ValueError("ocr_engine must be apple or rapidocr")
+        if config.worker_kind == "vision" and config.semantic_engine not in {
+            "rampart",
+            "gliner2",
+            "openai-pf",
+        }:
+            raise ValueError("semantic_engine must be rampart, gliner2, or openai-pf")
         if config.profile not in PROFILES:
             raise ValueError(f"profile must be one of: {', '.join(PROFILES)}")
         if config.cache_entries < 0:
@@ -306,8 +317,14 @@ class AcceleratedRedactor:
                 self._config.profile,
                 "--mode",
                 self._config.vision_mode,
+                "--engine",
+                self._config.ocr_engine,
+                "--semantic-engine",
+                self._config.semantic_engine,
             ]
-            if self._config.visual_model is not None:
+            if not self._config.visual_enabled:
+                command.append("--no-visual")
+            elif self._config.visual_model is not None:
                 visual_model = self._config.visual_model.resolve()
                 if not visual_model.is_file():
                     raise RedactionError("configured visual detector is missing")
