@@ -5,7 +5,7 @@
 # by process, but it can match by socket-owning user, so the enforcing variant
 # runs the proxy as a dedicated role user.
 #
-# One-time setup (operator, sudo):
+# One-time setup (operator, sudo; see docs/egress/bootstrap-pf.md first):
 #   sudo sysadminctl -addUser _plvaproxy -shell /usr/bin/false   # role user
 #   sudo pfctl -a plva -f docs/egress/pf-plva.anchor             # load anchor
 #   sudo pfctl -e                                                # enable pf

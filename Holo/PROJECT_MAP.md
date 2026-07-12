@@ -80,7 +80,8 @@ Hackathon/
         ├── step-3-status.md             Interception hooks built; local verify PASS, live verify pending
         ├── step-4-accelerated-redaction.md  Persistent parallel GPU worker evidence and benchmark
         ├── step-4-obscuring.md          Real obscuring via frozen v2 detector + /viewer
-        └── step-5-privacy-core.md       PASS: vault, chips, resolution, and history scrub
+        ├── step-5-privacy-core.md       PASS: vault, chips, resolution, and history scrub
+        └── cua-placeholder-optimization.md  Multi-step token reuse, cache, readiness, and residual gates
 ```
 
 ## What each area is for
@@ -123,6 +124,12 @@ COMPLETE** (2026-07-12): those OCR findings now feed stable nonce-namespaced pla
 a session-only vault; executed fields resolve locally; request history is scrubbed by plain match
 plus warm Core ML Rampart. Synthetic Holo cooperation and end-to-end resolution passed. See
 `verification/step-5-privacy-core.md`.
+The CUA/placeholder optimization pass additionally binds each launch to its own proxy instance,
+supports issued-token reuse across later frames, hardens action grammar handling, and removes the
+frame/history cache-thrash paths. Its local integration gate passes; a controlled live PLVA-off/on
+task corpus is still required. The current detector is release eligible; the development-only
+language in the frozen July 11 v2 baseline describes historical provenance, not current status.
+See `verification/cua-placeholder-optimization.md`.
 Step 2 (Overshoot latency measurement) has not started.
 
 Completed evidence:
@@ -137,7 +144,7 @@ Completed evidence:
   `tools`), envelope uses plural `tool_calls`. Frame stayed local and was shredded; nothing reached
   the repo. See `verification/step-0-runtime-capture.md`.
 - **§7 decision recorded** in `docs/decisions/0001-openshell-sec7-egress-topology.md`.
-- The main automated gate is 103 passing tests with at least 80% coverage; the Core ML package has
+- The main automated gate is 146 passing tests with at least 80% coverage; the Core ML package has
   17 passing tests. Formatting, Ruff, strict mypy,
   lock validation, sdist, and wheel checks pass.
 - **Pass-through proxy built and gated** (2026-07-11 resume): loopback-only, verbatim body relay,

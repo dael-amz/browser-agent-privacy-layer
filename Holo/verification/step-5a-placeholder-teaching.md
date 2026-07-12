@@ -6,14 +6,15 @@ Verified 2026-07-12 with synthetic values only.
 
 - The scheme is appended inside Holo's existing system message without replacing its content or
   creating a second system message; user-observation fallback handles requests without one.
-- The static prompt requires the exact inner token in executed action fields and forbids guessing,
-  mutation, decorative guillemets, and stale-token reuse.
+- The static prompt requires an exact issued token in executed action fields and forbids guessing
+  or mutation. Decorative guillemets are tolerated and stripped locally before execution.
 - A separate `[PLVA_SECURITY_POLICY]` block lists the active per-class levels; manifests label each
   token with its level, and the native skill tells Holo that the live policy is authoritative.
 - The same atomic vault-and-paint operation emits a value-free `{token, class}` manifest.
 - Only the latest observation's frame manifest is attached beside its image.
 - Prior PLVA system messages and frame manifests are removed before fresh injection.
-- A current frame without tokens receives an explicit `none` manifest.
+- A current frame without tokens receives an explicit `none` current-frame manifest plus a
+  value-free list of issued tokens still active for the private session.
 - Manifest metadata is removed before provider forwarding and malformed/forged entries fail closed.
 - `holo-skills/plva-placeholders/SKILL.md` is installed as the native `plva-placeholders` skill.
 
@@ -27,9 +28,9 @@ jq empty ~/.holo/settings.json                          passed
 workspace/installed SKILL.md byte comparison            passed
 ```
 
-Tests cover current-frame-only membership, stale-token removal, the empty-frame case, token/class
-validation, single-system-message merging, observation placement, cleartext exclusion, action-only
-resolution, JSON/SSE proxy behavior, and privacy-safe logs.
+Tests cover current/active membership, forged-token rejection, multi-step later-frame reuse, the
+empty-frame case, token/class validation, single-system-message merging, observation placement,
+cleartext exclusion, action-only resolution, JSON/SSE proxy behavior, and privacy-safe logs.
 
 An H Company schema capture showed that Holo already supplies a 27,165-character system message.
 The original PLVA insertion created a second consecutive system message and received HTTP 400.

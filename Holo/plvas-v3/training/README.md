@@ -16,8 +16,9 @@ replacement tracks. Neither replacement may silently become a release model.
 | PLVA compact tagger replacement | Development pipeline verified | Training and release require a frozen Rampart baseline |
 | Fine-grained visual replacement | Pinned YOLO11n AGPL development base plus data, training, evaluation, and Modal pipeline | Closed-source release requires an Ultralytics commercial license and measured replacement gates |
 
-No custom model in this repository is currently release eligible. The tooling
-records development artifacts, but publication fails closed.
+The current detector is release eligible. Some checked-in development manifests and examples
+describe earlier candidates that were not eligible; those remain historical artifacts. Publication
+tooling continues to fail closed for any new candidate that does not pass the release gates.
 
 ## Pinned asset bootstrap
 
