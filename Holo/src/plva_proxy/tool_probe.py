@@ -36,6 +36,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageDraw
 
+from plva_proxy.credentials import resolve_provider_key
 from plva_proxy.providers import PROVIDERS, ProviderSpec
 from plva_proxy.runtime_capture import LOOPBACK_HOST
 
@@ -581,23 +582,6 @@ def _runtime_answer(model: str) -> dict[str, Any]:
     }
 
 
-def _env_value(path: Path, names: tuple[str, ...]) -> str | None:
-    for name in names:
-        if value := os.environ.get(name):
-            return value
-    try:
-        lines = path.read_text("utf-8").splitlines()
-    except OSError:
-        return None
-    for line in lines:
-        for name in names:
-            if line.startswith(name + "="):
-                value = line.split("=", 1)[1].strip().strip("\"'")
-                if value:
-                    return value
-    return None
-
-
 @contextmanager
 def _temporary_skill() -> Iterator[None]:
     target = Path.home() / ".holo" / "skills" / "plva-tool-probe" / "SKILL.md"
@@ -671,7 +655,7 @@ def main() -> None:
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
     provider = PROVIDERS[args.provider]
-    key = _env_value(ROOT / ".env", provider.key_names)
+    key, _ = resolve_provider_key(provider=args.provider, project_root=ROOT)
     if key is None:
         parser.error("the selected provider key is unavailable")
     runner = ProbeRunner(provider_name=args.provider, provider=provider, api_key=key)

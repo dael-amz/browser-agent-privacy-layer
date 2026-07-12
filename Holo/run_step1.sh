@@ -67,15 +67,19 @@ parse_on_off() {
 case "$PROVIDER" in
   overshoot)
     MODEL="${PLVA_MODEL:-Hcompany/Holo3-35B-A3B}"
-    if [[ -z "${OVERSHOOT_API_KEY:-}${API_KEY:-}" ]] && { [[ ! -f .env ]] || ! grep -Eq '^(OVERSHOOT_API_KEY|API_KEY)=..*' .env; }; then
-      echo "ERROR: put API_KEY=<Overshoot key> in Holo/.env" >&2
+    if [[ -z "${OVERSHOOT_API_KEY:-}${API_KEY:-}" ]] \
+      && { [[ ! -f "$HOME/.holo/.env" ]] || ! grep -Eq '^(OVERSHOOT_API_KEY|API_KEY)=..+' "$HOME/.holo/.env"; } \
+      && { [[ ! -f .env ]] || ! grep -Eq '^(OVERSHOOT_API_KEY|API_KEY)=..+' .env; }; then
+      echo "ERROR: put API_KEY=<Overshoot key> in Holo/.env or ~/.holo/.env" >&2
       exit 1
     fi
     ;;
   hcompany)
     MODEL="${PLVA_MODEL:-holo3-1-35b-a3b}"
-    if [[ -z "${HAI_API_KEY:-}" ]] && { [[ ! -f .env ]] || ! grep -Eq '^HAI_API_KEY=..*' .env; }; then
-      echo "ERROR: put HAI_API_KEY=<H Company key> in Holo/.env" >&2
+    if [[ -z "${HAI_API_KEY:-}" ]] \
+      && { [[ ! -f "$HOME/.holo/.env" ]] || ! grep -Eq '^HAI_API_KEY=..+' "$HOME/.holo/.env"; } \
+      && { [[ ! -f .env ]] || ! grep -Eq '^HAI_API_KEY=..+' .env; }; then
+      echo "ERROR: put HAI_API_KEY=<H Company key> in Holo/.env, or run holo login (saves to ~/.holo/.env)" >&2
       exit 1
     fi
     ;;

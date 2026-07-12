@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
-from plva_proxy import demo
+from plva_proxy import credentials, demo
 
 
 class DormantThread:
@@ -44,6 +44,7 @@ def test_controller_validates_and_updates_policy_and_settings() -> None:
         {
             "plva_enabled": False,
             "provider": "overshoot",
+            "credential_source": "holo_cli",
             "vision_mode": "fast",
             "lifecycle": "cold",
             "features": {name: False for name in demo.FEATURE_ENV},
@@ -53,6 +54,7 @@ def test_controller_validates_and_updates_policy_and_settings() -> None:
     assert policy["EMAIL"] == "blocked"
     assert policy["PASSWORD"] == "hide_use"
     assert settings["plva_enabled"] is False
+    assert settings["credential_source"] == "holo_cli"
     assert settings["features"]["manifest"] is False
     with pytest.raises(ValueError, match="policy"):
         controller.set_policy([])
@@ -76,6 +78,21 @@ def test_demo_loads_editable_policy_file(monkeypatch: pytest.MonkeyPatch, tmp_pa
     policy_file.write_text('{"EMAIL":"invalid"}', encoding="utf-8")
     with pytest.raises(RuntimeError, match="invalid safety level"):
         demo.DemoController()
+
+
+def test_controller_reports_credential_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    holo_env = tmp_path / "holo.env"
+    holo_env.write_text("HAI_API_KEY=synthetic-key\n", encoding="utf-8")
+    monkeypatch.setattr(credentials, "HOLO_USER_ENV", holo_env)
+    monkeypatch.delenv("HAI_API_KEY", raising=False)
+
+    snapshot = demo.DemoController(history_root=tmp_path / "history").snapshot()
+
+    assert snapshot["credentials"]["configured"] is True
+    assert snapshot["credentials"]["source"] == "holo_cli"
+    assert "synthetic-key" not in json.dumps(snapshot)
 
 
 def test_controller_starts_with_memory_only_environment_and_can_stop(
@@ -207,6 +224,30 @@ def test_proxy_monitor_keeps_only_latest_memory_artifacts(
     assert controller.vault()["entries"][0]["placeholder"] == "EMAIL_1_test"
     assert controller.approvals()[0]["token"] == "EMAIL_1_test"
     assert controller.filter_diagnostics()["status"] == "passed"
+
+
+async def test_demo_connect_holo_cli_endpoint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    holo_env = tmp_path / "holo.env"
+    holo_env.write_text("HAI_API_KEY=synthetic-key\n", encoding="utf-8")
+    monkeypatch.setattr(credentials, "HOLO_USER_ENV", holo_env)
+    monkeypatch.delenv("HAI_API_KEY", raising=False)
+    controller = demo.DemoController(history_root=tmp_path / "history")
+    controller.set_settings({**controller.snapshot()["settings"], "credential_source": "environment"})
+    app = demo.create_demo_app(controller)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://demo.test"
+    ) as client:
+        before = await client.get("/api/state")
+        connected = await client.post("/api/credentials/connect-holo-cli")
+
+    assert before.json()["credentials"]["configured"] is False
+    assert connected.status_code == 200
+    assert connected.json()["credentials"]["configured"] is True
+    assert connected.json()["credentials"]["source"] == "holo_cli"
+    assert "synthetic-key" not in json.dumps(connected.json())
 
 
 async def test_demo_api_serves_ui_controls_and_memory_viewers(

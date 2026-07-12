@@ -205,13 +205,27 @@
     .pname{font-size:15px;line-height:20px}
     .pname small{display:block;color:var(--fore-secondary);font-size:12px}
     .seg{display:grid;grid-template-columns:repeat(3,1fr);background:var(--back-secondary);border-radius:var(--radius-full);padding:3px}
+    .animatedseg{position:relative;--seg-x:0;--seg-y:0}
+    .animatedseg .segindicator{position:absolute;left:3px;top:3px;bottom:3px;width:calc((100% - 6px)/3);
+      border-radius:var(--radius-full);background:var(--back-primary);box-shadow:0 1px 3px rgba(12,12,12,.08);
+      transform:translate(calc(var(--seg-x) * 100%),calc(var(--seg-y) * 100%));
+      transition:transform var(--duration-medium) var(--ease-smooth-out);pointer-events:none}
+    .animatedseg.seg-2 .segindicator{width:calc((100% - 6px)/2)}
+    .animatedseg.seg-4{border-radius:14px}
+    .animatedseg.seg-4 .segindicator{bottom:auto;width:calc((100% - 6px)/2);height:calc((100% - 6px)/2);border-radius:11px}
     .seg button{display:flex;align-items:center;justify-content:center;gap:5px;border-radius:var(--radius-full);
-      padding:6px 4px;font-size:13px;line-height:18px;color:var(--fore-secondary)}
+      min-width:0;padding:6px 4px;overflow:hidden;font-size:13px;line-height:18px;color:var(--fore-secondary);
+      text-overflow:ellipsis;white-space:nowrap}
     .seg button.active{background:var(--back-primary);color:var(--fore-primary);box-shadow:0 1px 3px rgba(12,12,12,.08)}
+    .animatedseg button{position:relative;z-index:1}
+    .animatedseg button.active{background:transparent;box-shadow:none}
     .seg .sdot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.35}
     .seg button.active[data-level=hide_use] .sdot{background:var(--ok);opacity:1}
     .seg button.active[data-level=approval] .sdot{background:var(--warn);opacity:1}
     .seg button.active[data-level=blocked] .sdot{background:var(--bad);opacity:1}
+    .seg-4{grid-template-columns:repeat(2,1fr)}
+    .seg-4 button{border-radius:11px}
+    .seg-2{grid-template-columns:repeat(2,1fr)}
     .setting{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border-fade)}
     .setting:last-child{border-bottom:0}
     .setting .about{font-size:15px;line-height:20px}
@@ -237,6 +251,24 @@
     .level.hide_use{color:var(--ok);border-color:currentColor}
     .level.approval{color:var(--warn);border-color:currentColor}
     .level.blocked{color:var(--bad);border-color:currentColor}
+    .cred{font-size:12px;padding:3px 9px;border-radius:var(--radius-full);border:1px solid var(--border-soft);white-space:nowrap}
+    .cred.cred-ok{color:var(--ok);border-color:currentColor}
+    .cred.cred-missing{color:var(--warn);border-color:currentColor}
+    .connrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(210px,300px);align-items:center;gap:12px;
+      padding:12px 0;border-bottom:1px solid var(--border-fade)}
+    .connrow:last-child{border-bottom:0}
+    .connname{font-size:15px;line-height:20px}
+    .connname small{display:block;color:var(--fore-secondary);font-size:13px;line-height:18px;margin-top:2px}
+    .connrow .seg{width:100%;min-width:0}
+    .connrow>.cred{justify-self:end}
+    .credentialrow>.setupcmd{grid-column:1/-1;width:100%;margin-top:0}
+    .credentialrow>.connectbtn{grid-column:1/-1;justify-self:start}
+    .connectbtn{min-height:34px;padding:6px 14px;border-radius:var(--radius-full);background:var(--back-inverse);color:var(--fore-inverse);
+      font-size:14px;line-height:18px;white-space:nowrap}
+    .connectbtn:disabled{opacity:.45}
+    .setupcmd{display:flex;align-items:center;gap:8px;margin-top:8px}
+    .setupcmd code{flex:1;padding:8px 10px;border-radius:var(--radius-card);background:var(--back-secondary);font:13px/18px ui-monospace,SFMono-Regular,Menlo,monospace}
+    .copybtn{min-height:34px;padding:6px 12px;border-radius:var(--radius-full);background:var(--back-secondary);font-size:13px}
     .secret{font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace;filter:blur(5px);user-select:none}
     .revealed .secret{filter:none;user-select:text}
     .toolbar{display:flex;justify-content:flex-end;margin-bottom:10px}
@@ -273,11 +305,28 @@
     .runcard.active{background:var(--back-inverse);border-color:var(--back-inverse)}
     .runcard.active b{color:var(--fore-inverse)}
     .runcard.active small{color:rgba(255,255,255,.6)}
-    .workspace.withrail{flex-direction:row;align-items:flex-start;justify-content:center}
-    .sessionrail{position:sticky;top:0;width:240px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;padding:2px 0 160px}
-    .sessionrail h3{margin:2px 2px 0;font-size:13px;font-weight:500;color:var(--fore-secondary)}
+    .workspace.withrail{display:grid;grid-template-columns:240px minmax(0,1fr) minmax(0,860px) minmax(0,1fr) 240px;
+      align-items:start;justify-content:center;width:100%;padding-inline:0;
+      transition:grid-template-columns var(--duration-medium) var(--ease-smooth-out)}
+    .workspace.withrail.rail-collapsed{grid-template-columns:48px minmax(0,1fr) minmax(0,860px) minmax(0,1fr) 48px}
+    .sessionrail{position:sticky;top:0;width:100%;min-width:0;min-height:calc(100dvh - 66px);flex-shrink:0;
+      display:flex;flex-direction:column;gap:8px;overflow:hidden;padding:2px 12px 160px 0;
+      border-right:1px solid var(--border-soft);transition:padding var(--duration-medium) var(--ease-smooth-out)}
+    .withrail .wsinner{grid-column:3}
+    .sessionrailhead{display:flex;align-items:center;gap:8px;margin-right:-12px;padding:0 4px 0 8px}
+    .sessionrail h3{flex:1;margin:2px 0 0;font-size:13px;font-weight:500;color:var(--fore-secondary);
+      white-space:nowrap;transition:opacity var(--duration-quick) var(--ease-smooth-out),transform var(--duration-fast) var(--ease-smooth-out)}
+    .sessiontoggle{display:grid;place-items:center;width:32px;height:32px;flex-shrink:0;border-radius:10px;
+      color:var(--fore-secondary);transition:background var(--duration-quick) var(--ease-smooth-out),color var(--duration-quick) var(--ease-smooth-out)}
+    .sessiontoggle:hover{background:var(--back-secondary);color:var(--fore-primary)}
+    .sessionrail #session-list{transition:opacity var(--duration-quick) var(--ease-smooth-out),transform var(--duration-fast) var(--ease-smooth-out)}
+    .sessionrail.collapsed{padding-right:4px}
+    .sessionrail.collapsed .sessionrailhead{justify-content:flex-end;margin-right:-4px;padding-left:4px}
+    .sessionrail.collapsed h3,.sessionrail.collapsed #session-list{opacity:0;transform:translateX(-8px);visibility:hidden;
+      pointer-events:none;transition:opacity var(--duration-quick) var(--ease-smooth-out),transform var(--duration-fast) var(--ease-smooth-out),visibility 0s linear var(--duration-fast)}
     .sessionrail .runcard{max-width:none;width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:2px}
     .sessionrail .runcard b{max-width:100%}
+    .sessionrail .runcard small{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
     .sessionrail .replaylink{cursor:pointer;margin-top:6px;border:1px solid var(--border-soft);border-radius:var(--radius-full);padding:3px 10px;font-size:12px;line-height:16px}
     .sessionrail .runcard.active .replaylink{border-color:rgba(255,255,255,.4);color:var(--fore-inverse)}
     .cstate{font-size:12px;padding:3px 9px;border-radius:var(--radius-full);border:1px solid var(--border-soft);color:var(--fore-secondary)}
@@ -421,6 +470,14 @@
       .composerrow .hint{display:none}
       .policyrow{grid-template-columns:1fr}
       .filtergrid,.legend{grid-template-columns:1fr}
+      .workspace.withrail{display:flex;align-items:center}
+      .sessionrail{position:static;width:100%;min-height:calc(100dvh - 66px);padding-bottom:0}
+      .sessionrail.collapsed{width:48px;align-self:flex-start}
+    }
+    @media(max-width:600px){
+      .connrow{grid-template-columns:1fr}
+      .connrow>.cred{grid-row:1;grid-column:1;align-self:start;margin-top:2px}
+      .credentialrow>.connname{padding-right:72px}
     }
   </style>
 </head>
@@ -433,7 +490,7 @@
         <button class="navbtn t-tab" data-nav="chat" role="tab" aria-selected="true"><span>Chat</span></button>
         <button class="navbtn t-tab" data-nav="history" role="tab" aria-selected="false"><span>History</span></button>
         <button class="navbtn t-tab" data-nav="privacy" role="tab" aria-selected="false"><span>Privacy</span></button>
-        <button class="navbtn t-tab" data-nav="lab" role="tab" aria-selected="false"><span>Lab</span></button>
+        <button class="navbtn t-tab" data-nav="lab" role="tab" aria-selected="false"><span>Settings</span></button>
       </nav>
       <div class="topright">
         <div class="statuspill" id="status" data-state="idle"><span class="dot"></span><span id="status-label" class="t-text-swap">Ready</span></div>
@@ -454,6 +511,37 @@
       overshoot:[["Hcompany/Holo3-35B-A3B","Holo3 35B"],["Hcompany/Holo-3.1-35B-A3B-FP8","Holo3-1 35B FP8"],["Holo3-122B-A10B","Holo3 122B"]]
     };
     function modelLabel(id){for(const models of Object.values(modelCatalog)){const hit=models.find(([v])=>v===id);if(hit)return hit[1]}return id}
+    const credentialSourceLabels={auto:"Auto",holo_cli:"Holo Desktop CLI",project:"Project .env",environment:"Shell only"};
+    const credentialResolvedLabels={environment:"shell environment",holo_cli:"Holo Desktop CLI",project:"project .env"};
+    function credentialSummary(){
+      const c=state.credentials||{};
+      if(c.configured){
+        const bits=[`Connected via ${credentialResolvedLabels[c.source]||c.source||"configured source"}`];
+        if(c.key_label)bits.push(c.key_label);
+        else if(c.account_email)bits.push(c.account_email);
+        return bits.join(" · ");
+      }
+      const hints=[];
+      if(c.holo_cli_available)hints.push("Holo Desktop CLI key found");
+      if(c.project_env_available)hints.push("project .env key found");
+      if(c.environment_available)hints.push("shell key found");
+      if(hints.length){
+        if(c.holo_cli_available)return "Holo Desktop CLI key found on this Mac — connect below to use it";
+        return `${hints.join(" · ")} (not used with current source preference)`;
+      }
+      return "No API key found yet. Run holo login in Terminal, or add Holo/.env.";
+    }
+    function credentialActions(){
+      const c=state.credentials||{};
+      if(c.configured)return "";
+      if(c.holo_cli_available){
+        const label=c.key_label?`Use ${c.key_label}`:"Use Holo Desktop CLI";
+        return `<button class="connectbtn" id="connect-holo-cli">${esc(label)}</button>`;
+      }
+      return `<div class="setupcmd"><code>holo login</code><button class="copybtn" id="copy-holo-login" type="button">Copy</button></div>`;
+    }
+    function credentialStatusClass(){return (state.credentials&&state.credentials.configured)?"cred-ok":"cred-missing"}
+    function credentialStatusLabel(){return (state.credentials&&state.credentials.configured)?"Ready":"Missing"}
     function pillLabel(){const s=state.settings;return esc(s.model?modelLabel(s.model):(providerLabels[s.provider]||s.provider))}
     function modelMenuItems(){
       const s=state.settings;
@@ -465,7 +553,10 @@
     const featureLabels={chips:["Placeholder chips","Paint and vault current findings"],history_scrub:["History scrub","Remove values before the next model call"],scheme:["Scheme prompt","Teach Holo how placeholders work"],duplicate_warning:["Duplicate warning","Explain rare duplicate tokens"],manifest:["Frame manifest","List tokens visible right now"],resolution:["Action resolution","Restore values only in executed actions"],policy_teaching:["Policy prompt","Teach Holo each class security level"],skill:["Native skill","Reinforce the static scheme"]};
     const statusNames={idle:"Ready",starting:"Starting privately",running:"Holo is working",stopping:"Stopping",stopped:"Stopped",completed:"Complete",failed:"Needs attention"};
 
-    let state=null,tab="chat",mode="",activeView="frame",reveal=false,draft="";
+    const navTabs=new Set(["chat","history","privacy","lab"]);
+    function storedTab(){try{const saved=localStorage.getItem("holo.activeTab");return navTabs.has(saved)?saved:"chat"}catch{return "chat"}}
+    function setTab(next){tab=navTabs.has(next)?next:"chat";try{localStorage.setItem("holo.activeTab",tab)}catch{}}
+    let state=null,tab=storedTab(),mode="",activeView="frame",reveal=false,draft="",sessionRailOpen=true;
     const $=s=>document.querySelector(s), esc=v=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 
     async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})},cache:"no-store"});if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.detail||`Request failed (${r.status})`)}return r.json()}
@@ -527,15 +618,66 @@
 
     const chevron=`<svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     const arrowUp=`<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 14V4m0 0L4.5 8.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const sessionsIcon=`<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M6.5 3v12" stroke="currentColor" stroke-width="1.3"/></svg>`;
 
     /* ---------- actions ---------- */
     async function run(){const box=$("#prompt");const prompt=(box?box.value:"").trim();if(!prompt)return toast("Enter a task first");try{await api("/api/run",{method:"POST",body:JSON.stringify({prompt})});draft="";if(box)box.value="";await refresh()}catch(e){toast(e.message)}}
     async function stop(){try{await api("/api/stop",{method:"POST",body:"{}"});await refresh()}catch(e){toast(e.message)}}
-    async function setPolicy(cls,level){if(state.running)return toast("Stop the task before changing policy");const next={...state.policy,[cls]:level};try{const result=await api("/api/policy",{method:"PUT",body:JSON.stringify(next)});state.policy=result.policy;renderPanel();toast(`${labels[cls]} set to ${levelLabels[level]}`)}catch(e){toast(e.message)}}
-    async function saveSettings(patch){if(!state)return;if(state.running){render(true);return toast("Stop the task before changing settings")}
-      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,features:{...s.features},...patch};
+    function applySegmentSelection(selected){
+      if(!selected)return;
+      const seg=selected.closest(".animatedseg");if(!seg)return;
+      const buttons=[...seg.querySelectorAll("button")];
+      seg.querySelectorAll("button").forEach(button=>{
+        const active=button===selected;
+        button.classList.toggle("active",active);
+        button.setAttribute("aria-pressed",String(active));
+      });
+      const index=buttons.indexOf(selected);
+      seg.style.setProperty("--seg-x",String(seg.classList.contains("seg-4")?index%2:index));
+      seg.style.setProperty("--seg-y",String(seg.classList.contains("seg-4")?Math.floor(index/2):0));
+    }
+    function applyPolicySelection(cls,level){
+      applySegmentSelection(document.querySelector(`.policyseg [data-class="${cls}"][data-level="${level}"]`));
+    }
+    function applySettingSelection(key,value){
+      applySegmentSelection(document.querySelector(`.settingsseg [data-setting="${key}"][data-value="${value}"]`));
+    }
+    async function setPolicy(cls,level){
+      if(state.running)return toast("Stop the task before changing policy");
+      const previous=state.policy[cls];if(previous===level)return;
+      applyPolicySelection(cls,level);
+      const next={...state.policy,[cls]:level};
+      try{
+        const result=await api("/api/policy",{method:"PUT",body:JSON.stringify(next)});
+        state.policy=result.policy;applyPolicySelection(cls,state.policy[cls]);
+        toast(`${labels[cls]} set to ${levelLabels[state.policy[cls]]}`);
+      }catch(e){applyPolicySelection(cls,previous);toast(e.message)}
+    }
+    async function saveSettings(patch,selection){if(!state)return;if(state.running){render(true);return toast("Stop the task before changing settings")}
+      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,credential_source:s.credential_source||"auto",vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,features:{...s.features},...patch};
       if(patch&&patch.features)settings.features={...s.features,...patch.features};
-      try{const r=await api("/api/settings",{method:"PUT",body:JSON.stringify(settings)});state.settings=r.settings;render(true)}catch(e){toast(e.message);render(true)}}
+      try{
+        const r=await api("/api/settings",{method:"PUT",body:JSON.stringify(settings)});
+        state.settings=r.settings;if(r.credentials)state.credentials=r.credentials;
+        if(tab==="lab"){
+          renderChrome();
+          if(selection){
+            applySettingSelection(selection.key,state.settings[selection.key]);
+            if(selection.key==="provider"||selection.key==="credential_source"){
+              const delay=Math.max(0,350-(performance.now()-selection.startedAt));
+              setTimeout(()=>{if(tab==="lab")renderLab()},delay);
+            }
+          }else if(!patch.features)renderLab();
+        }else render(true);
+      }catch(e){toast(e.message);if(tab==="lab")renderLab();else render(true)}}
+    async function connectHoloCli(){
+      if(!state||state.running)return toast("Stop the task before connecting");
+      try{
+        const r=await api("/api/credentials/connect-holo-cli",{method:"POST",body:"{}"});
+        state.settings=r.settings;state.credentials=r.credentials;render(true);
+        toast("Connected to Holo Desktop CLI");
+      }catch(e){toast(e.message)}
+    }
 
     /* ---------- chrome ---------- */
     function renderChrome(){
@@ -571,11 +713,15 @@
             <button class="suggest" data-suggest>Open Terminal and run: echo plva-ok</button>
           </div>
           <div class="herohint">Runs locally behind the PLVA privacy boundary. Sensitive screen data never leaves this device.</div>
+          <div class="herohint" id="cred-hint" hidden></div>
         </div>`;
       }
       const viewChip=(view,label)=>`<button class="chip t-tab" role="tab" data-view="${view}" aria-selected="${String(activeView===view)}">${label}</button>`;
-      const rail=state.running?"":`<aside class="sessionrail" id="session-rail"><h3>Past sessions</h3><div id="session-list"><div class="empty">Loading…</div></div></aside>`;
-      return `<div class="workspace${state.running?"":" withrail"}">${rail}<div class="wsinner">
+      const rail=state.running?"":`<aside class="sessionrail${sessionRailOpen?"":" collapsed"}" id="session-rail">
+        <div class="sessionrailhead"><h3>Past sessions</h3><button class="sessiontoggle" id="session-toggle" type="button" aria-label="${sessionRailOpen?"Hide":"Show"} past sessions" aria-expanded="${String(sessionRailOpen)}" title="${sessionRailOpen?"Hide":"Show"} past sessions">${sessionsIcon}</button></div>
+        <div id="session-list"><div class="empty">Loading…</div></div>
+      </aside>`;
+      return `<div class="workspace${state.running?"":" withrail"}${!state.running&&!sessionRailOpen?" rail-collapsed":""}">${rail}<div class="wsinner">
           <div class="chips t-tabs" role="tablist">
             <span class="t-tabs-pill" aria-hidden="true"></span>
             ${viewChip("frame","Model view")}${viewChip("trace","Agent trace")}${viewChip("vault","Vault")}${viewChip("ocr","OCR")}${viewChip("filter","Stream guard")}
@@ -603,6 +749,14 @@
         box.onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();run()}}}
       const runBtn=$("#run");if(runBtn)runBtn.onclick=run;
       const stopBtn=$("#stop");if(stopBtn)stopBtn.onclick=stop;
+      const sessionToggle=$("#session-toggle");if(sessionToggle)sessionToggle.onclick=()=>{
+        sessionRailOpen=!sessionRailOpen;
+        const rail=$("#session-rail");rail.classList.toggle("collapsed",!sessionRailOpen);
+        rail.closest(".withrail").classList.toggle("rail-collapsed",!sessionRailOpen);
+        sessionToggle.setAttribute("aria-expanded",String(sessionRailOpen));
+        sessionToggle.setAttribute("aria-label",`${sessionRailOpen?"Hide":"Show"} past sessions`);
+        sessionToggle.title=`${sessionRailOpen?"Hide":"Show"} past sessions`;
+      };
       const pill=$("#model-pill");
       if(pill){pill.onclick=e=>{e.stopPropagation();const m=$("#model-menu");m.classList.contains("is-open")?closeDropdown(m):openDropdown(m)};
         document.querySelectorAll("#model-menu [data-model]").forEach(b=>b.onclick=()=>{closeDropdown($("#model-menu"));saveSettings({provider:b.dataset.provider,model:b.dataset.model})})}
@@ -618,7 +772,16 @@
         if(pill._label!==label){pill._label=label;pill.innerHTML=label}
       }
       const runBtn=$("#run");if(runBtn)runBtn.disabled=state.running;
-      if(!sessionActive())return;
+      if(!sessionActive()){
+        const hint=$("#cred-hint");
+        if(hint){
+          const cred=state.credentials;
+          const text=cred&&!cred.configured?credentialSummary():"";
+          hint.hidden=!text;
+          if(hint._text!==text){hint._text=text;hint.textContent=text}
+        }
+        return;
+      }
       document.querySelectorAll(".chip").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.view===activeView)));
       const stopBtn=$("#stop");if(stopBtn)stopBtn.hidden=!state.running;
       const events=[...state.events].reverse();
@@ -702,7 +865,7 @@
       });
       list.querySelectorAll("[data-replay]").forEach(s=>s.onclick=e=>{
         e.stopPropagation();
-        curRun=s.dataset.replay;curIdx=0;tab="history";reveal=false;
+        curRun=s.dataset.replay;curIdx=0;setTab("history");reveal=false;
         const nb=document.querySelector('[data-nav="history"]');if(nb)selectTab(nb,"[data-nav]");
         render(true);
       });
@@ -911,7 +1074,8 @@
           html+=`<section class="policygroup"><h3>${group}</h3>`;
           for(const cls of classes){
             const selected=state.policy[cls];
-            html+=`<div class="policyrow"><div class="pname">${labels[cls]}<small>${cls}</small></div><div class="seg">${Object.keys(levelLabels).map(level=>`<button data-class="${cls}" data-level="${level}" class="${selected===level?'active':''}"><span class="sdot"></span>${levelLabels[level]}</button>`).join("")}</div></div>`;
+            const selectedIndex=Object.keys(levelLabels).indexOf(selected);
+            html+=`<div class="policyrow"><div class="pname">${labels[cls]}<small>${cls}</small></div><div class="seg policyseg animatedseg" style="--seg-x:${selectedIndex};--seg-y:0"><span class="segindicator" aria-hidden="true"></span>${Object.keys(levelLabels).map(level=>`<button data-class="${cls}" data-level="${level}" class="${selected===level?'active':''}" aria-pressed="${String(selected===level)}"><span class="sdot"></span>${levelLabels[level]}</button>`).join("")}</div></div>`;
           }
           html+="</section>";
         }
@@ -925,28 +1089,54 @@
     /* ---------- lab panel ---------- */
     function labSkeleton(){
       return `<div class="panel"><div class="panelinner">
-        <h1>Advanced lab</h1>
-        <p class="sub">Testing and diagnostics. Weakening these settings weakens privacy, so use synthetic data here.</p>
-        <div class="card labcard" id="lab-selects"></div>
+        <h1>Settings</h1>
+        <p class="sub">Choose how PLVA connects to Holo and which models to use. Your API key stays local and is never shown here.</p>
+        <div class="legend">
+          <div><b><span class="ldot" style="background:var(--ok)"></span>Ready</b>A provider key is available for the selected source.</div>
+          <div><b><span class="ldot" style="background:var(--warn)"></span>Holo Desktop CLI</b>Uses <code>~/.holo/.env</code> from <code>holo login</code>.</div>
+          <div><b><span class="ldot" style="background:var(--fore-secondary)"></span>Project .env</b>Optional override in this app's <code>Holo/.env</code>.</div>
+        </div>
+        <div class="card policycard" id="lab-connection"></div>
+        <div class="card labcard" id="lab-pipeline"></div>
+        <section class="policygroup" style="margin-top:2px"><h3>Advanced diagnostics</h3></section>
         <div class="card labcard" id="feature-list"></div>
         <div class="warning">Disabling chips, history scrub, or resolution weakens privacy. Use synthetic data in the advanced lab.</div>
       </div></div>`;
     }
-    function segRow(title,detail,key,options){
-      const current=state.settings[key];
-      return `<div class="setting"><div class="about">${title}<small>${detail}</small></div><div class="seg" style="min-width:210px">${options.map(([v,l])=>`<button data-setting="${key}" data-value="${v}" class="${current===v?'active':''}">${l}</button>`).join("")}</div></div>`;
+    function segRow(title,detail,key,options,cols){
+      const current=state.settings[key]||"auto";
+      const klass=cols?` seg-${cols}`:"";
+      const selectedIndex=Math.max(0,options.findIndex(([value])=>value===current));
+      const x=cols===4?selectedIndex%2:selectedIndex,y=cols===4?Math.floor(selectedIndex/2):0;
+      return `<div class="connrow"><div class="connname">${title}<small>${detail}</small></div><div class="seg settingsseg animatedseg${klass}" style="--seg-x:${x};--seg-y:${y}"><span class="segindicator" aria-hidden="true"></span>${options.map(([v,l])=>`<button data-setting="${key}" data-value="${v}" class="${current===v?'active':''}" aria-pressed="${String(current===v)}" title="${esc(l)}">${esc(l)}</button>`).join("")}</div></div>`;
     }
+    function segCols(count){return count>=4?4:count===3?3:2}
     function renderLab(){
-      $("#lab-selects").innerHTML=
-        segRow("Provider","Inference endpoint","provider",[["hcompany","H Company"],["overshoot","Overshoot"]])+
-        segRow("Model","Holo variant for the selected provider","model",modelCatalog[state.settings.provider]||[])+
-        segRow("Vision mode","OCR quality / latency","vision_mode",[["fast","Fast"],["cascade","Cascade"],["accurate","Accurate"]])+
-        segRow("OCR engine","Apple Vision or Core ML RapidOCR","ocr_engine",[["apple","Apple OCR"],["rapidocr","RapidOCR"]])+
-        segRow("Visual detector","Off isolates the OCR pipeline and the text filter","visual_detector",[["on","On"],["off","Off"]])+
-        segRow("Detector version","v3 needs an exported ONNX detector","detector_version",[["v2","v2 baseline"],["v3","v3"]])+
-        segRow("Text filter","Alternatives need a local frozen model copy","semantic_engine",[["rampart","Rampart"],["gliner2","GLiNER2 PII"],["openai-pf","OpenAI PF"]])+
-        segRow("Worker lifecycle","Startup versus idle memory","lifecycle",[["eager","Eager"],["adaptive","Adaptive"],["cold","Cold"]]);
-      document.querySelectorAll("[data-setting]").forEach(b=>b.onclick=()=>saveSettings({[b.dataset.setting]:b.dataset.value}));
+      const cred=credentialSummary();
+      const models=modelCatalog[state.settings.provider]||[];
+      $("#lab-connection").innerHTML=
+        `<section class="policygroup"><h3>Connection</h3>
+          <div class="connrow credentialrow"><div class="connname">API key status<small>${esc(cred)}</small></div><span class="cred ${credentialStatusClass()}">${credentialStatusLabel()}</span>${credentialActions()}</div>
+          ${segRow("API key source","Auto checks shell, Holo Desktop CLI, then project .env","credential_source",Object.entries(credentialSourceLabels),4)}
+          ${segRow("Provider","Inference endpoint","provider",[["hcompany","H Company"],["overshoot","Overshoot"]],2)}
+          ${segRow("Model","Holo variant for the selected provider","model",models,segCols(models.length))}
+        </section>`;
+      $("#lab-pipeline").innerHTML=
+        `<section class="policygroup"><h3>Redaction pipeline</h3>
+          ${segRow("Vision mode","OCR quality / latency","vision_mode",[["fast","Fast"],["cascade","Cascade"],["accurate","Accurate"]],3)}
+          ${segRow("OCR engine","Apple Vision or Core ML RapidOCR","ocr_engine",[["apple","Apple OCR"],["rapidocr","RapidOCR"]],2)}
+          ${segRow("Visual detector","Off isolates the OCR pipeline and the text filter","visual_detector",[["on","On"],["off","Off"]],2)}
+          ${segRow("Detector version","v3 needs an exported ONNX detector","detector_version",[["v2","v2 baseline"],["v3","v3"]],2)}
+          ${segRow("Text filter","Alternatives need a local frozen model copy","semantic_engine",[["rampart","Rampart"],["gliner2","GLiNER2 PII"],["openai-pf","OpenAI PF"]],3)}
+          ${segRow("Worker lifecycle","Startup versus idle memory","lifecycle",[["eager","Eager"],["adaptive","Adaptive"],["cold","Cold"]],3)}
+        </section>`;
+      document.querySelectorAll("[data-setting]").forEach(b=>b.onclick=()=>{
+        const key=b.dataset.setting,value=b.dataset.value;if(state.settings[key]===value)return;
+        applySegmentSelection(b);
+        saveSettings({[key]:value},{key,startedAt:performance.now()});
+      });
+      const connect=$("#connect-holo-cli");if(connect)connect.onclick=connectHoloCli;
+      const copy=$("#copy-holo-login");if(copy)copy.onclick=()=>navigator.clipboard.writeText("holo login").then(()=>toast("Copied holo login"));
       const f=state.settings.features;
       $("#feature-list").innerHTML=Object.entries(featureLabels).map(([key,[title,detail]])=>`<div class="setting"><div class="about">${title}<small>${detail}</small></div><label class="switch"><input type="checkbox" data-feature="${key}" ${f[key]?'checked':''}><span class="slider"></span></label></div>`).join("");
       document.querySelectorAll("[data-feature]").forEach(i=>i.onchange=()=>saveSettings({features:{[i.dataset.feature]:i.checked}}));
@@ -969,7 +1159,10 @@
     }
     async function refresh(){try{state=await api("/api/state");render(false)}catch(e){toast("Demo service unavailable")}}
 
-    document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>{tab=b.dataset.nav;reveal=false;selectTab(b,"[data-nav]");render(true)});
+    document.querySelectorAll("[data-nav]").forEach(b=>{
+      b.setAttribute("aria-selected",String(b.dataset.nav===tab));
+      b.onclick=()=>{setTab(b.dataset.nav);reveal=false;selectTab(b,"[data-nav]");render(true)};
+    });
     initTabsPill(document.querySelector(".mainnav"));
     $("#plva-toggle").onclick=()=>saveSettings({plva_enabled:!state.settings.plva_enabled});
     document.addEventListener("click",e=>{const m=$("#model-menu");if(m&&!e.target.closest(".modelwrap"))closeDropdown(m)});

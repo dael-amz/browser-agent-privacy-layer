@@ -43,6 +43,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
+from plva_proxy.credentials import CREDENTIAL_SOURCES, CredentialSource, env_file_value, resolve_provider_key
 from plva_proxy.privacy import (
     PLACEHOLDER_MANIFEST_KEY,
     HistoryScrubber,
@@ -1383,22 +1384,7 @@ def add_viewer_routes(
         return Response(content=data, media_type=media_type, headers={"cache-control": "no-store"})
 
 
-def _env_file_value(path: Path, key: str) -> str | None:
-    """Read ``KEY=value`` from a dotenv-style file without echoing its contents."""
-
-    try:
-        lines = path.read_text("utf-8").splitlines()
-    except OSError:
-        return None
-    for line in lines:
-        stripped = line.strip()
-        if not stripped.startswith(f"{key}="):
-            continue
-        value = stripped.removeprefix(f"{key}=").strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        return value or None
-    return None
+_env_file_value = env_file_value
 
 
 def main() -> None:
@@ -1416,6 +1402,12 @@ def main() -> None:
         choices=tuple(PROVIDERS),
         default=os.environ.get("PLVA_PROVIDER", "overshoot"),
         help="inference-provider preset (default: overshoot)",
+    )
+    parser.add_argument(
+        "--credential-source",
+        choices=CREDENTIAL_SOURCES,
+        default=os.environ.get("PLVA_CREDENTIAL_SOURCE", "auto"),
+        help="where to load the provider API key (default: auto)",
     )
     parser.add_argument(
         "--upstream",
@@ -1628,13 +1620,11 @@ def main() -> None:
         privacy_policy = SafetyPolicy(raw_policy)
     except (ValueError, TypeError) as exc:
         parser.error(f"--privacy-policy-json is invalid: {exc}")
-    api_key = next(
-        (
-            value
-            for key in provider.key_names
-            if (value := os.environ.get(key) or _env_file_value(Path(".env"), key))
-        ),
-        None,
+    credential_source: CredentialSource = args.credential_source
+    api_key, _ = resolve_provider_key(
+        provider=args.provider,
+        source=credential_source,
+        project_root=Path.cwd(),
     )
     if not api_key:
         names = " or ".join(provider.key_names)

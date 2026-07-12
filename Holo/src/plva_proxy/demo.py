@@ -28,6 +28,12 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 
+from plva_proxy.credentials import (
+    CREDENTIAL_SOURCES,
+    CredentialSource,
+    credential_status,
+    inject_provider_keys,
+)
 from plva_proxy.privacy import SafetyPolicy
 from plva_proxy.providers import PROVIDERS
 from plva_proxy.runtime_capture import LOOPBACK_HOST
@@ -262,6 +268,7 @@ class DemoController:
             "plva_enabled": True,
             "provider": "hcompany",
             "model": PROVIDERS["hcompany"].model,
+            "credential_source": "auto",
             "vision_mode": "cascade",
             "lifecycle": "eager",
             "detector_version": "v2",
@@ -284,6 +291,7 @@ class DemoController:
                 "trace_count": len(self._traces),
                 "policy": dict(self._policy),
                 "settings": json.loads(json.dumps(self._settings)),
+                "credentials": self._credentials_snapshot(),
                 "stats": dict(self._stats),
                 "has_frame": self._frame is not None,
                 "vault_count": len(self._vault.get("entries", [])),
@@ -291,6 +299,36 @@ class DemoController:
                 "call_count": len(self._calls),
                 "filter": dict(self._filter),
             }
+
+    def _credential_source(self) -> CredentialSource:
+        source = self._settings.get("credential_source", "auto")
+        return source if source in CREDENTIAL_SOURCES else "auto"
+
+    def _credentials_snapshot(self) -> dict[str, Any]:
+        return credential_status(
+            provider=str(self._settings["provider"]),
+            source=self._credential_source(),
+            project_root=ROOT,
+        )
+
+    def connect_holo_cli(self) -> dict[str, Any]:
+        with self._lock:
+            self._require_idle()
+            probe = credential_status(
+                provider=str(self._settings["provider"]),
+                source="holo_cli",
+                project_root=ROOT,
+            )
+            if not probe["holo_cli_available"]:
+                raise RuntimeError(
+                    "No Holo Desktop CLI key found. Run holo login in a terminal first."
+                )
+            self._settings["credential_source"] = "auto"
+            self._event(
+                "Holo Desktop CLI connected",
+                "Using the API key saved by holo login.",
+            )
+            return self._credentials_snapshot()
 
     def set_policy(self, raw: Any) -> dict[str, str]:
         if not isinstance(raw, dict):
@@ -336,6 +374,9 @@ class DemoController:
         semantic_engine = raw.get("semantic_engine") or "rampart"
         if semantic_engine not in {"rampart", "gliner2", "openai-pf"}:
             raise ValueError("semantic engine is invalid")
+        credential_source = raw.get("credential_source") or "auto"
+        if credential_source not in CREDENTIAL_SOURCES:
+            raise ValueError("credential source is invalid")
         if not isinstance(plva_enabled, bool) or not isinstance(features, dict):
             raise ValueError("settings are invalid")
         selected_features: dict[str, bool] = {}
@@ -350,6 +391,7 @@ class DemoController:
                 "plva_enabled": plva_enabled,
                 "provider": provider,
                 "model": model,
+                "credential_source": credential_source,
                 "vision_mode": vision_mode,
                 "lifecycle": lifecycle,
                 "detector_version": detector_version,
@@ -548,6 +590,14 @@ class DemoController:
         )
         for name, variable in FEATURE_ENV.items():
             environment[variable] = "1" if self._settings["features"][name] else "0"
+        source = self._credential_source()
+        environment["PLVA_CREDENTIAL_SOURCE"] = source
+        inject_provider_keys(
+            environment,
+            provider=str(self._settings["provider"]),
+            source=source,
+            project_root=ROOT,
+        )
         return environment
 
     def _read_process(self, process: subprocess.Popen[str]) -> None:
@@ -800,7 +850,22 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
             selected = active.set_settings(await request.json())
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return _json_response({"settings": selected})
+        return _json_response(
+            {"settings": selected, "credentials": active._credentials_snapshot()}
+        )
+
+    @app.post("/api/credentials/connect-holo-cli")
+    async def connect_holo_cli() -> Response:
+        try:
+            credentials = active.connect_holo_cli()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _json_response(
+            {
+                "settings": active.snapshot()["settings"],
+                "credentials": credentials,
+            }
+        )
 
     @app.post("/api/run")
     async def run(request: Request) -> Response:
