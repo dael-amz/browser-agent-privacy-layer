@@ -1575,6 +1575,18 @@ def main() -> None:
         default=None,
         help="write the first request's structured_outputs schema (never messages) to this file",
     )
+    parser.add_argument(
+        "--tools",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="enable the Step 6.5 local tool channel: teaching, detection, bounded tool loop",
+    )
+    parser.add_argument(
+        "--tools-max-rounds",
+        type=int,
+        default=int(os.environ.get("PLVA_TOOLS_MAX_ROUNDS", "4")),
+        help="maximum model-tool exchanges per runtime step (default: 4)",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
@@ -1592,6 +1604,8 @@ def main() -> None:
         parser.error("--privacy-approval-ttl-seconds must be between 0 and 3600")
     if not 1 <= args.privacy_approval_use_count <= 100:
         parser.error("--privacy-approval-use-count must be between 1 and 100")
+    if not 1 <= args.tools_max_rounds <= 8:
+        parser.error("--tools-max-rounds must be between 1 and 8")
     if args.privacy and (args.redact is None or args.redact_engine != "vision"):
         parser.error("--privacy requires --redact with --redact-engine vision")
     try:
@@ -1738,6 +1752,12 @@ def main() -> None:
         if extra_hook is not None:
             hooks = _combine_hooks(hooks, Hooks(on_request=extra_hook))
     hooks = _combine_hooks(hooks, privacy_hooks)
+    tool_loop_instance: ToolLoop | None = None
+    if args.tools:
+        tool_loop_instance = ToolLoop(ToolRegistry(), max_rounds=args.tools_max_rounds)
+        hooks = _combine_hooks(
+            hooks, Hooks(on_request=tool_teaching_request_hook(tool_loop_instance))
+        )
     if args.capture_grammar is not None:
         hooks = _combine_hooks(Hooks(on_request=grammar_capture_hook(args.capture_grammar)), hooks)
 
@@ -1767,6 +1787,8 @@ def main() -> None:
         app_options["vault"] = vault_store
     if history_scrubber is not None:
         app_options["scrubber"] = history_scrubber
+    if tool_loop_instance is not None:
+        app_options["tool_loop"] = tool_loop_instance
     uvicorn.run(
         create_app(
             ProxyConfig(
