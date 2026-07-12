@@ -243,3 +243,85 @@ class ToolLoop:
             }
         )
         return document
+
+
+TOOL_TEACHING: Final = (
+    "[PLVA_TOOLS] This private session provides local tools the desktop cannot see: "
+    "echo(text) repeats text; add(a, b) returns the sum of two numbers; sort(items) "
+    "returns a list of strings in ascending order. Tools run locally and return "
+    "instantly. To call one, emit exactly one action of the form "
+    '{"tool_calls": [{"tool_name": "plva_tool", "name": "<tool>", "args": {...}}]} '
+    "and nothing else in that step. If your output format rejects that action, "
+    'instead include the single line ⟦TOOL⟧{"name": "<tool>", "args": {...}}⟦/TOOL⟧ '
+    "inside your thought or answer text. After a call, the next user message begins "
+    "with [PLVA_TOOL_RESULT] and carries the result; continue the task using it and "
+    "do not repeat an identical call."
+)
+
+
+def _strip_tool_teaching(text: str) -> str:
+    while TOOL_SYSTEM_BEGIN in text:
+        start = text.find(TOOL_SYSTEM_BEGIN)
+        end = text.find(TOOL_SYSTEM_END, start)
+        if end < 0:
+            raise ToolError("tool teaching block is incomplete")
+        text = text[:start] + text[end + len(TOOL_SYSTEM_END) :]
+    return text.rstrip()
+
+
+def _remove_old_tool_teaching(messages: list[Any]) -> None:
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            message["content"] = _strip_tool_teaching(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    part["text"] = _strip_tool_teaching(part["text"])
+
+
+def _merge_teaching(messages: list[Any], wrapped: str) -> None:
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == "system":
+            content = message.get("content")
+            if not isinstance(content, str):
+                raise ToolError("system prompt is not text")
+            message["content"] = content.rstrip() + "\n\n" + wrapped
+            return
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            content = message.get("content")
+            if isinstance(content, str):
+                message["content"] = content.rstrip() + "\n\n" + wrapped
+                return
+            if isinstance(content, list):
+                content.append({"type": "text", "text": wrapped})
+                return
+    raise ToolError("tool teaching has no compatible message")
+
+
+def tool_teaching_request_hook(
+    loop: ToolLoop | None = None,
+) -> Callable[[dict[str, Any], dict[str, str]], tuple[dict[str, Any], dict[str, str]]]:
+    """Merge tool teaching (and session results) into the request, single-system-safe."""
+
+    def apply(
+        document: dict[str, Any], headers: dict[str, str]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        rewritten: dict[str, Any] = copy.deepcopy(document)
+        messages = rewritten.get("messages")
+        if not isinstance(messages, list):
+            raise ToolError("request has no message history")
+        _remove_old_tool_teaching(messages)
+        teaching = TOOL_TEACHING
+        if loop is not None:
+            memory = loop.memory()
+            if memory:
+                teaching += " Results already computed this session: " + "; ".join(memory) + "."
+        wrapped = f"{TOOL_SYSTEM_BEGIN}\n{teaching}\n{TOOL_SYSTEM_END}"
+        _merge_teaching(messages, wrapped)
+        return rewritten, headers
+
+    return apply

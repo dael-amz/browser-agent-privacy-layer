@@ -182,10 +182,18 @@ else
   echo "--- redaction OFF"
 fi
 parse_on_off PRIVACY_SKILL "${PLVA_PRIVACY_SKILL:-$PRIVACY_ENABLED}" PLVA_PRIVACY_SKILL
+# Tools do not require redaction, so this toggle lives outside the PLVA_REDACT block above.
+parse_on_off TOOLS_ENABLED "${PLVA_TOOLS:-0}" PLVA_TOOLS
+parse_on_off TOOLS_SKILL "${PLVA_TOOLS_SKILL:-$TOOLS_ENABLED}" PLVA_TOOLS_SKILL
+[[ "$TOOLS_ENABLED" == 1 ]] && HOOK_ARGS+=(--tools)
+if [[ -n "${PLVA_CAPTURE_GRAMMAR:-}" ]]; then
+  HOOK_ARGS+=(--capture-grammar "$PLVA_CAPTURE_GRAMMAR")
+fi
 .venv/bin/plva-proxy --port "$PORT" "${HOOK_ARGS[@]}" >"$PROXY_LOG" 2>&1 &
 PROXY_PID=$!
 RUNS_DIR=""
 SKILL_DISABLED_FILE=""
+TOOLS_SKILL_DISABLED_FILE=""
 EGRESS_READY_FILE=$(mktemp /tmp/plva-step1-egress-ready.XXXXXX)
 if [[ -n "${PLVA_EGRESS_STATUS_FILE:-}" ]]; then
   EGRESS_STATUS_FILE="$PLVA_EGRESS_STATUS_FILE"
@@ -219,6 +227,9 @@ cleanup() {
   if [[ -n "$SKILL_DISABLED_FILE" && -f "$SKILL_DISABLED_FILE" ]]; then
     mv "$SKILL_DISABLED_FILE" "$HOME/.holo/skills/plva-placeholders/SKILL.md"
   fi
+  if [[ -n "${TOOLS_SKILL_DISABLED_FILE:-}" && -f "$TOOLS_SKILL_DISABLED_FILE" ]]; then
+    mv "$TOOLS_SKILL_DISABLED_FILE" "$HOME/.holo/skills/plva-tools/SKILL.md"
+  fi
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
@@ -230,6 +241,15 @@ elif [[ "$PRIVACY_SKILL" == 1 ]]; then
   mkdir -p "$HOME/.holo/skills/plva-placeholders"
   cp "holo-skills/plva-placeholders/SKILL.md" "$HOME/.holo/skills/plva-placeholders/SKILL.md"
   echo "--- native placeholder skill enabled"
+fi
+if [[ "$TOOLS_SKILL" == 0 && -f "$HOME/.holo/skills/plva-tools/SKILL.md" ]]; then
+  TOOLS_SKILL_DISABLED_FILE="$HOME/.holo/skills/plva-tools/SKILL.md.disabled.$$"
+  mv "$HOME/.holo/skills/plva-tools/SKILL.md" "$TOOLS_SKILL_DISABLED_FILE"
+  echo "--- native tools skill disabled for this diagnostic run"
+elif [[ "$TOOLS_SKILL" == 1 ]]; then
+  mkdir -p "$HOME/.holo/skills/plva-tools"
+  cp "holo-skills/plva-tools/SKILL.md" "$HOME/.holo/skills/plva-tools/SKILL.md"
+  echo "--- native tools skill enabled"
 fi
 PROXY_UP=""
 for _ in $(seq 1 240); do
