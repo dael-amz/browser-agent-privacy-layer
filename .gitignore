@@ -8,3 +8,6 @@
 .env
 .env.*
 !.env.example
+
+# Test artifacts
+.coverage

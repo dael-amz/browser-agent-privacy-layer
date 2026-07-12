@@ -431,6 +431,37 @@ class SessionVault:
                 for entry in self._by_placeholder.values()
             )
 
+    def match_observed_text(self, text: str) -> tuple[dict[str, str], ...]:
+        """Match OCR text against issued values without exposing those values.
+
+        Browser inputs often scroll horizontally after a local write, leaving a
+        long prefix or suffix of a vaulted value on screen. Semantic detection
+        can miss that fragment. Exact local substring matching provides a
+        deterministic second guard for values this session already knows.
+        """
+
+        observed = unicodedata.normalize("NFKC", text)
+        if len(re.sub(r"[^\w]", "", observed, flags=re.UNICODE)) < 4:
+            return ()
+        matches: list[dict[str, str]] = []
+        with self._lock:
+            for entry in self._by_placeholder.values():
+                if entry.pii_class in _CREDENTIAL_CLASSES:
+                    candidate = observed
+                    vaulted = entry.value
+                else:
+                    candidate = " ".join(observed.split()).casefold()
+                    vaulted = entry.canonical
+                if candidate in vaulted or vaulted in candidate:
+                    matches.append(
+                        {
+                            "token": entry.placeholder,
+                            "class": entry.pii_class,
+                            "safety_level": self._policy.level_for(entry.pii_class),
+                        }
+                    )
+        return tuple(matches)
+
     def validate_manifest_item(self, token: str, pii_class: str, safety_level: str) -> None:
         """Reject forged or stale internal manifest metadata before model egress."""
 
@@ -569,6 +600,20 @@ class VaultRedactor:
                             }
                         )
                         manifested.add(placeholder)
+            finding_text = finding.get("text")
+            vault_matches = (
+                self._vault.match_observed_text(finding_text)
+                if isinstance(finding_text, str)
+                else ()
+            )
+            for match in vault_matches:
+                placeholder = match["token"]
+                placeholders.append(placeholder)
+                if placeholder not in manifested:
+                    manifest.append(match)
+                    manifested.add(placeholder)
+            if vault_matches:
+                finding["vault_matches"] = [match["token"] for match in vault_matches]
             finding["placeholders"] = list(dict.fromkeys(placeholders))
             if placeholders:
                 try:
@@ -708,9 +753,7 @@ class HistoryScrubber:
         try:
             classifications, cache_hits = self._classify_incremental(classifier_inputs)
         except Exception as exc:
-            self._set_diagnostics(
-                "failed", len(texts), plain_hits, 0, 0, 0, "classifier_failed"
-            )
+            self._set_diagnostics("failed", len(texts), plain_hits, 0, 0, 0, "classifier_failed")
             raise PrivacyError("history classifier failed") from exc
         if len(classifications) != len(plain):
             self._set_diagnostics(
@@ -728,9 +771,7 @@ class HistoryScrubber:
             for text, classified, classification in zip(
                 plain, classifier_inputs, classifications, strict=True
             ):
-                rewritten, blocked = self._apply_classification(
-                    text, classified, classification
-                )
+                rewritten, blocked = self._apply_classification(text, classified, classification)
                 scrubbed.append(rewritten)
                 blocked_hits += blocked
         except PrivacyError:
@@ -846,6 +887,8 @@ class HistoryScrubber:
                 raise PrivacyError("history classifier span did not project to source text")
             normalized_class = _normalize_class(label)
             if self._vault.safety_level(normalized_class) == "blocked":
+                # Blocked values leave provider-bound history only as an opaque
+                # non-resolvable marker and must never enter the session vault.
                 replacement = f"[PLVA_BLOCKED_{normalized_class}]"
                 blocked_hits += 1
             else:

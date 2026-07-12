@@ -76,7 +76,8 @@ rm -rf "$RUNS_DIR"
 **Tier A — enforced per-run guard (no sudo):** `run_step1.sh` starts the CUA
 process group stopped, proves that `lsof` can observe a local canary socket,
 then samples the whole process group and terminates it if any remote endpoint
-is not the selected loopback proxy. The runtime is not resumed if visibility
+leaves loopback. Holo's CLI-to-Agent-API control channel and the PLVA proxy are
+both local and therefore allowed. The runtime is not resumed if visibility
 cannot be proved. Each run prints a `PLVA_EGRESS_STATUS_JSON=...` evidence line;
 set `PLVA_EGRESS_STATUS_FILE=/protected/path.json` to retain it with mode 0600.
 

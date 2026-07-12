@@ -181,7 +181,9 @@ against a **stub** with a stable contract so the pipeline is testable now.
 **CHANGED — the detector must emit recognized `value`s to the vault, locally.** Placeholder
 stability, resolution, *and* history scrub are all impossible if the detector returns geometry
 only. (The current frozen `plva-v2-baseline` is geometry-only — good enough for Step 4 obscuring,
-**not** for Steps 5+.) The vault — not the detector — **owns placeholder assignment** for stability
+**not** for Steps 5+.) That development-only snapshot is historical provenance, not the current
+detector's status: the current detector is release eligible and supplies the recognized values
+required by the privacy core. The vault — not the detector — **owns placeholder assignment** for stability
 (§6), so the detector emits `class/value/boundingBox` and the painter renders the vault's
 placeholder. Values never leave the device and never appear in logs.
 
@@ -319,10 +321,11 @@ ready; response shape recorded (structured JSON action in `message.content`, `to
 passed:** the closed runtime sends its screenshot through the configurable base URL (proven against
 a loopback stub). Evidence in `Holo/verification/step-0-*`.
 
-### ✅ Step 1 — HoloDesktop under isolation — **BUILT; live run pending key**
+### ✅ Step 1 — HoloDesktop under isolation — **LIVE ACCEPTANCE PASS**
 Pass-through proxy is the runtime's sole endpoint and sole provider egress. §7 egress decision
-resolved (ADR-0001). The one-command `run_step1.sh` closes the end-to-end run once the operator's
-Overshoot key is in `Holo/.env`. Live-frame streaming for that run is operator-authorized.
+resolved (ADR-0001). A real Holo/H Company run completed a controlled two-step form flow through
+PLVA with provider egress monitoring enabled; the loopback fixture independently verified the exact
+private value was submitted after local placeholder resolution.
 
 ### ✅/⚙️ Step 2 — Overshoot inference + latency — **inference done; latency pending**
 The proxy targets Overshoot by default. Remaining: record per-step and end-to-end latency
@@ -334,11 +337,12 @@ re-emitted, fail-closed. Verified with pass-through, the `test` hook, and a `ban
 rewrites every text the CUA types (a live proof of the response-leg action-rewrite seam that Step 5
 resolution reuses).
 
-### ✅ Step 4 — Outbound obscuring (redaction) — **BUILT (accelerated); geometry-only**
+### ✅ Step 4 — Outbound obscuring (redaction) — **BUILT; CURRENT DETECTOR RELEASE ELIGIBLE**
 The proxy redacts every outbound screenshot through the detector and serves the obscured frames at
 a loopback `/viewer`; a persistent WebGPU/WASM worker keeps it warm (see Cross-cutting note).
-**Gap:** the frozen detector is geometry-only, so no values reach the vault yet — which is exactly
-what Step 5 needs.
+The frozen July 11 v2 fixture remains geometry-only for historical Step 4 reproduction. It does not
+describe the current release-eligible detector, whose recognized values feed the completed Step 5
+vault and placeholder path.
 
 ---
 
@@ -472,7 +476,7 @@ levels. See `Holo/verification/step-6-policy.md`.
   and folds the result into the next injected observation, or the point-and-flag shape from Step 8).
   Nothing sensitive recorded.
 
-### 🔲 Step 7 — LLM mediator (OpenShell) for approvals + steering
+### ✅/⚙️ Step 7 — Local approval capabilities built; LLM mediator automation pending
 - **Goal:** `approval`-class resolutions and configurable risk flags are decided by a mediator
   against user-defined criteria, safely.
 - **Build:** proxy consults the mediator on a tripped flag (synchronous gate for approvals; async
@@ -482,6 +486,13 @@ levels. See `Holo/verification/step-6-policy.md`.
 - **Verify:** an `approval` value resolves only after approval and only within granted scope; a
   denied request blocks with no real value used; mediator sandbox has provably no egress; with the
   mediator down, everything gated fails closed.
+
+**Completed locally 2026-07-12:** exact short-lived approval capabilities are now implemented in
+the session vault and enforced atomically during action resolution. Grants bind issued token, tool,
+argument path, optional target, TTL, and bounded uses; mismatch, expiry, exhaustion, and revocation
+fail closed. The loopback proxy exposes value-free grant/list/revoke endpoints and the app Vault
+view can authorize one exact private write. A local LLM mediator remains an automation/steering
+extension, not a prerequisite for manual approval-gated use.
 
 ### 🔲 Step 8 — SPEAK-mechanism spike (prerequisite for voice-read)
 - **Goal:** determine empirically *how*, if at all, Holo3 can signal "read this aloud" — before

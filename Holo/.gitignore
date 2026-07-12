@@ -20,11 +20,12 @@ captures/
 screenshots/
 transcripts/
 vault/
+history/
 
 # Local editor and OS files
 .DS_Store
 .idea/
 .vscode/
 
-# PLVA detector bundle — pulled/fed from a separate clone, not vendored here
+# PLVA detector bundle -- pulled/fed from a separate clone, not vendored here
 plva-v2-baseline/
