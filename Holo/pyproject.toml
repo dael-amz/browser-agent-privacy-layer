@@ -20,6 +20,7 @@ plva-probe = "plva_proxy.contract_probe:main"
 plva-proxy = "plva_proxy.proxy:main"
 plva-runtime-capture = "plva_proxy.runtime_capture:main"
 plva-benchmark = "plva_proxy.benchmark:main"
+plva-tool-probe = "plva_proxy.tool_probe:main"
 
 [build-system]
 requires = ["hatchling>=1.28.0"]
