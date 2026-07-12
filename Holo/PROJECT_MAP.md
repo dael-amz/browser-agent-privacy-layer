@@ -17,7 +17,8 @@ Hackathon/
     ├── PROJECT_MAP.md                   This living directory and status guide
     ├── README.md                        Active project overview and safety warning
     ├── run_step1.sh                     One-command live run (proxy + preflight + task + cleanup)
-    ├── plva-v2-baseline/                Frozen v2 detector harness (operator-supplied, AGPL, dev-only)
+    ├── plva-v2-baseline/                Frozen v2 detector harness — NOT vaulted in git; pulled from a
+    │                                    separate clone and fed via `--redact <path>` (gitignored, AGPL, dev-only)
     ├── pyproject.toml                   Package metadata, dependencies, commands, and quality gates
     ├── uv.lock                          Exact reproducible Python dependency lock
     ├── .python-version                  Required Python version for local tooling
@@ -81,7 +82,7 @@ the blueprint's test hooks; default remains pass-through), with SSE responses bu
 reconstructed, mutated, and re-emitted under a response hook, and every hook/parse failure failing
 closed. Its live verify (the Step 1/2 task running unchanged through pass-through and hook modes)
 rides on the pending live run. **Step 4 is PARTIAL** (2026-07-11): real *obscuring* works — the
-operator-supplied frozen `plva-v2-baseline/` detector is wired into the request-hook seam
+frozen `plva-v2-baseline/` detector (pulled from a separate clone, not vaulted in git) is wired into the request-hook seam
 (`--redact`, fail-closed, threadpooled) with a memory-only loopback `/viewer` showing the
 obscured frames the model sees — but the report is geometry-only, so the vault / placeholders /
 resolution / history-scrub half of Step 4 is not built. See `verification/step-4-obscuring.md`.

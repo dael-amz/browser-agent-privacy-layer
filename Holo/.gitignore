@@ -25,3 +25,6 @@ vault/
 .DS_Store
 .idea/
 .vscode/
+
+# PLVA detector bundle — pulled/fed from a separate clone, not vendored here
+plva-v2-baseline/
