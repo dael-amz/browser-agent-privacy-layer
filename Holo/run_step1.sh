@@ -146,12 +146,61 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
     --audit-capacity "${PLVA_AUDIT_CAPACITY:-32}"
   )
   if [[ "$REDACT_ENGINE" == "vision" ]]; then
-    VISUAL_MODEL="${PLVA_VISUAL_MODEL:-plva-v2-baseline/runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx}"
-    if [[ ! -f "$VISUAL_MODEL" ]]; then
-      echo "ERROR: visual detector not found: $VISUAL_MODEL" >&2
-      exit 1
+    OCR_ENGINE="${PLVA_OCR_ENGINE:-apple}"
+    case "$OCR_ENGINE" in
+      apple|rapidocr) ;;
+      *)
+        echo "ERROR: PLVA_OCR_ENGINE must be apple or rapidocr" >&2
+        exit 1
+        ;;
+    esac
+    HOOK_ARGS+=(--ocr-engine "$OCR_ENGINE")
+    SEMANTIC_ENGINE="${PLVA_SEMANTIC_ENGINE:-rampart}"
+    case "$SEMANTIC_ENGINE" in
+      rampart) ;;
+      gliner2|openai-pf)
+        SEMANTIC_DIR="coreml-redactor/models/semantic/gliner2-privacy-filter-PII-multi"
+        SEMANTIC_REPO="fastino/gliner2-privacy-filter-PII-multi"
+        if [[ "$SEMANTIC_ENGINE" == "openai-pf" ]]; then
+          SEMANTIC_DIR="coreml-redactor/models/semantic/openai-privacy-filter"
+          SEMANTIC_REPO="openai/privacy-filter"
+        fi
+        if [[ ! -d "$SEMANTIC_DIR" ]]; then
+          echo "ERROR: $SEMANTIC_ENGINE semantic model is not installed: $SEMANTIC_DIR" >&2
+          echo "       Fetch a frozen copy first: huggingface-cli download $SEMANTIC_REPO --local-dir $SEMANTIC_DIR" >&2
+          exit 1
+        fi
+        ;;
+      *)
+        echo "ERROR: PLVA_SEMANTIC_ENGINE must be rampart, gliner2, or openai-pf" >&2
+        exit 1
+        ;;
+    esac
+    HOOK_ARGS+=(--semantic-engine "$SEMANTIC_ENGINE")
+    parse_on_off VISUAL_DETECTOR "${PLVA_VISUAL_DETECTOR:-1}" PLVA_VISUAL_DETECTOR
+    if [[ "$VISUAL_DETECTOR" == 0 ]]; then
+      HOOK_ARGS+=(--no-visual-detector)
+    else
+      DETECTOR_VERSION="${PLVA_DETECTOR_VERSION:-v2}"
+      case "$DETECTOR_VERSION" in
+        v2) DEFAULT_VISUAL_MODEL="plva-v2-baseline/runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx" ;;
+        v3) DEFAULT_VISUAL_MODEL="plvas-v3/models/visual/webredact/detector.onnx" ;;
+        *)
+          echo "ERROR: PLVA_DETECTOR_VERSION must be v2 or v3" >&2
+          exit 1
+          ;;
+      esac
+      VISUAL_MODEL="${PLVA_VISUAL_MODEL:-$DEFAULT_VISUAL_MODEL}"
+      if [[ ! -f "$VISUAL_MODEL" ]]; then
+        echo "ERROR: visual detector not found: $VISUAL_MODEL" >&2
+        if [[ "$DETECTOR_VERSION" == "v3" && -z "${PLVA_VISUAL_MODEL:-}" ]]; then
+          echo "       The pinned v3 release ships OpenVINO IR only (nano640.bin/xml)." >&2
+          echo "       Export an ONNX detector to that path (plvas-v3/training/visual/export_detector_onnx.py) or select v2." >&2
+        fi
+        exit 1
+      fi
+      HOOK_ARGS+=(--visual-model "$VISUAL_MODEL")
     fi
-    HOOK_ARGS+=(--visual-model "$VISUAL_MODEL")
   fi
   [[ "$PRIVACY_ENABLED" == 1 ]] && HOOK_ARGS+=(--privacy)
   if [[ "$PRIVACY_ENABLED" == 1 ]]; then

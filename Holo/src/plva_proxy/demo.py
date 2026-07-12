@@ -29,6 +29,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 
 from plva_proxy.privacy import SafetyPolicy
+from plva_proxy.providers import PROVIDERS
 from plva_proxy.runtime_capture import LOOPBACK_HOST
 
 ROOT: Final = Path(__file__).resolve().parents[2]
@@ -260,8 +261,13 @@ class DemoController:
         self._settings: dict[str, Any] = {
             "plva_enabled": True,
             "provider": "hcompany",
+            "model": PROVIDERS["hcompany"].model,
             "vision_mode": "cascade",
             "lifecycle": "eager",
+            "detector_version": "v2",
+            "ocr_engine": "apple",
+            "visual_detector": "on",
+            "semantic_engine": "rampart",
             "features": {name: True for name in FEATURE_ENV},
         }
 
@@ -300,16 +306,36 @@ class DemoController:
         if not isinstance(raw, dict):
             raise ValueError("settings must be an object")
         provider = raw.get("provider")
+        model = raw.get("model")
         vision_mode = raw.get("vision_mode")
         lifecycle = raw.get("lifecycle")
         plva_enabled = raw.get("plva_enabled")
         features = raw.get("features")
-        if provider not in {"hcompany", "overshoot"}:
+        if provider not in PROVIDERS:
             raise ValueError("provider is invalid")
+        if model is not None and not isinstance(model, str):
+            raise ValueError("model is invalid")
+        # A model from another provider falls back to the new provider's default
+        # so switching providers never strands an incompatible model id.
+        if model not in PROVIDERS[provider].allowed_models():
+            model = PROVIDERS[provider].model
         if vision_mode not in {"fast", "cascade", "accurate"}:
             raise ValueError("vision mode is invalid")
         if lifecycle not in {"adaptive", "eager", "cold"}:
             raise ValueError("lifecycle is invalid")
+        # Absent keys fall back to defaults so older clients keep working.
+        detector_version = raw.get("detector_version") or "v2"
+        ocr_engine = raw.get("ocr_engine") or "apple"
+        visual_detector = raw.get("visual_detector") or "on"
+        if detector_version not in {"v2", "v3"}:
+            raise ValueError("detector version is invalid")
+        if ocr_engine not in {"apple", "rapidocr"}:
+            raise ValueError("OCR engine is invalid")
+        if visual_detector not in {"on", "off"}:
+            raise ValueError("visual detector setting is invalid")
+        semantic_engine = raw.get("semantic_engine") or "rampart"
+        if semantic_engine not in {"rampart", "gliner2", "openai-pf"}:
+            raise ValueError("semantic engine is invalid")
         if not isinstance(plva_enabled, bool) or not isinstance(features, dict):
             raise ValueError("settings are invalid")
         selected_features: dict[str, bool] = {}
@@ -323,8 +349,13 @@ class DemoController:
             self._settings = {
                 "plva_enabled": plva_enabled,
                 "provider": provider,
+                "model": model,
                 "vision_mode": vision_mode,
                 "lifecycle": lifecycle,
+                "detector_version": detector_version,
+                "ocr_engine": ocr_engine,
+                "visual_detector": visual_detector,
+                "semantic_engine": semantic_engine,
                 "features": selected_features,
             }
             return copy.deepcopy(self._settings)
@@ -502,10 +533,15 @@ class DemoController:
         environment.update(
             {
                 "PLVA_PROVIDER": str(self._settings["provider"]),
+                "PLVA_MODEL": str(self._settings["model"]),
                 "PLVA_REDACT": "1" if enabled else "0",
                 "PLVA_REDACT_ENGINE": "vision",
                 "PLVA_VISION_MODE": str(self._settings["vision_mode"]),
                 "PLVA_REDACT_LIFECYCLE": str(self._settings["lifecycle"]),
+                "PLVA_DETECTOR_VERSION": str(self._settings["detector_version"]),
+                "PLVA_OCR_ENGINE": str(self._settings["ocr_engine"]),
+                "PLVA_VISUAL_DETECTOR": "1" if self._settings["visual_detector"] == "on" else "0",
+                "PLVA_SEMANTIC_ENGINE": str(self._settings["semantic_engine"]),
                 "PLVA_PRIVACY": "1" if enabled else "0",
                 "PLVA_POLICY_JSON": json.dumps(self._policy, separators=(",", ":")),
             }

@@ -18,6 +18,62 @@ from plva_coreml.ocr import OCRFinding, PIIValue
 SEQUENCE_LENGTH: Final = 128
 RAMPART_MIN_SCORE: Final = 0.4
 KEEP_LABELS: Final = frozenset({"CITY", "STATE", "ZIP_CODE"})
+SEMANTIC_ENGINES: Final = ("rampart", "gliner2", "openai-pf")
+# Alternative engines load frozen local copies only; no runtime downloads.
+SEMANTIC_MODELS_ROOT: Final = Path(__file__).resolve().parents[2] / "models" / "semantic"
+GLINER2_MODEL_DIR: Final = SEMANTIC_MODELS_ROOT / "gliner2-privacy-filter-PII-multi"
+OPENAI_PF_MODEL_DIR: Final = SEMANTIC_MODELS_ROOT / "openai-privacy-filter"
+# Alternative-engine vocabularies mapped onto the Rampart taxonomy so fusion,
+# policy, and vault logic keep seeing one label space. Unmapped labels pass
+# through uppercased and stay blocked by the unknown-class policy default.
+_GLINER2_LABELS: Final = {
+    "person": "GIVEN_NAME",
+    "full_name": "GIVEN_NAME",
+    "first_name": "GIVEN_NAME",
+    "middle_name": "GIVEN_NAME",
+    "last_name": "SURNAME",
+    "date_of_birth": "DATE_OF_BIRTH",
+    "email": "EMAIL",
+    "phone_number": "PHONE",
+    "address": "STREET_NAME",
+    "street_address": "STREET_NAME",
+    "postal_code": "ZIP_CODE",
+    "city": "CITY",
+    "state_or_region": "STATE",
+    "government_id": "GOVERNMENT_ID",
+    "national_id_number": "GOVERNMENT_ID",
+    "passport_number": "PASSPORT",
+    "drivers_license_number": "DRIVERS_LICENSE",
+    "license_number": "DRIVERS_LICENSE",
+    "tax_id": "TAX_ID",
+    "tax_number": "TAX_ID",
+    "bank_account": "BANK_ACCOUNT",
+    "account_number": "BANK_ACCOUNT",
+    "routing_number": "ROUTING_NUMBER",
+    "iban": "BANK_ACCOUNT",
+    "payment_card": "CREDIT_CARD",
+    "card_number": "CREDIT_CARD",
+    "card_expiry": "CREDIT_CARD",
+    "card_cvv": "CREDIT_CARD",
+    "username": "USERNAME",
+    "ip_address": "IP_ADDRESS",
+    "password": "PASSWORD",
+    "secret": "SECRET",
+    "api_key": "API_KEY",
+    "access_token": "AUTH_TOKEN",
+    "recovery_code": "SECRET",
+}
+_OPENAI_PF_LABELS: Final = {
+    "private_person": "GIVEN_NAME",
+    "private_name": "GIVEN_NAME",
+    "private_email": "EMAIL",
+    "private_phone": "PHONE",
+    "private_address": "STREET_NAME",
+    "private_id": "GOVERNMENT_ID",
+    "private_financial": "BANK_ACCOUNT",
+    "private_credential": "SECRET",
+    "private_date": "DATE_OF_BIRTH",
+}
 ID_TO_LABEL: Final = (
     "O",
     "B-GIVEN_NAME",
@@ -78,7 +134,17 @@ class SemanticResult:
 class SemanticPipeline:
     """Warm Rampart session plus deterministic high-confidence PII rules."""
 
-    def __init__(self, baseline: Path, cache: Path) -> None:
+    def __init__(self, baseline: Path, cache: Path, engine: str = "rampart") -> None:
+        if engine not in SEMANTIC_ENGINES:
+            raise ValueError(f"engine must be one of: {', '.join(SEMANTIC_ENGINES)}")
+        self._engine = engine
+        self._alt: _Gliner2NER | _OpenAIPrivacyFilterNER | None = None
+        if engine == "gliner2":
+            self._alt = _Gliner2NER(GLINER2_MODEL_DIR)
+            return
+        if engine == "openai-pf":
+            self._alt = _OpenAIPrivacyFilterNER(OPENAI_PF_MODEL_DIR)
+            return
         model = prepare_fixed_model(
             baseline / "dist/semantic/rampart/onnx/model_q4.onnx",
             cache / "models/rampart-1x128.onnx",
@@ -101,6 +167,9 @@ class SemanticPipeline:
         )
 
     def warm(self) -> None:
+        if self._alt is not None:
+            self._alt.warm()
+            return
         zeros = np.zeros((1, SEQUENCE_LENGTH), dtype=np.int64)
         self._run_rampart(zeros, zeros, zeros)
 
@@ -169,6 +238,20 @@ class SemanticPipeline:
     def _detect_ner(
         self, masked: str, raw: str, raw_starts: list[int], raw_ends: list[int]
     ) -> list[Span]:
+        if self._alt is not None:
+            spans: list[Span] = []
+            for start, end, label, score in self._alt.detect(masked):
+                start = max(0, start)
+                end = min(end, len(raw_ends))
+                if end <= start or score < RAMPART_MIN_SCORE:
+                    continue
+                raw_start = raw_starts[start]
+                raw_end = raw_ends[end - 1]
+                if raw_end > raw_start:
+                    spans.append(
+                        Span(raw_start, raw_end, label, score, "ner", raw[raw_start:raw_end])
+                    )
+            return _merge_spans(spans)
         encoding = self._tokenizer.encode(masked)
         encodings = [encoding, *encoding.overflowing]
         spans: list[Span] = []
@@ -420,3 +503,116 @@ def _valid_ssn(digits: str) -> bool:
         or digits[3:5] == "00"
         or digits[5:] == "0000"
     )
+
+
+def _missing_model_error(engine: str, repo: str, model_dir: Path, extra: str) -> RuntimeError:
+    return RuntimeError(
+        f"{engine} semantic model is not installed. Download a frozen copy with:\n"
+        f"  huggingface-cli download {repo} --local-dir {model_dir}\n"
+        f"{extra}Runtime downloads are never attempted; the worker fails closed instead."
+    )
+
+
+class _Gliner2NER:
+    """GLiNER2 PII extractor behind the SemanticPipeline NER seam."""
+
+    def __init__(self, model_dir: Path) -> None:
+        if not model_dir.is_dir():
+            raise _missing_model_error(
+                "gliner2",
+                "fastino/gliner2-privacy-filter-PII-multi",
+                model_dir,
+                "  (and install its runtime: uv add gliner2 in coreml-redactor)\n",
+            )
+        try:
+            from gliner2 import GLiNER2
+        except ImportError as exc:
+            raise RuntimeError(
+                "the gliner2 package is not installed in the Vision worker "
+                "environment; run `uv add gliner2` in coreml-redactor"
+            ) from exc
+        self._model = GLiNER2.from_pretrained(str(model_dir))
+        self._labels = list(_GLINER2_LABELS)
+
+    def warm(self) -> None:
+        self.detect("warm up john.smith@example.com")
+
+    def detect(self, text: str) -> list[tuple[int, int, str, float]]:
+        result = self._model.extract_entities(
+            text,
+            self._labels,
+            threshold=0.5,
+            include_confidence=True,
+            include_spans=True,
+        )
+        spans: list[tuple[int, int, str, float]] = []
+        for entity in _walk_entities(result):
+            label = str(entity.get("label") or entity.get("type") or "")
+            if not label:
+                continue
+            try:
+                start = int(entity["start"])
+                end = int(entity["end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            score = float(entity.get("confidence") or entity.get("score") or 1.0)
+            spans.append((start, end, _GLINER2_LABELS.get(label.lower(), label.upper()), score))
+        return spans
+
+
+def _walk_entities(node: object) -> list[dict]:
+    """Collect span dicts from the nested gliner2 result shape defensively."""
+
+    found: list[dict] = []
+    if isinstance(node, dict):
+        if "start" in node and "end" in node:
+            found.append(node)
+        else:
+            for value in node.values():
+                found.extend(_walk_entities(value))
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            found.extend(_walk_entities(item))
+    return found
+
+
+class _OpenAIPrivacyFilterNER:
+    """openai/privacy-filter token classifier behind the SemanticPipeline NER seam."""
+
+    def __init__(self, model_dir: Path) -> None:
+        if not model_dir.is_dir():
+            raise _missing_model_error(
+                "openai-pf",
+                "openai/privacy-filter",
+                model_dir,
+                "  (and install its runtime: uv add transformers torch in coreml-redactor)\n",
+            )
+        try:
+            from transformers import pipeline
+        except ImportError as exc:
+            raise RuntimeError(
+                "the transformers package is not installed in the Vision worker "
+                "environment; run `uv add transformers torch` in coreml-redactor"
+            ) from exc
+        self._classifier = pipeline(
+            task="token-classification",
+            model=str(model_dir),
+            aggregation_strategy="simple",
+        )
+
+    def warm(self) -> None:
+        self.detect("My name is Alice Smith")
+
+    def detect(self, text: str) -> list[tuple[int, int, str, float]]:
+        spans: list[tuple[int, int, str, float]] = []
+        for entity in self._classifier(text):
+            group = str(entity.get("entity_group") or entity.get("entity") or "")
+            start = entity.get("start")
+            end = entity.get("end")
+            if not group or start is None or end is None:
+                continue
+            score = float(entity.get("score", 0.0))
+            spans.append(
+                (int(start), int(end), _OPENAI_PF_LABELS.get(group.lower(), group.upper()), score)
+            )
+        return spans

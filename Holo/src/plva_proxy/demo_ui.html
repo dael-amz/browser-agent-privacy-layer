@@ -98,7 +98,7 @@
     .modelpill{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px 6px 12px;
       border:1px solid var(--border-soft);border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;background:var(--back-primary)}
     .modelpill svg{color:var(--fore-secondary)}
-    .modelmenu{position:absolute;top:calc(100% + 6px);left:50%;width:200px;margin-left:-100px;
+    .modelmenu{position:absolute;top:calc(100% + 6px);left:50%;width:240px;margin-left:-120px;
       background:var(--back-primary);border:1px solid var(--border-fade);border-radius:var(--radius-card);
       box-shadow:0 12px 32px rgba(12,12,12,.1);padding:6px;z-index:5}
     /* transitions-dev: 05-menu-dropdown */
@@ -133,6 +133,7 @@
     @media (prefers-reduced-motion: reduce) {
       .t-dropdown { transition: none !important; }
     }
+    .modelmenu .menuhead{padding:6px 12px 2px;font-size:11px;line-height:16px;letter-spacing:.4px;text-transform:uppercase;color:var(--fore-secondary)}
     .modelmenu button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;
       border-radius:10px;font-size:15px;line-height:20px}
     .modelmenu button:hover{background:var(--back-secondary)}
@@ -241,6 +242,7 @@
     .toolbar{display:flex;justify-content:flex-end;margin-bottom:10px}
     .linkbtn{border:1px solid var(--border-soft);border-radius:var(--radius-full);padding:5px 12px;font-size:13px;line-height:18px;color:var(--fore-primary)}
     .linkbtn:hover{background:var(--back-secondary)}
+    .linkbtn:disabled{opacity:.45;cursor:not-allowed}
     .finding{padding:12px 14px;border:1px solid var(--border-fade);border-radius:12px;margin:8px 0;background:var(--back-primary)}
     .findingtop{display:flex;justify-content:space-between;gap:8px;font-size:14px}
     .findingtop b{font-weight:500}
@@ -271,6 +273,13 @@
     .runcard.active{background:var(--back-inverse);border-color:var(--back-inverse)}
     .runcard.active b{color:var(--fore-inverse)}
     .runcard.active small{color:rgba(255,255,255,.6)}
+    .workspace.withrail{flex-direction:row;align-items:flex-start;justify-content:center}
+    .sessionrail{position:sticky;top:0;width:240px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;padding:2px 0 160px}
+    .sessionrail h3{margin:2px 2px 0;font-size:13px;font-weight:500;color:var(--fore-secondary)}
+    .sessionrail .runcard{max-width:none;width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+    .sessionrail .runcard b{max-width:100%}
+    .sessionrail .replaylink{cursor:pointer;margin-top:6px;border:1px solid var(--border-soft);border-radius:var(--radius-full);padding:3px 10px;font-size:12px;line-height:16px}
+    .sessionrail .runcard.active .replaylink{border-color:rgba(255,255,255,.4);color:var(--fore-inverse)}
     .cstate{font-size:12px;padding:3px 9px;border-radius:var(--radius-full);border:1px solid var(--border-soft);color:var(--fore-secondary)}
     .cstate.sent{color:var(--ok);border-color:currentColor}
     .cstate.streamed{color:var(--fore-secondary)}
@@ -439,7 +448,20 @@
     const groups={"Identity":["NAME","DOB","GOV_ID","SSN"],"Contact":["EMAIL","PHONE","ADDRESS"],"Financial":["BANK_ACCOUNT","CARD_NUMBER","CVC"],"Credentials":["PASSWORD","API_KEY","AUTH_TOKEN","PRIVATE_KEY","SECRET"]};
     const labels={NAME:"Name",DOB:"Date of birth",GOV_ID:"Government ID",SSN:"Social Security number",EMAIL:"Email",PHONE:"Phone",ADDRESS:"Postal address",BANK_ACCOUNT:"Bank account",CARD_NUMBER:"Card number",CVC:"Card security code",PASSWORD:"Password",API_KEY:"API key",AUTH_TOKEN:"Authentication token",PRIVATE_KEY:"Private key",SECRET:"Other secret"};
     const levelLabels={hide_use:"Use",approval:"Ask",blocked:"Block"};
-    const providerLabels={hcompany:"Holo-1",overshoot:"Overshoot"};
+    const providerLabels={hcompany:"H Company",overshoot:"Overshoot"};
+    const modelCatalog={
+      hcompany:[["holo3-1-35b-a3b","Holo3-1 35B"]],
+      overshoot:[["Hcompany/Holo3-35B-A3B","Holo3 35B"],["Hcompany/Holo-3.1-35B-A3B-FP8","Holo3-1 35B FP8"],["Holo3-122B-A10B","Holo3 122B"]]
+    };
+    function modelLabel(id){for(const models of Object.values(modelCatalog)){const hit=models.find(([v])=>v===id);if(hit)return hit[1]}return id}
+    function pillLabel(){const s=state.settings;return esc(s.model?modelLabel(s.model):(providerLabels[s.provider]||s.provider))}
+    function modelMenuItems(){
+      const s=state.settings;
+      return Object.entries(modelCatalog).map(([p,models])=>
+        `<div class="menuhead">${esc(providerLabels[p]||p)}</div>`+
+        models.map(([id,label])=>`<button data-provider="${esc(p)}" data-model="${esc(id)}">${esc(label)}<small>${id===s.model?"Selected":""}</small></button>`).join("")
+      ).join("");
+    }
     const featureLabels={chips:["Placeholder chips","Paint and vault current findings"],history_scrub:["History scrub","Remove values before the next model call"],scheme:["Scheme prompt","Teach Holo how placeholders work"],duplicate_warning:["Duplicate warning","Explain rare duplicate tokens"],manifest:["Frame manifest","List tokens visible right now"],resolution:["Action resolution","Restore values only in executed actions"],policy_teaching:["Policy prompt","Teach Holo each class security level"],skill:["Native skill","Reinforce the static scheme"]};
     const statusNames={idle:"Ready",starting:"Starting privately",running:"Holo is working",stopping:"Stopping",stopped:"Stopped",completed:"Complete",failed:"Needs attention"};
 
@@ -511,7 +533,7 @@
     async function stop(){try{await api("/api/stop",{method:"POST",body:"{}"});await refresh()}catch(e){toast(e.message)}}
     async function setPolicy(cls,level){if(state.running)return toast("Stop the task before changing policy");const next={...state.policy,[cls]:level};try{const result=await api("/api/policy",{method:"PUT",body:JSON.stringify(next)});state.policy=result.policy;renderPanel();toast(`${labels[cls]} set to ${levelLabels[level]}`)}catch(e){toast(e.message)}}
     async function saveSettings(patch){if(!state)return;if(state.running){render(true);return toast("Stop the task before changing settings")}
-      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,vision_mode:s.vision_mode,lifecycle:s.lifecycle,features:{...s.features},...patch};
+      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,features:{...s.features},...patch};
       if(patch&&patch.features)settings.features={...s.features,...patch.features};
       try{const r=await api("/api/settings",{method:"PUT",body:JSON.stringify(settings)});state.settings=r.settings;render(true)}catch(e){toast(e.message);render(true)}}
 
@@ -536,8 +558,8 @@
             <textarea id="prompt" rows="3" placeholder="What can I do for you?"></textarea>
             <div class="composerrow">
               <div class="modelwrap">
-                <button class="modelpill" id="model-pill">${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}</button>
-                <div class="modelmenu t-dropdown" data-origin="top-left" id="model-menu">${Object.entries(providerLabels).map(([v,l])=>`<button data-provider="${v}">${l}<small>${v===state.settings.provider?"Selected":""}</small></button>`).join("")}</div>
+                <button class="modelpill" id="model-pill">${pillLabel()} ${chevron}</button>
+                <div class="modelmenu t-dropdown" data-origin="top-left" id="model-menu">${modelMenuItems()}</div>
               </div>
               <span class="hint">Recorded to your local audit history</span>
               <button class="send" id="run" title="Run privately">${arrowUp}</button>
@@ -552,7 +574,8 @@
         </div>`;
       }
       const viewChip=(view,label)=>`<button class="chip t-tab" role="tab" data-view="${view}" aria-selected="${String(activeView===view)}">${label}</button>`;
-      return `<div class="workspace"><div class="wsinner">
+      const rail=state.running?"":`<aside class="sessionrail" id="session-rail"><h3>Past sessions</h3><div id="session-list"><div class="empty">Loading…</div></div></aside>`;
+      return `<div class="workspace${state.running?"":" withrail"}">${rail}<div class="wsinner">
           <div class="chips t-tabs" role="tablist">
             <span class="t-tabs-pill" aria-hidden="true"></span>
             ${viewChip("frame","Model view")}${viewChip("trace","Agent trace")}${viewChip("vault","Vault")}${viewChip("ocr","OCR")}${viewChip("filter","Stream guard")}
@@ -565,8 +588,8 @@
         </div></div>
         <div class="dock"><div class="dockbar">
           <div class="modelwrap">
-            <button class="modelpill" id="model-pill">${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}</button>
-            <div class="modelmenu t-dropdown" data-origin="bottom-left" id="model-menu">${Object.entries(providerLabels).map(([v,l])=>`<button data-provider="${v}">${l}<small>${v===state.settings.provider?"Selected":""}</small></button>`).join("")}</div>
+            <button class="modelpill" id="model-pill">${pillLabel()} ${chevron}</button>
+            <div class="modelmenu t-dropdown" data-origin="bottom-left" id="model-menu">${modelMenuItems()}</div>
           </div>
           <textarea id="prompt" rows="1" placeholder="What can I do for you?"></textarea>
           <button class="stoppill" id="stop" hidden>Stop</button>
@@ -582,7 +605,7 @@
       const stopBtn=$("#stop");if(stopBtn)stopBtn.onclick=stop;
       const pill=$("#model-pill");
       if(pill){pill.onclick=e=>{e.stopPropagation();const m=$("#model-menu");m.classList.contains("is-open")?closeDropdown(m):openDropdown(m)};
-        document.querySelectorAll("#model-menu [data-provider]").forEach(b=>b.onclick=()=>{closeDropdown($("#model-menu"));saveSettings({provider:b.dataset.provider})})}
+        document.querySelectorAll("#model-menu [data-model]").forEach(b=>b.onclick=()=>{closeDropdown($("#model-menu"));saveSettings({provider:b.dataset.provider,model:b.dataset.model})})}
       document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{activeView=b.dataset.view;reveal=false;selectTab(b,".chip");updateChat()});
       document.querySelectorAll("[data-suggest]").forEach(b=>b.onclick=()=>{const box=$("#prompt");if(!box)return;box.value=b.textContent;draft=box.value;box.focus()});
       initTabsPill(document.querySelector(".chips"));
@@ -591,7 +614,7 @@
     async function updateChat(){
       const pill=$("#model-pill");
       if(pill){
-        const label=`${esc(providerLabels[state.settings.provider]||state.settings.provider)} ${chevron}`;
+        const label=`${pillLabel()} ${chevron}`;
         if(pill._label!==label){pill._label=label;pill.innerHTML=label}
       }
       const runBtn=$("#run");if(runBtn)runBtn.disabled=state.running;
@@ -602,6 +625,7 @@
       const timelineHtml=events.length?events.map(e=>`<div class="event"><time>${esc(e.time)}</time><i></i><div><b>${esc(e.title)}</b><small>${esc(e.detail)}</small></div></div>`).join(""):`<div class="empty">No task has run yet.</div>`;
       const timeline=$("#timeline");
       if(timeline&&timeline._html!==timelineHtml){timeline._html=timelineHtml;timeline.innerHTML=timelineHtml}
+      await updateSessionRail();
       await renderView();
     }
 
@@ -657,19 +681,66 @@
       setView(box,"card viewcard",`<div class="filtergrid"><div class="bigmetric"><strong>${esc(d.texts_scanned||0)}</strong><span>text blocks scanned</span></div><div class="bigmetric"><strong>${esc(d.plain_vault_hits||0)}</strong><span>exact vault matches</span></div><div class="bigmetric"><strong>${esc(d.semantic_hits||0)}</strong><span>semantic detections</span></div><div class="bigmetric"><strong>${esc(d.blocked_hits||0)}</strong><span>opaque blocked removals</span></div></div><div class="finding" style="margin-top:12px"><div class="findingtop"><b>Filter status</b><span class="level ${d.status==='failed'?'blocked':'hide_use'}">${esc(d.status||"idle")}</span></div><p>Diagnostic: ${esc(d.error_code||"none")}. Cleartext is never shown here; counts remain memory-only.</p></div>`);
     }
 
+    async function updateSessionRail(){
+      const list=$("#session-list");if(!list)return;
+      let data;try{data=await api("/api/history/runs")}catch{return}
+      const runs=data.runs||[];
+      const sig=runs.map(r=>`${r.id}:${r.status}:${r.calls}`).join("|")+"@"+(selSession||"");
+      if(list._sig===sig)return;
+      list._sig=sig;
+      if(!runs.length){list.innerHTML=`<div class="empty">No recorded sessions yet.</div>`;return}
+      list.innerHTML=runs.map(r=>`<button class="runcard ${r.id===selSession?'active':''}" data-session="${esc(r.id)}" data-prompt="${esc(r.prompt||"")}">
+          <b>${esc(r.prompt||"(no prompt)")}</b>
+          <small>${esc(new Date((r.started_at||0)*1000).toLocaleString())} · ${r.calls} calls · ${esc(r.status||"")}</small>
+          <span class="replaylink" data-replay="${esc(r.id)}">View replay</span>
+        </button>`).join("");
+      list.querySelectorAll("[data-session]").forEach(b=>b.onclick=e=>{
+        if(e.target.closest("[data-replay]"))return;
+        selSession=b.dataset.session;list._sig="";
+        const box=$("#prompt");if(box){box.value=b.dataset.prompt;draft=box.value;box.focus()}
+        toast("Prompt loaded. Send it to run this session again.");
+      });
+      list.querySelectorAll("[data-replay]").forEach(s=>s.onclick=e=>{
+        e.stopPropagation();
+        curRun=s.dataset.replay;curIdx=0;tab="history";reveal=false;
+        const nb=document.querySelector('[data-nav="history"]');if(nb)selectTab(nb,"[data-nav]");
+        render(true);
+      });
+    }
+
     /* ---------- history panel: run rail + replay timeline ---------- */
-    let curRun=null,runDetail=null,curIdx=0,playing=false,playTimer=null,runsSig="",detailSig="",inspectKey="";
+    let curRun=null,runDetail=null,curIdx=0,playing=false,playTimer=null,runsSig="",detailSig="",inspectKey="",selSession=null;
     const playIcon=`<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.2v9.6a.6.6 0 00.9.5l7.5-4.8a.6.6 0 000-1L5.9 2.7a.6.6 0 00-.9.5z"/></svg>`;
     const pauseIcon=`<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>`;
     function historySkeleton(){
       return `<div class="panel"><div class="panelinner" style="max-width:980px">
         <h1>Audit timeline</h1>
         <p class="sub">Every run is recorded to this device's local history: the redacted frames, scrubbed text, and raw placeholder replies that crossed the privacy boundary. Pick a run and scrub through its model calls like a replay.</p>
+        <div class="toolbar"><button class="linkbtn" id="export-run">Export audit log</button></div>
         <div class="runsrail" id="runs-rail"></div>
         <div id="replay"></div>
       </div></div>`;
     }
-    function resetHistoryView(){runsSig="";detailSig="";inspectKey="";stopPlay()}
+    function resetHistoryView(){runsSig="";detailSig="";inspectKey="";stopPlay();const eb=$("#export-run");if(eb)eb.onclick=exportRun}
+    async function exportRun(){
+      if(!curRun)return toast("Select a run to export first");
+      const btn=$("#export-run");
+      if(btn){btn.disabled=true;btn.textContent="Exporting…"}
+      try{
+        const detail=await api(`/api/history/runs/${curRun}`);
+        const calls=await Promise.all((detail.calls||[]).map(c=>
+          api(`/api/history/runs/${curRun}/calls/${c.id}`).catch(()=>({...c,note:"full record unavailable"}))));
+        const payload={format:"plva-audit-log",exported_at:new Date().toISOString(),run:detail.run,calls};
+        const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url;a.download=`${curRun}-audit.json`;
+        document.body.appendChild(a);a.click();a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+        toast("Audit log saved. Screenshots stay in local history.");
+      }catch(e){toast(e.message||"Export failed")}
+      finally{if(btn){btn.disabled=false;btn.textContent="Export audit log"}}
+    }
     async function updateHistory(force){
       const rail=$("#runs-rail");if(!rail)return;
       let data;try{data=await api("/api/history/runs")}catch{return}
@@ -867,8 +938,13 @@
     }
     function renderLab(){
       $("#lab-selects").innerHTML=
-        segRow("Provider","Inference endpoint","provider",[["hcompany","Holo-1"],["overshoot","Overshoot"]])+
+        segRow("Provider","Inference endpoint","provider",[["hcompany","H Company"],["overshoot","Overshoot"]])+
+        segRow("Model","Holo variant for the selected provider","model",modelCatalog[state.settings.provider]||[])+
         segRow("Vision mode","OCR quality / latency","vision_mode",[["fast","Fast"],["cascade","Cascade"],["accurate","Accurate"]])+
+        segRow("OCR engine","Apple Vision or Core ML RapidOCR","ocr_engine",[["apple","Apple OCR"],["rapidocr","RapidOCR"]])+
+        segRow("Visual detector","Off isolates the OCR pipeline and the text filter","visual_detector",[["on","On"],["off","Off"]])+
+        segRow("Detector version","v3 needs an exported ONNX detector","detector_version",[["v2","v2 baseline"],["v3","v3"]])+
+        segRow("Text filter","Alternatives need a local frozen model copy","semantic_engine",[["rampart","Rampart"],["gliner2","GLiNER2 PII"],["openai-pf","OpenAI PF"]])+
         segRow("Worker lifecycle","Startup versus idle memory","lifecycle",[["eager","Eager"],["adaptive","Adaptive"],["cold","Cold"]]);
       document.querySelectorAll("[data-setting]").forEach(b=>b.onclick=()=>saveSettings({[b.dataset.setting]:b.dataset.value}));
       const f=state.settings.features;
@@ -880,7 +956,7 @@
     function render(force){
       if(!state)return;
       renderChrome();
-      const nextMode=tab==="chat"?(sessionActive()?"chat-work":"chat-hero"):tab;
+      const nextMode=tab==="chat"?(sessionActive()?(state.running?"chat-work":"chat-done"):"chat-hero"):tab;
       if(nextMode!==mode||force){
         mode=nextMode;
         $("#main").innerHTML=tab==="chat"?chatSkeleton():tab==="history"?historySkeleton():tab==="privacy"?privacySkeleton():labSkeleton();

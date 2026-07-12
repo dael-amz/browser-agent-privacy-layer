@@ -5,12 +5,17 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import io
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
+from plva_coreml.hybrid import HybridANERedactor
 from plva_coreml.ocr import OCRFinding
+from plva_coreml.semantics import SEMANTIC_ENGINES
 from plva_coreml.vision_hybrid import VISION_PIPELINE_MODES, HybridVisionRedactor
 
 
@@ -52,17 +57,38 @@ def main() -> None:
     parser.add_argument("--visual-model", type=Path, default=None)
     parser.add_argument("--profile", choices=("high-recall", "balanced"), default="high-recall")
     parser.add_argument("--mode", choices=VISION_PIPELINE_MODES, default="cascade")
+    parser.add_argument("--engine", choices=("apple", "rapidocr"), default="apple")
+    parser.add_argument("--no-visual", action="store_true")
+    parser.add_argument("--semantic-engine", choices=SEMANTIC_ENGINES, default="rampart")
     args = parser.parse_args()
-    pipeline = HybridVisionRedactor(
-        args.baseline.resolve(),
-        args.cache.resolve(),
-        profile=args.profile,
-        mode=args.mode,
-        visual_model=args.visual_model.resolve() if args.visual_model is not None else None,
-    )
+    visual_model = args.visual_model.resolve() if args.visual_model is not None else None
+    visual_enabled = not args.no_visual
+    if args.engine == "rapidocr":
+        pipeline: HybridANERedactor | HybridVisionRedactor = HybridANERedactor(
+            args.baseline.resolve(),
+            args.cache.resolve(),
+            profile=args.profile,
+            visual_model=visual_model,
+            visual_enabled=visual_enabled,
+            semantic_engine=args.semantic_engine,
+        )
+        backend = "vision-rapidocr"
+    else:
+        pipeline = HybridVisionRedactor(
+            args.baseline.resolve(),
+            args.cache.resolve(),
+            profile=args.profile,
+            mode=args.mode,
+            visual_model=visual_model,
+            visual_enabled=visual_enabled,
+            semantic_engine=args.semantic_engine,
+        )
+        backend = f"vision-{args.mode}"
+    if not visual_enabled:
+        backend += "-novisual"
     try:
         pipeline.warm()
-        _emit({"ready": True, "backend": f"vision-{args.mode}", "threaded": True})
+        _emit({"ready": True, "backend": backend, "threaded": True})
         for line in sys.stdin:
             identifier = ""
             try:
@@ -93,7 +119,13 @@ def main() -> None:
                 if not identifier or not isinstance(encoded, str):
                     raise ValueError("request")
                 png = base64.b64decode(encoded, validate=True)
-                result = pipeline.process(png)
+                if isinstance(pipeline, HybridANERedactor):
+                    with Image.open(io.BytesIO(png)) as loaded:
+                        source = loaded.convert("RGB")
+                        source.load()
+                    result = pipeline.process(source)
+                else:
+                    result = pipeline.process(png)
                 timings = dict(result.timings)
                 timings["workerTotalMs"] = timings.get("total_ms", 0.0)
                 _emit(
@@ -101,13 +133,13 @@ def main() -> None:
                         "id": identifier,
                         "ok": True,
                         "image": base64.b64encode(result.png).decode("ascii"),
-                        "backend": f"vision-{args.mode}",
+                        "backend": backend,
                         "counts": result.counts,
                         "timings": timings,
                         "findings": [_finding_json(finding) for finding in result.findings],
                     }
                 )
-            except (ValueError, TypeError, binascii.Error, RuntimeError):
+            except (ValueError, TypeError, binascii.Error, RuntimeError, OSError):
                 _emit({"id": identifier, "ok": False, "error": "FrameError"})
     finally:
         pipeline.close()

@@ -31,27 +31,32 @@ class HybridVisionRedactor:
         profile: str = "high-recall",
         mode: str = "cascade",
         visual_model: Path | None = None,
+        visual_enabled: bool = True,
+        semantic_engine: str = "rampart",
     ) -> None:
         if mode not in VISION_PIPELINE_MODES:
             raise ValueError(f"mode must be one of: {', '.join(VISION_PIPELINE_MODES)}")
         self._profile = profile
         self._mode = mode
-        prepared_visual_model = prepare_fixed_visual_model(
-            visual_model or baseline / "dist/visual/detector.onnx",
-            cache / "models/visual-fixed.onnx",
-        )
-        self._visual = VisualANESession(
-            prepared_visual_model, cache_directory=cache / "compiled/visual"
-        )
+        self._visual: VisualANESession | None = None
+        if visual_enabled:
+            prepared_visual_model = prepare_fixed_visual_model(
+                visual_model or baseline / "dist/visual/detector.onnx",
+                cache / "models/visual-fixed.onnx",
+            )
+            self._visual = VisualANESession(
+                prepared_visual_model, cache_directory=cache / "compiled/visual"
+            )
         self._vision = VisionOCRClient(cache)
-        self._semantic = SemanticPipeline(baseline, cache)
+        self._semantic = SemanticPipeline(baseline, cache, engine=semantic_engine)
         self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="plva-vision")
 
     def warm(self) -> None:
-        visual = self._executor.submit(self._visual.warm)
+        visual = self._executor.submit(self._visual.warm) if self._visual is not None else None
         vision = self._executor.submit(self._vision.warm)
         semantic = self._executor.submit(self._semantic.warm)
-        visual.result()
+        if visual is not None:
+            visual.result()
         vision.result()
         semantic.result()
 
@@ -76,8 +81,12 @@ class HybridVisionRedactor:
                 source.load()
         except (OSError, ValueError) as exc:
             raise RuntimeError("frame is not a decodable image") from exc
-        visual_future = self._executor.submit(
-            detect_regions, self._visual, source.copy(), profile=self._profile
+        visual_future = (
+            self._executor.submit(
+                detect_regions, self._visual, source.copy(), profile=self._profile
+            )
+            if self._visual is not None
+            else None
         )
         initial_mode = "accurate" if self._mode == "accurate" else "fast"
         vision_future = self._executor.submit(
@@ -109,7 +118,7 @@ class HybridVisionRedactor:
                     source.height,
                 )
                 semantic = self._semantic.classify(combined)
-        visual = visual_future.result()
+        visual = visual_future.result() if visual_future is not None else None
         ocr_regions = _ocr_regions(semantic.findings, profile=self._profile)
         visual_regions = tuple(
             HybridRegion(
@@ -122,7 +131,7 @@ class HybridVisionRedactor:
                 ("VISUAL",),
                 region.score,
             )
-            for region in visual.regions
+            for region in (visual.regions if visual is not None else ())
         )
         fused = _fuse_regions((*visual_regions, *ocr_regions))
         render_started = time.perf_counter()
@@ -145,7 +154,7 @@ class HybridVisionRedactor:
             regions=fused,
             findings=semantic.findings,
             counts={
-                "visual": len(visual.regions),
+                "visual": len(visual.regions) if visual is not None else 0,
                 "ocr_detected": len(semantic.findings),
                 "ocr_recognized": sum(bool(finding.text) for finding in semantic.findings),
                 "ocr_uncertain": sum(finding.uncertain for finding in semantic.findings),
@@ -153,8 +162,8 @@ class HybridVisionRedactor:
                 "fused": len(fused),
             },
             timings={
-                "visual_ms": visual.total_ms,
-                "visual_inference_ms": visual.inference_ms,
+                "visual_ms": visual.total_ms if visual is not None else 0.0,
+                "visual_inference_ms": visual.inference_ms if visual is not None else 0.0,
                 "ocr_ms": initial_vision.duration_ms + accurate_ms,
                 "vision_fast_ms": initial_vision.duration_ms if initial_mode == "fast" else 0.0,
                 "vision_accurate_ms": (

@@ -46,36 +46,54 @@ class HybridANERedactor:
         *,
         profile: str = "high-recall",
         visual_model: Path | None = None,
+        visual_enabled: bool = True,
+        semantic_engine: str = "rampart",
     ) -> None:
         self._profile = profile
-        prepared_visual_model = prepare_fixed_visual_model(
-            visual_model or baseline / "dist/visual/detector.onnx",
-            cache / "models/visual-fixed.onnx",
-        )
-        self._visual = VisualANESession(
-            prepared_visual_model, cache_directory=cache / "compiled/visual"
-        )
+        self._visual: VisualANESession | None = None
+        if visual_enabled:
+            prepared_visual_model = prepare_fixed_visual_model(
+                visual_model or baseline / "dist/visual/detector.onnx",
+                cache / "models/visual-fixed.onnx",
+            )
+            self._visual = VisualANESession(
+                prepared_visual_model, cache_directory=cache / "compiled/visual"
+            )
         self._ocr = OCRPipeline(baseline, cache)
-        self._semantic = SemanticPipeline(baseline, cache)
+        self._semantic = SemanticPipeline(baseline, cache, engine=semantic_engine)
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="plva-detect")
 
     def warm(self) -> None:
-        visual = self._executor.submit(self._visual.warm)
+        visual = self._executor.submit(self._visual.warm) if self._visual is not None else None
         ocr = self._executor.submit(self._ocr.warm)
-        visual.result()
+        if visual is not None:
+            visual.result()
         ocr.result()
         self._semantic.warm()
 
     def close(self) -> None:
         self._executor.shutdown(wait=True, cancel_futures=True)
 
+    def classify_texts(self, texts: tuple[str, ...]) -> tuple[OCRFinding, ...]:
+        """Run the warm Core ML Rampart/rule path over outbound history strings."""
+
+        findings = tuple(
+            OCRFinding(0, index, 1, index + 1, text, 1.0, 1.0)
+            for index, text in enumerate(texts)
+        )
+        return self._semantic.classify(findings).findings
+
     def process(self, source: Image.Image) -> HybridResult:
         total_started = time.perf_counter()
-        visual_future = self._executor.submit(
-            detect_regions, self._visual, source.copy(), profile=self._profile
+        visual_future = (
+            self._executor.submit(
+                detect_regions, self._visual, source.copy(), profile=self._profile
+            )
+            if self._visual is not None
+            else None
         )
         ocr_future = self._executor.submit(self._ocr.recognize, source.copy())
-        visual = visual_future.result()
+        visual = visual_future.result() if visual_future is not None else None
         ocr: OCRResult = ocr_future.result()
         semantic = self._semantic.classify(ocr.findings)
         ocr_regions = _ocr_regions(semantic.findings, profile=self._profile)
@@ -90,7 +108,7 @@ class HybridANERedactor:
                 ("VISUAL",),
                 region.score,
             )
-            for region in visual.regions
+            for region in (visual.regions if visual is not None else ())
         )
         fused = _fuse_regions((*visual_regions, *ocr_regions))
         render_started = time.perf_counter()
@@ -113,7 +131,7 @@ class HybridANERedactor:
             regions=fused,
             findings=semantic.findings,
             counts={
-                "visual": len(visual.regions),
+                "visual": len(visual.regions) if visual is not None else 0,
                 "ocr_detected": ocr.detected_count,
                 "ocr_recognized": sum(bool(finding.text) for finding in semantic.findings),
                 "ocr_uncertain": sum(finding.uncertain for finding in semantic.findings),
@@ -121,8 +139,8 @@ class HybridANERedactor:
                 "fused": len(fused),
             },
             timings={
-                "visual_ms": visual.total_ms,
-                "visual_inference_ms": visual.inference_ms,
+                "visual_ms": visual.total_ms if visual is not None else 0.0,
+                "visual_inference_ms": visual.inference_ms if visual is not None else 0.0,
                 "ocr_ms": ocr.total_ms,
                 "ocr_detector_ms": ocr.detector_ms,
                 "ocr_recognizer_ms": ocr.recognizer_ms,
