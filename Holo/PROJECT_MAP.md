@@ -52,6 +52,7 @@ Hackathon/
     │       ├── contract_probe.py        Privacy-safe Overshoot model/JSON/SSE contract probe
     │       ├── live.py                  Continuous local capture→redact→viewer loop (no upstream)
     │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks + viewer (fail-closed, SSE-safe)
+    │       ├── providers.py             Overshoot and H Company endpoint/model/key presets
     │       ├── redactor.py              Persistent accelerated worker client + frozen CLI fallback
     │       └── runtime_capture.py       Loopback-only Holo screenshot-transport capture stub (+ /health)
     ├── tests/
@@ -139,8 +140,9 @@ Completed evidence:
 
 Active blockers / open items:
 
-- **Step 1 live run awaits the operator's Overshoot key** in `Holo/.env` (`API_KEY=...`),
-  then one pass of `verification/step-1-runbook.md`. Live-frame streaming for this run was
+- **Step 1 live run awaits a provider key** in `Holo/.env`: `API_KEY=...` for Overshoot or
+  `HAI_API_KEY=...` with `PLVA_PROVIDER=hcompany`, then one pass of
+  `verification/step-1-runbook.md`. Live-frame streaming for this run was
   authorized by the operator on 2026-07-11 ("finish step 1").
 - The closed runtime writes frame-bearing `events.jsonl` with no disable knob; every real run must
   relocate `--runs-dir` to an ephemeral local path and shred it. `~/.holo/runs` is off-limits.
@@ -154,7 +156,7 @@ Active blockers / open items:
 |---|---|
 | `plva-live` | Continuous local capture through the persistent accelerated redactor → `http://127.0.0.1:18082/viewer`; no provider or key. |
 | `plva-probe` | Run the live synthetic Overshoot contract probe when `API_KEY` is supplied. |
-| `plva-proxy` | Loopback proxy; `--redact-engine vision` selects native Vision/Core ML, `accelerated` selects WebGPU/WASM, and `baseline` retains the oracle; `/viewer` and `/viewer/findings` are memory-only. |
+| `plva-proxy` | Loopback proxy; `--provider` selects Overshoot or H Company; `--redact-engine vision` selects native Vision/Core ML, `accelerated` selects WebGPU/WASM, and `baseline` retains the oracle; `/viewer` and `/viewer/findings` are memory-only. |
 | `plva-runtime-capture` | Start the metadata-only capture stub on `127.0.0.1`; it never contacts a provider. |
 
 `plva-proxy` is the runtime's sole endpoint and the sole provider egress (Step 1/ADR-0001 role),

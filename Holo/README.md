@@ -29,6 +29,20 @@ PLVA_REDACT_LIFECYCLE=eager \
 ./run_step1.sh "your task"
 ```
 
+Choose the inference provider independently of the redaction engine. Overshoot remains the default.
+To use H Company's managed Holo API, place `HAI_API_KEY=<key>` in `.env`, then run:
+
+```bash
+PLVA_PROVIDER=hcompany \
+PLVA_REDACT=1 \
+PLVA_REDACT_ENGINE=vision \
+./run_step1.sh "your task"
+```
+
+The H Company preset uses `https://api.hcompany.ai/v1` and `holo3-1-35b-a3b`. Override the model
+with `PLVA_MODEL` or either preset's URL with `PLVA_UPSTREAM` when testing another compatible
+deployment.
+
 Watch exactly what the model receives at `http://127.0.0.1:18081/viewer`. The latest memory-only
 OCR/vault candidates are at `http://127.0.0.1:18081/viewer/findings`; that endpoint contains
 sensitive cleartext and is never persisted or logged. `PLVA_VISION_MODE=cascade` is the default:

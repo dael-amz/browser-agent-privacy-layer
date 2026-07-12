@@ -1,4 +1,4 @@
-"""Loopback interception proxy between the Holo runtime and Overshoot.
+"""Loopback interception proxy between the Holo runtime and its selected provider.
 
 Step 1 gave this proxy its pass-through role: the runtime's only model
 endpoint, loopback-bound, injecting the provider credential and relaying
@@ -43,7 +43,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
-from plva_proxy.contract_probe import API_BASE_URL
+from plva_proxy.providers import PROVIDERS
 from plva_proxy.redactor import (
     BACKENDS,
     PROFILES,
@@ -749,7 +749,17 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--upstream", default=API_BASE_URL, help="provider base URL")
+    parser.add_argument(
+        "--provider",
+        choices=tuple(PROVIDERS),
+        default=os.environ.get("PLVA_PROVIDER", "overshoot"),
+        help="inference-provider preset (default: overshoot)",
+    )
+    parser.add_argument(
+        "--upstream",
+        default=None,
+        help="override the selected provider's base URL",
+    )
     parser.add_argument(
         "--hook",
         choices=("none", "test", "banana"),
@@ -823,13 +833,25 @@ def main() -> None:
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
-    if not args.upstream.startswith(("http://", "https://")):
+    provider = PROVIDERS.get(args.provider)
+    if provider is None:
+        parser.error("--provider must be overshoot or hcompany")
+    upstream = args.upstream or provider.base_url
+    if not upstream.startswith(("http://", "https://")):
         parser.error("--upstream must be an http(s) URL")
     if args.redact_idle_seconds < 0:
         parser.error("--redact-idle-seconds cannot be negative")
-    api_key = os.environ.get("API_KEY") or _env_file_value(Path(".env"), "API_KEY")
+    api_key = next(
+        (
+            value
+            for key in provider.key_names
+            if (value := os.environ.get(key) or _env_file_value(Path(".env"), key))
+        ),
+        None,
+    )
     if not api_key:
-        parser.error("API_KEY is required (export it, or fill .env next to pyproject.toml)")
+        names = " or ".join(provider.key_names)
+        parser.error(f"{names} is required for provider {args.provider}")
 
     image_hook: RequestHook | None = None
     if args.hook_image is not None:
@@ -919,7 +941,7 @@ def main() -> None:
         _LOGGER.info("viewer: http://127.0.0.1:%d/viewer", args.port)
     uvicorn.run(
         create_app(
-            ProxyConfig(upstream_base_url=args.upstream, api_key=api_key),
+            ProxyConfig(upstream_base_url=upstream, api_key=api_key),
             hooks=hooks,
             frame_store=frame_store,
             startup_callbacks=startup_callbacks,

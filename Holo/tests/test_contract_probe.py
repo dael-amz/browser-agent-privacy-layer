@@ -37,8 +37,8 @@ def test_build_chat_payload_uses_exact_model_and_synthetic_data_url() -> None:
     assert "api_key" not in repr(payload).lower()
 
 
-def test_contract_constants_use_current_overshoot_v1beta_endpoint() -> None:
-    assert COMPLETIONS_URL == "https://api.overshoot.ai/v1beta/chat/completions"
+def test_contract_constants_use_current_overshoot_v1_endpoint() -> None:
+    assert COMPLETIONS_URL == "https://api.overshoot.ai/v1/chat/completions"
 
 
 def test_find_ready_model_requires_exact_ready_entry() -> None:
@@ -176,7 +176,7 @@ def test_probe_checks_models_and_uses_bearer_auth_only_for_completion(
     summary = _probe(api_key="test-only-key", stream=stream)
 
     assert isinstance(summary, SSESummary if stream else CompletionSummary)
-    assert seen_paths == ["/v1beta/models", "/v1beta/chat/completions"]
+    assert seen_paths == ["/v1/models", "/v1/chat/completions"]
 
 
 def test_main_requires_key_without_printing_environment(

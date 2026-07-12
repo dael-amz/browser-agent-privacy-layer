@@ -21,10 +21,10 @@
 # Inspect:  sudo pfctl -a plva -sr
 # Remove:   sudo pfctl -a plva -F rules
 
-table <overshoot> persist { api.overshoot.ai }
+table <inference_providers> persist { api.overshoot.ai, api.hcompany.ai }
 
 # 1) No process on this host may open a TCP connection to the provider...
-block return out proto tcp to <overshoot> port 443
+block return out proto tcp to <inference_providers> port 443
 
 # 2) ...except sockets owned by the proxy's dedicated role user.
-pass out proto tcp to <overshoot> port 443 user _plvaproxy keep state
+pass out proto tcp to <inference_providers> port 443 user _plvaproxy keep state
