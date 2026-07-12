@@ -450,8 +450,8 @@
     const levelLabels={hide_use:"Use",approval:"Ask",blocked:"Block"};
     const providerLabels={hcompany:"H Company",overshoot:"Overshoot"};
     const modelCatalog={
-      hcompany:[["holo3-1-35b-a3b","Holo3-1 35B"]],
-      overshoot:[["Hcompany/Holo3-35B-A3B","Holo3 35B"],["Hcompany/Holo-3.1-35B-A3B-FP8","Holo3-1 35B FP8"],["Holo3-122B-A10B","Holo3 122B"]]
+      hcompany:[["holo3-1-35b-a3b","Holo3-1 35B"],["holo3-122b-a10b","Holo3 122B"]],
+      overshoot:[["Hcompany/Holo3-35B-A3B","Holo3 35B"]]
     };
     function modelLabel(id){for(const models of Object.values(modelCatalog)){const hit=models.find(([v])=>v===id);if(hit)return hit[1]}return id}
     function pillLabel(){const s=state.settings;return esc(s.model?modelLabel(s.model):(providerLabels[s.provider]||s.provider))}

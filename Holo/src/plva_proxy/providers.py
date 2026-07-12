@@ -22,16 +22,13 @@ PROVIDERS: Final[dict[str, ProviderSpec]] = {
         base_url="https://api.overshoot.ai/v1",
         model="Hcompany/Holo3-35B-A3B",
         key_names=("OVERSHOOT_API_KEY", "API_KEY"),
-        models=(
-            "Hcompany/Holo3-35B-A3B",
-            "Hcompany/Holo-3.1-35B-A3B-FP8",
-            "Holo3-122B-A10B",
-        ),
+        models=("Hcompany/Holo3-35B-A3B",),
     ),
     "hcompany": ProviderSpec(
         base_url="https://api.hcompany.ai/v1",
         model="holo3-1-35b-a3b",
         key_names=("HAI_API_KEY",),
-        models=("holo3-1-35b-a3b",),
+        # Verified against the live /v1/models list (both active and ready).
+        models=("holo3-1-35b-a3b", "holo3-122b-a10b"),
     ),
 }
