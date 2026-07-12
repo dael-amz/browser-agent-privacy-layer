@@ -438,7 +438,7 @@ opaque mask but receive no token or vault entry; `approval` tokens are stored bu
 denied until Step 7 supplies a local approver. The consumer app exposes all 15 classes and three
 levels. See `Holo/verification/step-6-policy.md`.
 
-### 🔲 Step 6.5 — Tool-call channel spike: can Holo3 make tool calls via skills + prompting? — **NEW · DO THIS NEXT**
+### ✅ Step 6.5 — Tool-call channel spike: can Holo3 make tool calls via skills + prompting?
 - **Why this is next (not a refinement of Step 6 — a standalone prerequisite).** Several remaining
   steps assume the CUA can **invoke a tool and consume its result**: the local reasoning tool and
   deterministic ops (Step 13), SPEAK / voice-read (Steps 8–9), spoken-prompt routing (Step 10), and
@@ -471,6 +471,17 @@ levels. See `Holo/verification/step-6-policy.md`.
   model-side (proxy/app-mediated pseudo-tools that need no model cooperation: the proxy runs the op
   and folds the result into the next injected observation, or the point-and-flag shape from Step 8).
   Nothing sensitive recorded.
+
+**Completed 2026-07-12.** An authentic one-step Holo request was captured on loopback and all
+provider-bound user text and pixels were replaced with a fixed synthetic `add(3, 4)` fixture. The
+runtime schema has `structured_outputs` and an unconstrained string `tool_name`, but no native
+`tools`; the temporary skill declaration was not loaded into the request. Native invocation
+therefore failed, and the model's attempted structured action did not match a parseable argument
+shape. The free-text marker completed the full emit → parse → local execute → result-consumption
+round trip. Adopt the marker channel for Steps 7/8/9/10/13, always backed by the deterministic
+proxy/app pseudo-tool path because marker compliance varied between otherwise identical probe
+runs. The value-free matrix and schema fingerprint are in
+`Holo/verification/step-6.5-tool-channel.md`; rerun with `uv run plva-tool-probe`.
 
 ### 🔲 Step 7 — LLM mediator (OpenShell) for approvals + steering
 - **Goal:** `approval`-class resolutions and configurable risk flags are decided by a mediator

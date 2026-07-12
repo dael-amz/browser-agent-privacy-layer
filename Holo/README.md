@@ -201,3 +201,19 @@ Use `--mode both` only when an explicit PLVA-off exposure comparison is intended
 they never infer action success or frame
 privacy from process exit status. The fixture contains synthetic data only, prompts never contain
 the fixture value, and the loopback server does not log request bodies.
+
+## Holo tool-channel probe
+
+Recheck the Step 6.5 model-to-local-tool contract with synthetic data only:
+
+```bash
+$HOME/.local/bin/uv run plva-tool-probe \
+  --provider hcompany \
+  --output /tmp/plva-tool-probe.json
+```
+
+The probe captures one authentic Holo request on loopback, replaces every user/history message
+and desktop image before provider egress, and tests native tools, structured actions, and a strict
+free-text marker. It records only schema metadata and boolean outcomes. The current Holo3 contract
+round-trips the free-text marker; native tools are absent and the attempted custom structured
+action is not parseable. See `verification/step-6.5-tool-channel.md` for the matrix and fallback.
