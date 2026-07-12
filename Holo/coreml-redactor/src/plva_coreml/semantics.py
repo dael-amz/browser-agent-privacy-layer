@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from dataclasses import dataclass, replace
@@ -21,11 +22,12 @@ COMPLETE_NAME_MIN_SCORE: Final = RAMPART_MIN_SCORE
 CONTEXTUAL_NAME_MIN_SCORE: Final = 0.5
 MULTIWORD_NAME_MIN_SCORE: Final = 0.72
 KEEP_LABELS: Final = frozenset({"CITY", "STATE", "ZIP_CODE"})
-SEMANTIC_ENGINES: Final = ("rampart", "gliner2", "openai-pf")
+SEMANTIC_ENGINES: Final = ("rampart", "gliner2", "openai-pf", "openai-pf-4bit")
 # Alternative engines load frozen local copies only; no runtime downloads.
 SEMANTIC_MODELS_ROOT: Final = Path(__file__).resolve().parents[2] / "models" / "semantic"
 GLINER2_MODEL_DIR: Final = SEMANTIC_MODELS_ROOT / "gliner2-privacy-filter-PII-multi"
 OPENAI_PF_MODEL_DIR: Final = SEMANTIC_MODELS_ROOT / "openai-privacy-filter"
+OPENAI_PF_4BIT_MODEL_DIR: Final = SEMANTIC_MODELS_ROOT / "openai-privacy-filter-4bit"
 # Alternative-engine vocabularies mapped onto the Rampart taxonomy so fusion,
 # policy, and vault logic keep seeing one label space. Unmapped labels pass
 # through uppercased and stay blocked by the unknown-class policy default.
@@ -76,6 +78,20 @@ _OPENAI_PF_LABELS: Final = {
     "private_financial": "BANK_ACCOUNT",
     "private_credential": "SECRET",
     "private_date": "DATE_OF_BIRTH",
+    # Bare BIOES category names used by the mlx-community 4-bit export.
+    "person": "GIVEN_NAME",
+    "name": "GIVEN_NAME",
+    "email": "EMAIL",
+    "phone": "PHONE",
+    "url": "URL",
+    "address": "STREET_NAME",
+    "date": "DATE_OF_BIRTH",
+    "account_number": "BANK_ACCOUNT",
+    "account": "BANK_ACCOUNT",
+    "financial": "BANK_ACCOUNT",
+    "id": "GOVERNMENT_ID",
+    "credential": "SECRET",
+    "secret": "SECRET",
 }
 NAME_LABELS: Final = frozenset({"GIVEN_NAME", "SURNAME"})
 ID_TO_LABEL: Final = (
@@ -142,12 +158,15 @@ class SemanticPipeline:
         if engine not in SEMANTIC_ENGINES:
             raise ValueError(f"engine must be one of: {', '.join(SEMANTIC_ENGINES)}")
         self._engine = engine
-        self._alt: _Gliner2NER | _OpenAIPrivacyFilterNER | None = None
+        self._alt: _Gliner2NER | _OpenAIPrivacyFilterNER | _OpenAIPrivacyFilterMLXNER | None = None
         if engine == "gliner2":
             self._alt = _Gliner2NER(GLINER2_MODEL_DIR)
             return
         if engine == "openai-pf":
             self._alt = _OpenAIPrivacyFilterNER(OPENAI_PF_MODEL_DIR)
+            return
+        if engine == "openai-pf-4bit":
+            self._alt = _OpenAIPrivacyFilterMLXNER(OPENAI_PF_4BIT_MODEL_DIR)
             return
         model = prepare_fixed_model(
             baseline / "dist/semantic/rampart/onnx/model_q4.onnx",
@@ -694,4 +713,93 @@ class _OpenAIPrivacyFilterNER:
             spans.append(
                 (int(start), int(end), _OPENAI_PF_LABELS.get(group.lower(), group.upper()), score)
             )
+        return spans
+
+
+class _OpenAIPrivacyFilterMLXNER:
+    """4-bit MLX quantization of openai/privacy-filter behind the SemanticPipeline NER seam."""
+
+    _MAX_TOKENS: Final = 8192
+
+    def __init__(self, model_dir: Path) -> None:
+        if not model_dir.is_dir():
+            raise _missing_model_error(
+                "openai-pf-4bit",
+                "mlx-community/openai-privacy-filter-4bit",
+                model_dir,
+                "  (and install its runtime: uv add mlx-embeddings in coreml-redactor)\n",
+            )
+        try:
+            import mlx.core as mx
+            from mlx_embeddings.utils import load
+        except ImportError as exc:
+            raise RuntimeError(
+                "the mlx-embeddings package is not installed in the Vision worker "
+                "environment; run `uv add mlx-embeddings` in coreml-redactor"
+            ) from exc
+        self._mx = mx
+        self._model, self._tokenizer = load(str(model_dir))
+        config = json.loads((model_dir / "config.json").read_text())
+        id2label = config.get("id2label") or {}
+        self._id_to_label = {int(key): str(value) for key, value in id2label.items()}
+        if not self._id_to_label:
+            raise RuntimeError("openai-pf-4bit config.json is missing its id2label map")
+
+    def warm(self) -> None:
+        self.detect("warm up john.smith@example.com")
+
+    def detect(self, text: str) -> list[tuple[int, int, str, float]]:
+        if not text.strip():
+            return []
+        encoded = self._tokenizer(
+            text,
+            return_offsets_mapping=True,
+            truncation=True,
+            max_length=self._MAX_TOKENS,
+        )
+        ids = self._mx.array([encoded["input_ids"]])
+        attention = self._mx.array([encoded["attention_mask"]])
+        outputs = self._model(ids, attention_mask=attention)
+        logits = np.asarray(getattr(outputs, "logits", outputs), dtype=np.float32)[0]
+        probabilities = _softmax(logits)
+        spans: list[tuple[int, int, str, float]] = []
+        current: tuple[str, int, int, float, int] | None = None
+
+        def flush() -> None:
+            nonlocal current
+            if current is None:
+                return
+            label, start, end, score_sum, count = current
+            # Offset mappings absorb the whitespace preceding a word-start
+            # token; trimmed edges keep vault values byte-exact.
+            while start < end and text[start].isspace():
+                start += 1
+            while end > start and text[end - 1].isspace():
+                end -= 1
+            if end > start:
+                spans.append((start, end, label, score_sum / count))
+            current = None
+
+        for index, (start, end) in enumerate(encoded["offset_mapping"]):
+            if start == end:
+                flush()
+                continue
+            label_id = int(np.argmax(probabilities[index]))
+            raw_label = self._id_to_label.get(label_id, "O")
+            if raw_label == "O":
+                flush()
+                continue
+            prefix, _, name = raw_label.partition("-")
+            if not name:
+                prefix, name = "S", prefix
+            label = _OPENAI_PF_LABELS.get(name.lower().removeprefix("private_"), name.upper())
+            score = float(probabilities[index, label_id])
+            if current is not None and current[0] == label and prefix in {"I", "E"}:
+                current = (label, current[1], end, current[3] + score, current[4] + 1)
+            else:
+                flush()
+                current = (label, start, end, score, 1)
+            if prefix in {"E", "S"}:
+                flush()
+        flush()
         return spans

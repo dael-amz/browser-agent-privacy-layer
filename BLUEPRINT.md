@@ -511,9 +511,12 @@ Nemotron model over a loopback-pinned fail-closed client (`plva_proxy.local_llm`
 (`config/mediator-criteria.json`), plus a trace watchdog (`should_review` deterministic trigger →
 `review_trace` → continue/warn/halt) for killing a misbehaving CUA. Outage/malformed output fails
 closed (deny/halt); verdicts echoing shown cleartext are withheld; an approving verdict's
-`grant_kwargs()` maps 1:1 onto `SessionVault.grant_approval`. On this host the zero-egress
-invariant is evidenced by an `lsof` audit (`plva-mediator probe`) per ADR-0001, not OpenShell.
-Evidence: `Holo/verification/local-llm-mediator-executor.md`; runbook:
+`grant_kwargs()` maps 1:1 onto `SessionVault.grant_approval`. **The model now runs inside a
+NemoClaw/OpenShell sandbox** (Docker driver) under a zero-egress policy — enforcement verified
+empirically by deny-tests from inside (HTTPS/HTTP/raw-IP/DNS all blocked), reached only via
+`openshell forward service` on loopback; `Holo/run_mediator_sandbox.sh` manages the stack and
+hard-fails unless the deny-test passes (ADR-0001 addendum corrects the earlier "unusable on
+macOS" assumption). Evidence: `Holo/verification/local-llm-mediator-executor.md`; runbook:
 `Holo/docs/local-llm-runbook.md`.
 
 ### 🔲 Step 8 — SPEAK-mechanism spike (prerequisite for voice-read)
@@ -666,7 +669,14 @@ for the explicitly deferred Step 7/9/10/12 controls.
 > talking point / stretch goal — it is little extra plumbing because it reuses the Step 7 sandbox,
 > but it should not be on the critical path for the demo.
 
-**Executor (B) component built 2026-07-12 (not yet bridged):** `plva_proxy.semantic_executor`
+**Bridged into the proxy 2026-07-12** (`plva_proxy.tool_channel`, flags
+`--privacy-tools` / `--privacy-mediator`, env `PRIVACY_TOOLS=1 PRIVACY_MEDIATOR=1` via
+`run_step1.sh`): the ⟦PLVA_TOOL⟧ marker channel (teaching injected, allowlist-validated,
+deterministic (A) sort in-proxy, (B) via the sandboxed model, value-free result into the next
+observation, `POST /viewer/tools` fallback), mediator auto-approval on gated resolutions, and the
+watchdog halt gate. The Step 6.5 spike loop (`tools.py`, `--tools`) is unchanged and separate.
+
+**Executor (B) component built 2026-07-12:** `plva_proxy.semantic_executor`
 runs `sort`/`select` over issued tokens through the same local model. The model answers with
 exact item texts (grammar-constrained to that enum on grammar-capable servers); the executor maps
 answers back to tokens and discards the completion, so the return to the CUA is tokens-only by

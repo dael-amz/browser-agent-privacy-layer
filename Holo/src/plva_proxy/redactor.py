@@ -101,8 +101,11 @@ class AcceleratedRedactor:
             "rampart",
             "gliner2",
             "openai-pf",
+            "openai-pf-4bit",
         }:
-            raise ValueError("semantic_engine must be rampart, gliner2, or openai-pf")
+            raise ValueError(
+                "semantic_engine must be rampart, gliner2, openai-pf, or openai-pf-4bit"
+            )
         if config.profile not in PROFILES:
             raise ValueError(f"profile must be one of: {', '.join(PROFILES)}")
         if config.cache_entries < 0:

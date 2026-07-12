@@ -17,6 +17,7 @@ Hackathon/
     ├── PROJECT_MAP.md                   This living directory and status guide
     ├── README.md                        Active project overview and safety warning
     ├── run_step1.sh                     One-command live run (proxy + preflight + task + cleanup)
+    ├── run_mediator_sandbox.sh          NemoClaw/OpenShell mediator stack: up (with in-sandbox deny-test gate) / status / down
     ├── redactor-worker/                 Persistent parallel WebGPU/WASM redaction worker source
     │   ├── bin/redactor-worker.mjs      Private loopback browser/IPC supervisor
     │   ├── src/worker.js                Warm parallel visual + OCR pipeline and PNG renderer
@@ -54,6 +55,7 @@ Hackathon/
     │       ├── local_llm.py             Loopback-pinned fail-closed client for the sandboxed local LLM + no-egress audit
     │       ├── mediator.py              §7 local LLM mediator: approval verdicts, trace watchdog, and CLI demos
     │       ├── semantic_executor.py     Step 13(B) placeholder-preserving sort/select via the local LLM (token-only returns)
+    │       ├── tool_channel.py          Step 13/7 bridge: ⟦PLVA_TOOL⟧ marker channel, deterministic sort (A), mediator auto-approval, watchdog halt
     │       ├── privacy.py               Session vault, chip painter, resolver, and history scrub
     │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks + memory-only sent-frame audit viewer (fail-closed, SSE-safe)
     │       ├── providers.py             Overshoot and H Company endpoint/model/key presets
@@ -65,6 +67,7 @@ Hackathon/
     │   ├── test_proxy.py                Relay fidelity, credential, SSE, fail-closed, and log-hygiene tests
     │   ├── test_proxy_hooks.py          Step 3 hook seam: mutation, SSE re-emit, and fail-closed tests
     │   ├── test_local_llm.py            Loopback pinning, JSON extraction, leak scan, and egress-audit tests
+    │   ├── test_tool_channel.py         Marker channel, deterministic sort, auto-approval, and watchdog-halt tests
     │   ├── test_mediator.py             Criteria validation, fail-closed verdicts, watchdog trigger, and CLI tests
     │   ├── test_semantic_executor.py    Token-only contract, retry/fail-closed, and validation tests
     │   ├── test_privacy.py              Vault, chip, scrub, resolution, and detector-stub tests
@@ -73,7 +76,8 @@ Hackathon/
     │   └── test_runtime_capture.py      Capture validation, JSON/SSE, health, privacy, and bind tests
     ├── config/
     │   ├── privacy-policy.json          Step 6 editable per-class safety levels
-    │   └── mediator-criteria.json       User-written rules for approval-gated classes + trace-review thresholds
+    │   ├── mediator-criteria.json       User-written rules for approval-gated classes + trace-review thresholds
+    │   └── openshell-mediator-policy.yaml  Zero-egress OpenShell policy for the mediator sandbox (§7)
     ├── docs/
     │   ├── decisions/
     │   │   └── 0001-openshell-sec7-egress-topology.md   §7 topology decision (egress-isolation)

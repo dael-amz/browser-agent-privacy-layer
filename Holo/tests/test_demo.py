@@ -234,7 +234,9 @@ async def test_demo_connect_holo_cli_endpoint(
     monkeypatch.setattr(credentials, "HOLO_USER_ENV", holo_env)
     monkeypatch.delenv("HAI_API_KEY", raising=False)
     controller = demo.DemoController(history_root=tmp_path / "history")
-    controller.set_settings({**controller.snapshot()["settings"], "credential_source": "environment"})
+    controller.set_settings(
+        {**controller.snapshot()["settings"], "credential_source": "environment"}
+    )
     app = demo.create_demo_app(controller)
 
     async with httpx.AsyncClient(

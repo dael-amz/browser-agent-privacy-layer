@@ -273,7 +273,7 @@ class DemoController:
             "lifecycle": "eager",
             "detector_version": "v2",
             "ocr_engine": "apple",
-            "visual_detector": "on",
+            "visual_detector": "off",
             "semantic_engine": "rampart",
             "features": {name: True for name in FEATURE_ENV},
         }
@@ -364,7 +364,7 @@ class DemoController:
         # Absent keys fall back to defaults so older clients keep working.
         detector_version = raw.get("detector_version") or "v2"
         ocr_engine = raw.get("ocr_engine") or "apple"
-        visual_detector = raw.get("visual_detector") or "on"
+        visual_detector = raw.get("visual_detector") or "off"
         if detector_version not in {"v2", "v3"}:
             raise ValueError("detector version is invalid")
         if ocr_engine not in {"apple", "rapidocr"}:
@@ -372,7 +372,7 @@ class DemoController:
         if visual_detector not in {"on", "off"}:
             raise ValueError("visual detector setting is invalid")
         semantic_engine = raw.get("semantic_engine") or "rampart"
-        if semantic_engine not in {"rampart", "gliner2", "openai-pf"}:
+        if semantic_engine not in {"rampart", "gliner2", "openai-pf", "openai-pf-4bit"}:
             raise ValueError("semantic engine is invalid")
         credential_source = raw.get("credential_source") or "auto"
         if credential_source not in CREDENTIAL_SOURCES:
@@ -850,9 +850,7 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
             selected = active.set_settings(await request.json())
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return _json_response(
-            {"settings": selected, "credentials": active._credentials_snapshot()}
-        )
+        return _json_response({"settings": selected, "credentials": active._credentials_snapshot()})
 
     @app.post("/api/credentials/connect-holo-cli")
     async def connect_holo_cli() -> Response:

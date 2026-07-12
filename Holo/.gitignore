@@ -32,3 +32,6 @@ plva-v2-baseline/
 
 # Local LLM weights (mediator/semantic executor) — never commit model binaries
 models/
+
+# plva-v3-new generated build output (rebuildable; integrity manifests track it)
+plva-v3-new/dist/

@@ -31,6 +31,16 @@ dev = [
   "ruff>=0.14,<0.15",
   "types-pillow>=10.2",
 ]
+semantic-alternatives = [
+    "gliner2>=1.3.2",
+    # openai_privacy_filter support is on main but not yet in a tagged release.
+    "mlx-embeddings",
+    "torch>=2.13.0",
+    "transformers>=5.13.1",
+]
+
+[tool.uv.sources]
+mlx-embeddings = { git = "https://github.com/Blaizzy/mlx-embeddings", rev = "9b28270be81211f2b8daed0041aec65ea5dc4b28" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

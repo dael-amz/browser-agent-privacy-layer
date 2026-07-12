@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import contextlib
 import io
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from PIL import Image
 
@@ -50,6 +51,12 @@ def _emit(value: dict[str, Any]) -> None:
     print(json.dumps(value, separators=(",", ":")), flush=True)
 
 
+def _library_output() -> contextlib.AbstractContextManager[TextIO]:
+    """Keep third-party banners off the stdout JSON protocol."""
+
+    return contextlib.redirect_stdout(sys.stderr)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", type=Path, required=True)
@@ -63,31 +70,33 @@ def main() -> None:
     args = parser.parse_args()
     visual_model = args.visual_model.resolve() if args.visual_model is not None else None
     visual_enabled = not args.no_visual
-    if args.engine == "rapidocr":
-        pipeline: HybridANERedactor | HybridVisionRedactor = HybridANERedactor(
-            args.baseline.resolve(),
-            args.cache.resolve(),
-            profile=args.profile,
-            visual_model=visual_model,
-            visual_enabled=visual_enabled,
-            semantic_engine=args.semantic_engine,
-        )
-        backend = "vision-rapidocr"
-    else:
-        pipeline = HybridVisionRedactor(
-            args.baseline.resolve(),
-            args.cache.resolve(),
-            profile=args.profile,
-            mode=args.mode,
-            visual_model=visual_model,
-            visual_enabled=visual_enabled,
-            semantic_engine=args.semantic_engine,
-        )
-        backend = f"vision-{args.mode}"
+    with _library_output():
+        if args.engine == "rapidocr":
+            pipeline: HybridANERedactor | HybridVisionRedactor = HybridANERedactor(
+                args.baseline.resolve(),
+                args.cache.resolve(),
+                profile=args.profile,
+                visual_model=visual_model,
+                visual_enabled=visual_enabled,
+                semantic_engine=args.semantic_engine,
+            )
+            backend = "vision-rapidocr"
+        else:
+            pipeline = HybridVisionRedactor(
+                args.baseline.resolve(),
+                args.cache.resolve(),
+                profile=args.profile,
+                mode=args.mode,
+                visual_model=visual_model,
+                visual_enabled=visual_enabled,
+                semantic_engine=args.semantic_engine,
+            )
+            backend = f"vision-{args.mode}"
     if not visual_enabled:
         backend += "-novisual"
     try:
-        pipeline.warm()
+        with _library_output():
+            pipeline.warm()
         _emit({"ready": True, "backend": backend, "threaded": True})
         for line in sys.stdin:
             identifier = ""
@@ -106,7 +115,8 @@ def main() -> None:
                         or sum(len(text) for text in texts) > 2_000_000
                     ):
                         raise ValueError("request")
-                    classified = pipeline.classify_texts(tuple(texts))
+                    with _library_output():
+                        classified = pipeline.classify_texts(tuple(texts))
                     _emit(
                         {
                             "id": identifier,
@@ -119,13 +129,14 @@ def main() -> None:
                 if not identifier or not isinstance(encoded, str):
                     raise ValueError("request")
                 png = base64.b64decode(encoded, validate=True)
-                if isinstance(pipeline, HybridANERedactor):
-                    with Image.open(io.BytesIO(png)) as loaded:
-                        source = loaded.convert("RGB")
-                        source.load()
-                    result = pipeline.process(source)
-                else:
-                    result = pipeline.process(png)
+                with _library_output():
+                    if isinstance(pipeline, HybridANERedactor):
+                        with Image.open(io.BytesIO(png)) as loaded:
+                            source = loaded.convert("RGB")
+                            source.load()
+                        result = pipeline.process(source)
+                    else:
+                        result = pipeline.process(png)
                 timings = dict(result.timings)
                 timings["workerTotalMs"] = timings.get("total_ms", 0.0)
                 _emit(
@@ -142,7 +153,8 @@ def main() -> None:
             except (ValueError, TypeError, binascii.Error, RuntimeError, OSError):
                 _emit({"id": identifier, "ok": False, "error": "FrameError"})
     finally:
-        pipeline.close()
+        with _library_output():
+            pipeline.close()
 
 
 if __name__ == "__main__":

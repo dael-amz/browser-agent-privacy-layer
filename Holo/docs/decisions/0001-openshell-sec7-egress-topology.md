@@ -85,3 +85,17 @@ host-firewall substitute is no longer needed).
   `.env` and is injected only by the proxy.
 - If OpenShell is ever used, its namespace creation must be verified as *enforcing* (not degraded to
   observation) before any real frame is allowed to flow.
+
+## Addendum 2026-07-12 — OpenShell IS usable on this macOS host for processes it launches
+
+Empirical update (see `verification/local-llm-mediator-executor.md`): with the Docker driver,
+OpenShell 0.0.80 on this Mac launches Linux sandboxes whose deny-by-default L7 egress control
+**actually enforces** — non-allowlisted HTTPS/HTTP/raw-IP connects fail with proxy 403s and DNS
+resolution is blocked, verified by deny-tests run *inside* a live sandbox. The §7 mediator's
+local model now runs there under a zero-network-policy
+(`config/openshell-mediator-policy.yaml`), reached only via `openshell forward service` on host
+loopback (`run_mediator_sandbox.sh`). Caveats that stand: the host `hai-agent-runtime` still
+cannot be wrapped (findings 1–2 unchanged); community sandbox images carry a permissive
+built-in allowlist until overridden, and `policy set` propagates with a delay — so a live
+deny-test gate remains mandatory before cleartext flows; `openshell policy prove` was
+inconclusive with a hand-written credential descriptor (a leaky negative control also passed).

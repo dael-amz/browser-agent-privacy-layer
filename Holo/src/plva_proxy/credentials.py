@@ -58,9 +58,7 @@ def _read_holo_profile() -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def _key_from_environment(
-    key_names: tuple[str, ...], environ: dict[str, str]
-) -> str | None:
+def _key_from_environment(key_names: tuple[str, ...], environ: dict[str, str]) -> str | None:
     for name in key_names:
         if value := environ.get(name):
             return value

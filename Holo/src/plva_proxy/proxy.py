@@ -43,7 +43,14 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
-from plva_proxy.credentials import CREDENTIAL_SOURCES, CredentialSource, env_file_value, resolve_provider_key
+from plva_proxy.credentials import (
+    CREDENTIAL_SOURCES,
+    CredentialSource,
+    env_file_value,
+    resolve_provider_key,
+)
+from plva_proxy.local_llm import LLMConfig, LoopbackLLMClient
+from plva_proxy.mediator import DEFAULT_CRITERIA_PATH, Mediator, MediatorCriteria
 from plva_proxy.privacy import (
     PLACEHOLDER_MANIFEST_KEY,
     HistoryScrubber,
@@ -64,6 +71,8 @@ from plva_proxy.redactor import (
     redact_png,
 )
 from plva_proxy.runtime_capture import LOOPBACK_HOST
+from plva_proxy.semantic_executor import SemanticExecutor
+from plva_proxy.tool_channel import ToolChannel
 from plva_proxy.tools import (
     ToolError,
     ToolLoop,
@@ -991,6 +1000,7 @@ def create_app(
     vault: SessionVault | None = None,
     scrubber: HistoryScrubber | None = None,
     tool_loop: ToolLoop | None = None,
+    tool_channel: ToolChannel | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     startup_callbacks: tuple[Callable[[], None], ...] = (),
     cleanup_callbacks: tuple[Callable[[], None], ...] = (),
@@ -1211,7 +1221,14 @@ def create_app(
         return await _relay(request, "POST", "/chat/completions", use_hooks=True)
 
     if frame_store is not None:
-        add_viewer_routes(app, frame_store, calls=call_store, vault=vault, scrubber=scrubber)
+        add_viewer_routes(
+            app,
+            frame_store,
+            calls=call_store,
+            vault=vault,
+            scrubber=scrubber,
+            tool_channel=tool_channel,
+        )
 
     return app
 
@@ -1223,6 +1240,7 @@ def add_viewer_routes(
     calls: CallStore | None = None,
     vault: SessionVault | None = None,
     scrubber: HistoryScrubber | None = None,
+    tool_channel: ToolChannel | None = None,
 ) -> None:
     """Attach the loopback-only obscured-frame viewer to an application."""
 
@@ -1322,6 +1340,31 @@ def add_viewer_routes(
         return Response(
             content=json.dumps(grant, separators=(",", ":")),
             status_code=201,
+            media_type="application/json",
+            headers={"cache-control": "no-store"},
+        )
+
+    @app.post("/viewer/tools", status_code=201)
+    async def run_viewer_tool(request: Request) -> Response:
+        """Step 6.5 mandatory fallback: proxy/app-initiated op, no model marker needed."""
+        if tool_channel is None:
+            raise HTTPException(status_code=404, detail="tool channel is disabled")
+        payload = await approval_payload(request)
+        verb = payload.get("verb")
+        tokens = payload.get("tokens")
+        instruction = payload.get("instruction")
+        if (
+            not isinstance(verb, str)
+            or not isinstance(tokens, list)
+            or any(not isinstance(token, str) for token in tokens)
+            or not (instruction is None or isinstance(instruction, str))
+        ):
+            raise HTTPException(status_code=400, detail="tool payload is incomplete")
+        observation = await run_in_threadpool(
+            tool_channel.run_op, verb, tuple(tokens), instruction, None
+        )
+        return Response(
+            content=json.dumps({"observation": observation}, separators=(",", ":")),
             media_type="application/json",
             headers={"cache-control": "no-store"},
         )
@@ -1479,15 +1522,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--semantic-engine",
-        choices=("rampart", "gliner2", "openai-pf"),
+        choices=("rampart", "gliner2", "openai-pf", "openai-pf-4bit"),
         default="rampart",
         help="local semantic PII engine for the Vision worker (default: rampart)",
     )
     parser.add_argument(
         "--visual-detector",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="enable the visual detector alongside OCR (default: enabled)",
+        default=False,
+        help="enable the v2/v3 visual detector alongside OCR (default: OCR-only)",
     )
     parser.add_argument(
         "--visual-model",
@@ -1560,6 +1603,16 @@ def main() -> None:
         "--privacy-policy-json",
         default=os.environ.get("PLVA_POLICY_JSON", ""),
         help="JSON object mapping PII classes to hide_use, approval, or blocked",
+    )
+    parser.add_argument(
+        "--privacy-tools",
+        action="store_true",
+        help="enable the Step 13 token tool channel (⟦PLVA_TOOL:…⟧ sort/select via the local LLM)",
+    )
+    parser.add_argument(
+        "--privacy-mediator",
+        action="store_true",
+        help="consult the sandboxed local LLM mediator for approval-gated actions + watchdog",
     )
     parser.add_argument(
         "--privacy-approval-ttl-seconds",
@@ -1640,6 +1693,7 @@ def main() -> None:
     redact_hook: RequestHook | None = None
     privacy_hooks: Hooks | None = None
     vault_store: SessionVault | None = None
+    tool_channel: ToolChannel | None = None
     history_scrubber: HistoryScrubber | None = None
     frame_store: FrameStore | None = None
     call_store: CallStore | None = None
@@ -1720,6 +1774,34 @@ def main() -> None:
                 else:
                     detached_vault_cleanup = vault.dispose
                 history_scrubber = HistoryScrubber(vault, accelerated.classify_texts)
+                if args.privacy_tools or args.privacy_mediator:
+                    llm_client = LoopbackLLMClient(LLMConfig.from_env())
+                    scrub_ref = history_scrubber
+
+                    def _scrub_one(text: str) -> str:
+                        try:
+                            return scrub_ref.scrub((text,))[0]
+                        except Exception:
+                            return "[withheld: scrub unavailable]"
+
+                    mediator: Mediator | None = None
+                    if args.privacy_mediator:
+                        criteria = (
+                            MediatorCriteria.load(DEFAULT_CRITERIA_PATH)
+                            if DEFAULT_CRITERIA_PATH.exists()
+                            else MediatorCriteria.defaults()
+                        )
+                        mediator = Mediator(llm_client, criteria, scrubber=_scrub_one)
+                    tool_channel = ToolChannel(
+                        vault,
+                        history_scrubber,
+                        executor=(
+                            SemanticExecutor(llm_client, resolver=vault.resolve)
+                            if args.privacy_tools
+                            else None
+                        ),
+                        mediator=mediator,
+                    )
                 privacy_hooks = Hooks(
                     on_request=privacy_request_hook(
                         history_scrubber,
@@ -1729,8 +1811,13 @@ def main() -> None:
                         inject_duplicate_warning=args.privacy_duplicate_warning,
                         inject_manifest=args.privacy_manifest,
                         inject_policy=args.privacy_policy_teaching,
+                        tool_channel=tool_channel,
                     ),
-                    on_response=(privacy_response_hook(vault) if args.privacy_resolution else None),
+                    on_response=(
+                        privacy_response_hook(vault, tool_channel=tool_channel)
+                        if args.privacy_resolution
+                        else None
+                    ),
                 )
             redact_hook = frame_redaction_hook(
                 active_redactor,
@@ -1792,6 +1879,8 @@ def main() -> None:
         app_options["scrubber"] = history_scrubber
     if tool_loop is not None:
         app_options["tool_loop"] = tool_loop
+    if tool_channel is not None:
+        app_options["tool_channel"] = tool_channel
     uvicorn.run(
         create_app(
             ProxyConfig(

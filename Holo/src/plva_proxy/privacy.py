@@ -902,6 +902,30 @@ class HistoryScrubber:
         return scrubbed, blocked_hits
 
 
+class ToolChannelSupport(Protocol):
+    """What the privacy hooks need from a Step 13/Step 7 tool channel."""
+
+    task_context: str
+
+    def ensure_not_halted(self) -> None: ...
+
+    def maybe_review(self) -> None: ...
+
+    def teaching_text(self) -> str: ...
+
+    def drain_pending(self) -> tuple[str, ...]: ...
+
+    def note_step(self) -> None: ...
+
+    def scan_completion_text(self, text: str) -> None: ...
+
+    def consult_approval(self, call: Mapping[str, Any]) -> bool: ...
+
+    def record_denial(self, error: PrivacyError) -> None: ...
+
+    def is_approval_denial(self, error: PrivacyError) -> bool: ...
+
+
 def privacy_request_hook(
     scrubber: HistoryScrubber,
     *,
@@ -911,10 +935,14 @@ def privacy_request_hook(
     inject_duplicate_warning: bool = True,
     inject_manifest: bool = True,
     inject_policy: bool = True,
+    tool_channel: ToolChannelSupport | None = None,
 ) -> Callable[[dict[str, Any], dict[str, str]], tuple[dict[str, Any], dict[str, str]]]:
     def apply(
         document: dict[str, Any], headers: dict[str, str]
     ) -> tuple[dict[str, Any], dict[str, str]]:
+        if tool_channel is not None:
+            tool_channel.maybe_review()
+            tool_channel.ensure_not_halted()
         rewritten: dict[str, Any] = copy.deepcopy(document)
         raw_manifest = rewritten.pop(PLACEHOLDER_MANIFEST_KEY, None)
         messages = rewritten.get("messages")
@@ -939,6 +967,8 @@ def privacy_request_hook(
         scrubbed = scrubber.scrub(texts) if texts and history_scrub else texts
         for (container, key), value in zip(locations, scrubbed, strict=True):
             container[key] = value
+        if tool_channel is not None:
+            tool_channel.task_context = _first_user_text(messages)
         if manifest_target is not None:
             scrubber.validate_manifest(manifest_items)
         instructions = _placeholder_instructions(
@@ -954,6 +984,9 @@ def privacy_request_hook(
                 else None
             ),
         )
+        if tool_channel is not None:
+            teaching = tool_channel.teaching_text()
+            instructions = f"{instructions} {teaching}" if instructions else teaching
         if instructions is not None:
             _inject_placeholder_instructions(messages, instructions, manifest_target)
         if manifest_target is not None:
@@ -962,9 +995,29 @@ def privacy_request_hook(
                 for item in scrubber.active_manifest()
             )
             _attach_manifest(manifest_target, manifest_items, active_items)
+        if tool_channel is not None and manifest_target is not None:
+            for text in tool_channel.drain_pending():
+                _attach_observation_text(manifest_target, text)
         return rewritten, headers
 
     return apply
+
+
+def _first_user_text(messages: list[Any]) -> str:
+    """Value-free task summary for the mediator: the (scrubbed) first user text."""
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()[:300]
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict):
+                    text = part.get("text")
+                    if isinstance(text, str) and text.strip():
+                        return text.strip()[:300]
+    return ""
 
 
 def _placeholder_instructions(
@@ -1185,12 +1238,36 @@ def _level_hint(level: str) -> str:
     }[level]
 
 
-def privacy_response_hook(vault: SessionVault) -> Callable[[dict[str, Any]], dict[str, Any]]:
+def privacy_response_hook(
+    vault: SessionVault, tool_channel: ToolChannelSupport | None = None
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def resolve_with_mediator(call: dict[str, Any]) -> None:
+        try:
+            _resolve_call(call, vault)
+            return
+        except PrivacyError as error:
+            if (
+                tool_channel is None
+                or not tool_channel.is_approval_denial(error)
+                or not tool_channel.consult_approval(call)
+            ):
+                if tool_channel is not None:
+                    tool_channel.record_denial(error)
+                raise
+        try:
+            _resolve_call(call, vault)
+        except PrivacyError as error:
+            if tool_channel is not None:
+                tool_channel.record_denial(error)
+            raise
+
     def apply(document: dict[str, Any]) -> dict[str, Any]:
         rewritten: dict[str, Any] = copy.deepcopy(document)
         choices = rewritten.get("choices")
         if not isinstance(choices, list):
             raise PrivacyError("completion has no choices")
+        if tool_channel is not None:
+            tool_channel.note_step()
         for choice in choices:
             if not isinstance(choice, dict):
                 continue
@@ -1200,6 +1277,9 @@ def privacy_response_hook(vault: SessionVault) -> Callable[[dict[str, Any]], dic
             content = message.get("content")
             if not isinstance(content, str):
                 continue
+            if tool_channel is not None:
+                # Scan before resolution so marker tokens are still tokens.
+                tool_channel.scan_completion_text(content)
             try:
                 action = json.loads(content)
             except ValueError:
@@ -1211,7 +1291,7 @@ def privacy_response_hook(vault: SessionVault) -> Callable[[dict[str, Any]], dic
                 name = _call_name(call)
                 if name.lower() in {"answer", "final_answer"}:
                     continue
-                _resolve_call(call, vault)
+                resolve_with_mediator(call)
             if calls:
                 message["content"] = json.dumps(action, separators=(",", ":"))
         return rewritten
@@ -1260,9 +1340,8 @@ def _call_name(call: dict[str, Any]) -> str:
     raise PrivacyError("tool call has no name")
 
 
-def _resolve_call(call: dict[str, Any], vault: SessionVault) -> None:
-    tool_name = _call_name(call)
-    target = _call_target(call)
+def action_references(call: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    """Collect (token, argument-path) references from one call's executed fields."""
     references: list[tuple[str, str]] = []
     for key, value in list(call.items()):
         if key in _TOOL_NAME_KEYS or key in _NON_EXECUTED_FIELDS:
@@ -1274,7 +1353,19 @@ def _resolve_call(call: dict[str, Any], vault: SessionVault) -> None:
                 _collect_structure_references(value["arguments"], "function.arguments", references)
             continue
         _collect_structure_references(value, key, references)
-    resolved = vault.resolve_action(tuple(references), tool_name=tool_name, target=target)
+    return tuple(references)
+
+
+def call_target(call: Mapping[str, Any]) -> str | None:
+    """Public alias of the destination-hint reader for the tool channel."""
+    return _call_target(call)
+
+
+def _resolve_call(call: dict[str, Any], vault: SessionVault) -> None:
+    tool_name = _call_name(call)
+    target = _call_target(call)
+    references = action_references(call)
+    resolved = vault.resolve_action(references, tool_name=tool_name, target=target)
     for key, value in list(call.items()):
         if key in _TOOL_NAME_KEYS or key in _NON_EXECUTED_FIELDS:
             continue

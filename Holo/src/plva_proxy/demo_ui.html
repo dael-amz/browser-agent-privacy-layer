@@ -1125,9 +1125,9 @@
         `<section class="policygroup"><h3>Redaction pipeline</h3>
           ${segRow("Vision mode","OCR quality / latency","vision_mode",[["fast","Fast"],["cascade","Cascade"],["accurate","Accurate"]],3)}
           ${segRow("OCR engine","Apple Vision or Core ML RapidOCR","ocr_engine",[["apple","Apple OCR"],["rapidocr","RapidOCR"]],2)}
-          ${segRow("Visual detector","Off isolates the OCR pipeline and the text filter","visual_detector",[["on","On"],["off","Off"]],2)}
-          ${segRow("Detector version","v3 needs an exported ONNX detector","detector_version",[["v2","v2 baseline"],["v3","v3"]],2)}
-          ${segRow("Text filter","Alternatives need a local frozen model copy","semantic_engine",[["rampart","Rampart"],["gliner2","GLiNER2 PII"],["openai-pf","OpenAI PF"]],3)}
+          ${segRow("Visual detector","Off (default) detects PII from OCR + text filter only","visual_detector",[["off","Off"],["on","On"]],2)}
+          ${segRow("Detector version","Only used when the visual detector is on; v3 needs an exported ONNX detector","detector_version",[["v2","v2 baseline"],["v3","v3"]],2)}
+          ${segRow("Text filter","Alternatives need a local frozen model copy","semantic_engine",[["rampart","Rampart"],["gliner2","GLiNER2 PII"],["openai-pf","OpenAI PF"],["openai-pf-4bit","OpenAI PF 4-bit"]],2)}
           ${segRow("Worker lifecycle","Startup versus idle memory","lifecycle",[["eager","Eager"],["adaptive","Adaptive"],["cold","Cold"]],3)}
         </section>`;
       document.querySelectorAll("[data-setting]").forEach(b=>b.onclick=()=>{

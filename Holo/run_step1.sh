@@ -168,12 +168,15 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
     SEMANTIC_ENGINE="${PLVA_SEMANTIC_ENGINE:-rampart}"
     case "$SEMANTIC_ENGINE" in
       rampart) ;;
-      gliner2|openai-pf)
+      gliner2|openai-pf|openai-pf-4bit)
         SEMANTIC_DIR="coreml-redactor/models/semantic/gliner2-privacy-filter-PII-multi"
         SEMANTIC_REPO="fastino/gliner2-privacy-filter-PII-multi"
         if [[ "$SEMANTIC_ENGINE" == "openai-pf" ]]; then
           SEMANTIC_DIR="coreml-redactor/models/semantic/openai-privacy-filter"
           SEMANTIC_REPO="openai/privacy-filter"
+        elif [[ "$SEMANTIC_ENGINE" == "openai-pf-4bit" ]]; then
+          SEMANTIC_DIR="coreml-redactor/models/semantic/openai-privacy-filter-4bit"
+          SEMANTIC_REPO="mlx-community/openai-privacy-filter-4bit"
         fi
         if [[ ! -d "$SEMANTIC_DIR" ]]; then
           echo "ERROR: $SEMANTIC_ENGINE semantic model is not installed: $SEMANTIC_DIR" >&2
@@ -182,12 +185,12 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
         fi
         ;;
       *)
-        echo "ERROR: PLVA_SEMANTIC_ENGINE must be rampart, gliner2, or openai-pf" >&2
+        echo "ERROR: PLVA_SEMANTIC_ENGINE must be rampart, gliner2, openai-pf, or openai-pf-4bit" >&2
         exit 1
         ;;
     esac
     HOOK_ARGS+=(--semantic-engine "$SEMANTIC_ENGINE")
-    parse_on_off VISUAL_DETECTOR "${PLVA_VISUAL_DETECTOR:-1}" PLVA_VISUAL_DETECTOR
+    parse_on_off VISUAL_DETECTOR "${PLVA_VISUAL_DETECTOR:-0}" PLVA_VISUAL_DETECTOR
     if [[ "$VISUAL_DETECTOR" == 0 ]]; then
       HOOK_ARGS+=(--no-visual-detector)
     else
@@ -209,7 +212,7 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
         fi
         exit 1
       fi
-      HOOK_ARGS+=(--visual-model "$VISUAL_MODEL")
+      HOOK_ARGS+=(--visual-detector --visual-model "$VISUAL_MODEL")
     fi
   fi
   [[ "$PRIVACY_ENABLED" == 1 ]] && HOOK_ARGS+=(--privacy)
@@ -225,6 +228,8 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
     [[ "$PRIVACY_MANIFEST" == 0 ]] && HOOK_ARGS+=(--no-privacy-manifest)
     [[ "$PRIVACY_RESOLUTION" == 0 ]] && HOOK_ARGS+=(--no-privacy-resolution)
     [[ "$PRIVACY_POLICY_TEACHING" == 0 ]] && HOOK_ARGS+=(--no-privacy-policy-teaching)
+    [[ "${PRIVACY_TOOLS:-0}" == 1 ]] && HOOK_ARGS+=(--privacy-tools)
+    [[ "${PRIVACY_MEDIATOR:-0}" == 1 ]] && HOOK_ARGS+=(--privacy-mediator)
   fi
   echo "--- redaction ON ($REDACT_ENGINE, $REDACT_PROFILE, ${PLVA_REDACT_LIFECYCLE:-adaptive}); privacy=$PRIVACY_ENABLED; watch frames at http://127.0.0.1:$PORT/viewer and OCR at /viewer/findings"
   if [[ "$PRIVACY_ENABLED" == 1 ]]; then

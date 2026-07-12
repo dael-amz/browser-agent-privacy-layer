@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 2,
+  "snapshot": "plva-v3",
+  "capturedAt": "2026-07-12T08:30:00-07:00",
+  "releaseEligible": false,
+  "intendedUse": "development-only local screenshot redaction and integration testing",
+  "detector": {
+    "name": "plva-visual-agpl-ats-v3-safe-head-v10",
+    "status": "trained-unpublished-stopped-early",
+    "sourceLicense": "AGPL-3.0-only",
+    "checkpointSha256": "5fcd871b76a6fe456d004ef465ad5cf97616b9f475080711ba0d059a5807a9ad",
+    "onnxSha256": "2ed3f25c9bee375dc1683cf0ffa2044374b6bc35dd89a465a7dce6451ce8b928",
+    "thresholdArtifactSha256": "c5c9892e0b87d5356645ac70090e22c21f95efd41d2391ad854c45ec87ecea60",
+    "thresholdProfileSha256": "919da6455fc93ffb8ef929eeb5ded012b102c97a083b421cd0b5226b8be8b90e",
+    "runtimePolicySha256": "c92fe90f228d7b47e7202fd09efbf77b75e8db5bc0837a6fc145a9774d0c102a",
+    "training": {
+      "requestedEpochs": 40,
+      "committedEpochs": 35,
+      "selectedEpochZeroBased": 0,
+      "stopReason": "user-requested after repeated non-selection"
+    },
+    "selectionMetrics": {
+      "metricBasis": "runtime-top1-fixed-profile-v1",
+      "privacyCoverageRecallMean": 0.9759900650430919,
+      "compatibleCoverageRecallMean": 0.9652807678551956,
+      "secretPrivacyRecallMinimum": 0.9468208092485549,
+      "secretCompatibleRecallMinimum": 0.9445086705202312,
+      "map50Mean": 0.950275239431627
+    }
+  },
+  "runtime": {
+    "visualAndOcrModelLoadsOverlap": true,
+    "visualAndOcrInferenceOverlap": true,
+    "visualDetectorWorker": true,
+    "workerFailureRetriesOnMainRuntime": true,
+    "mainThreadWasmRuntimeSerialized": true,
+    "standaloneWasmThreads": 1,
+    "threadingReason": "single-thread WASM was the stable measured path; the isolated four-thread experiment exceeded 120 seconds",
+    "ocrRecognizerBatch": 6,
+    "crossBoxCueAssociation": "structured non-secret cues only",
+    "contextualCommerceIdentityRules": true,
+    "tallCartRegression": "5/5 truths covered at >=98%",
+    "screenshotPolicyKeepLabels": [],
+    "runtimeModelAndThresholdHashBinding": true,
+    "visualRuntimePolicy": "single-frame calibrated letterbox; adaptive tiling disabled",
+    "maximumImagePixels": 16000000,
+    "maximumImageDimension": 16384,
+    "pixelIntegrityVerification": "exact 256-row stripes"
+  },
+  "publicationBlockers": [
+    "not a production privacy boundary",
+    "minimum secret privacy coverage is below 1.0",
+    "training schedule stopped early",
+    "AGPL development output requires an Ultralytics Enterprise license for closed-source use",
+    "WebPII and base-checkpoint obligations require release review",
+    "INT8 quantization is not approved"
+  ],
+  "files": [
+    {
+      "path": "runtime/models/ocr/ch_PP-OCRv4_det_mobile.onnx",
+      "bytes": 4745517,
+      "sha256": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9"
+    },
+    {
+      "path": "runtime/models/ocr/en_PP-OCRv4_rec_mobile.onnx",
+      "bytes": 7653044,
+      "sha256": "e8770c967605983d1570cdf5352041dfb68fa0c21664f49f47b155abd3e0e318"
+    },
+    {
+      "path": "runtime/models/ocr/en_dict.txt",
+      "bytes": 190,
+      "sha256": "5662df9d2d03f0e8ca0d3b0649d6acbab904b6a14b3d3521463c71c37c668ce3"
+    },
+    {
+      "path": "runtime/models/semantic/rampart/config.json",
+      "bytes": 2328,
+      "sha256": "003b84bbcd489f5e782fe5cad8f3249c3653ec880089abb1ccc398a0d895e3e6"
+    },
+    {
+      "path": "runtime/models/semantic/rampart/onnx/model_q4.onnx",
+      "bytes": 14693379,
+      "sha256": "9f27d24949b0581701071ea5ef522d77ccd3f50c525cc91eac4d265b0fc2afe5"
+    },
+    {
+      "path": "runtime/models/semantic/rampart/special_tokens_map.json",
+      "bytes": 695,
+      "sha256": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a"
+    },
+    {
+      "path": "runtime/models/semantic/rampart/tokenizer.json",
+      "bytes": 441954,
+      "sha256": "98ade711428b42a1b5343c403a73344535e92de8e19359cdb567ef34da210259"
+    },
+    {
+      "path": "runtime/models/semantic/rampart/tokenizer_config.json",
+      "bytes": 1292,
+      "sha256": "0088a6f8bcdd4014184fb068b83ebb12896a9db2bb269a71f73de83fef24bceb"
+    },
+    {
+      "path": "runtime/models/semantic/rampart/vocab.txt",
+      "bytes": 134750,
+      "sha256": "0fbe6b50061feabb9be68af471e9aa6df07a4bc428bdca4b0eff1fcd3612dee5"
+    },
+    {
+      "path": "runtime/src/ocr/association.js",
+      "bytes": 8530,
+      "sha256": "2673588450857e50b5652685829f6b353e7330f111c4bd8c208a98d0cd9947ff"
+    },
+    {
+      "path": "runtime/src/ocr/policy.js",
+      "bytes": 1350,
+      "sha256": "e21afb16d0dcae878a88aab2470cc8b7e546aefc10c32ab10f2f24662b967e59"
+    },
+    {
+      "path": "runtime/src/ocr/postprocess.js",
+      "bytes": 6411,
+      "sha256": "d42c557700ea9c4c679dcca995425075d2c4ce9b09181ee5694db0e44233ad18"
+    },
+    {
+      "path": "runtime/src/ocr/rapidocr.js",
+      "bytes": 8970,
+      "sha256": "024f921815a32becb890e456c1baade04da983cc9958493c87e9017b8a9b2823"
+    },
+    {
+      "path": "runtime/src/ocr/rules.js",
+      "bytes": 2864,
+      "sha256": "5dba09b797082d01ec62edc323231711dcf2ff19d0111de043a955c4c5020f6c"
+    },
+    {
+      "path": "runtime/src/ocr/semantic.js",
+      "bytes": 4092,
+      "sha256": "ee34c44ecc3c822e6285d531d76c70d837bf728ff9afe203e2f0113fce497ed9"
+    },
+    {
+      "path": "runtime/src/rampart.js",
+      "bytes": 1487,
+      "sha256": "cbf0016dcc73715834999447842b3ab2771ea271db515005ba2d49a3463eaee2"
+    },
+    {
+      "path": "runtime/src/runtime.js",
+      "bytes": 1131,
+      "sha256": "777ccf8107f905bc55042ba1b8661d0adb3aa5ccf636b6e828f38f15e1567e24"
+    },
+    {
+      "path": "runtime/src/visual/detector-worker.js",
+      "bytes": 3994,
+      "sha256": "2f53d13eb26c3e15c1b2136829816e9f387ac42a8c95f5961012f45cce35bcdb"
+    },
+    {
+      "path": "runtime/src/visual/detector.js",
+      "bytes": 10127,
+      "sha256": "2f2add21f97e939a1316ecbb49bf07432e0f5ecfb373ca86c25498e9ee521ca1"
+    },
+    {
+      "path": "runtime/src/visual/fusion.js",
+      "bytes": 2911,
+      "sha256": "9b28a91b0ad1312a66e68da38a1b80ef6c3ffaace5401dfe091b509f4c92751f"
+    },
+    {
+      "path": "runtime/src/visual/hybrid.js",
+      "bytes": 5738,
+      "sha256": "294cfb914f80b734d4e2b81c3edb610a27c03dd8ee210c60505b608473b4b049"
+    },
+    {
+      "path": "runtime/src/visual/model-contract.js",
+      "bytes": 825,
+      "sha256": "54cb45be9b0855a9853594b00c8577c45a7269d48b1d6bd07ce41a938d045a60"
+    },
+    {
+      "path": "runtime/src/visual/postprocess.js",
+      "bytes": 6199,
+      "sha256": "97673a16b7e2e218779678c45cef953402cfe3b0614c6053e01a192450e5c90b"
+    },
+    {
+      "path": "runtime/src/visual/render.js",
+      "bytes": 1426,
+      "sha256": "501095cb13b5e34f363f1bfc88e4eda8c8d60f0025daff8a447d924b4ef6f4de"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/MODEL_CARD.md",
+      "bytes": 1615,
+      "sha256": "5271f944cf7f8d8aef1db1a32c821401dd751a8d3464b3c22ac4e269651f626a"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/conversion_report.json",
+      "bytes": 1295,
+      "sha256": "fb88438ac604b22d71f5d2bae26a310f1a419958aa4ff5787be6f22dec6f0608"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/detector.onnx",
+      "bytes": 10428657,
+      "sha256": "2ed3f25c9bee375dc1683cf0ffa2044374b6bc35dd89a465a7dce6451ce8b928"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/detector_goldens.json",
+      "bytes": 14007,
+      "sha256": "b1173a64c1f56b125205a2d237bcec3e469b69e452ea56c815d05d24cb49c8b9"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/detector_manifest.json",
+      "bytes": 22958,
+      "sha256": "53434e42d3f79d8c2ed2e87041d2b0c3e9f2b51f87265e8221a1ce1b7d210e91"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/frozen-seed-provenance.json",
+      "bytes": 9938,
+      "sha256": "37a6736a1fe851905ac445d3935219b36e849be442ad784a35b4eebed12a656e"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/safety-best-thresholds.json",
+      "bytes": 6371,
+      "sha256": "c5c9892e0b87d5356645ac70090e22c21f95efd41d2391ad854c45ec87ecea60"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/seed-incumbent.json",
+      "bytes": 11532,
+      "sha256": "0f2da62c0c8c7b9c747ad10b8cb673c6aa9aaa98bc08cfd1d7646588055645ab"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/training-attempt.json",
+      "bytes": 2399,
+      "sha256": "53150ce6fbe0e7847b0754b08fe0508e7244af9bb54190fbd30edf80ce685d1f"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/training_manifest.json",
+      "bytes": 44156,
+      "sha256": "a2e811a9ca01b7358d55102911967c3a8534e4171674386984b3fe12df9ddc24"
+    },
+    {
+      "path": "runtime/training/artifacts/plva-visual-agpl-ats-v3/visual-safe-head-v10/visual_cross_runtime_report.json",
+      "bytes": 872,
+      "sha256": "366fc7bae4d4a0def0905bed541e79fe69474914bca31c573b959223811f29b4"
+    }
+  ],
+  "sealedRoots": [
+    "runtime"
+  ]
+}

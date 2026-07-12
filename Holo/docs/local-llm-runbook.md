@@ -7,62 +7,80 @@ code side is `src/plva_proxy/local_llm.py` (loopback-pinned, fail-closed client)
 (token-only sort/select). None of it is bridged into the proxy yet; the plug points are
 documented at the bottom.
 
-## 1. Serve the model (one-time download, then fully offline)
+## 1. Primary path — NemoClaw/OpenShell sandbox (live-verified on this machine)
 
-**Recommended: llama.cpp `llama-server` with a local ~4B GGUF.** Unlike a daemon with its
-own pull/telemetry machinery, `llama-server` holds one local file and opens no outbound
-sockets, which is exactly what the lsof audit verifies. The models below live under
-`models/` (gitignored).
-
-**Sizing rule for this 16 GB MacBook Air:** stay in the 4B class (~2.5 GB weights) and cap
-the context — the mediator/executor prompts are short, and an uncapped context allocates a
-needlessly large KV cache. The 8B-class model earlier caused system-wide memory pressure
-alongside a normal workload; treat it as ≥24 GB-machine material. Stop the server when it
-is not needed.
+The model runs **inside an OpenShell sandbox** (Docker-driver Linux container) under a
+**zero-egress policy** (`config/openshell-mediator-policy.yaml`: `network_policies: {}` on
+OpenShell's deny-by-default L7 proxy). The proxy reaches it only through
+`openshell forward service` on host loopback. One command manages the whole stack:
 
 ```bash
-# Recommended — mediator-grade judgment in a laptop-friendly footprint:
+./run_mediator_sandbox.sh up      # Docker + gateway + sandbox, VERIFY zero egress, forward :8555
+./run_mediator_sandbox.sh status
+./run_mediator_sandbox.sh down          # stop model + forward (frees ~3 GB) — after every session
+./run_mediator_sandbox.sh down --full   # also quit Docker Desktop + gateway
+```
+
+`up` **hard-fails unless a live deny-test from inside the sandbox proves egress is
+blocked** (HTTPS to a public host, the image's formerly-allowlisted hosts, a raw IP, and
+DNS must all fail). Never skip that gate: the community `ollama` image ships a
+*permissive* built-in allowlist (ollama.com, GitHub, npm, even api.anthropic.com) until
+the zero-egress policy is applied, and `policy set` takes a few seconds to propagate to
+the data plane.
+
+Facts established empirically (2026-07-12), correcting ADR-0001's assumption that
+OpenShell is unusable on macOS: enforcement is **real** for sandboxes it launches via the
+Docker driver (denied connects fail with L7 403s, DNS resolution is blocked);
+`policy set` on a live sandbox works after a propagation delay; `openshell policy prove`
+PASSes our policy but also PASSed a deliberately leaky negative control with our
+hand-written credential descriptor, so treat prove as **inconclusive** here and rely on
+the deny-test.
+
+Inside the sandbox: llama.cpp `llama-server` (linux-arm64, uploaded via
+`openshell sandbox upload` together with the GGUF — no sandbox egress needed) serving
+**Qwen3-4B-Instruct-2507 Q4_K_M** on the sandbox's own loopback with `--ctx-size 4096`. We
+run llama-server rather than the image's Ollama because its `json_schema` grammar
+enforcement is what makes verdicts reliable on a 4B model — through Ollama the same model
+lost judgment quality (approve→deny, warn→continue). CPU-only inference (no Metal in the
+VM): ~27 s per approval verdict — acceptable for a sparingly-consulted mediator.
+
+**Memory on this 16 GB MacBook Air:** Docker VM capped at 4 GB (Docker Desktop settings),
+container at 3.5 GB, ≈5.5 GB host-side while up. Tolerable briefly, not for background use
+— `down` after every session. Never serve 8B-class models on this machine (a
+Nemotron-Nano-8B run caused a crash-level swap storm; its GGUF was deleted).
+
+## 2. Fallback path — host llama-server (no sandbox; dev / latency-sensitive demos)
+
+```bash
+# Mediator-grade judgment, ~2.9 GB RSS, Metal-fast:
 llama-server -m models/qwen3-4b-instruct-2507-q4_k_m.gguf \
   --host 127.0.0.1 --port 8555 --ctx-size 4096 --no-webui
 
-# NVIDIA alternative — fine for the semantic executor, too weak for approval judgment
-# (live-tested: sorts/selects correctly under the value-enum grammar, but falsely denies
-# legitimate approval requests):
+# NVIDIA alternative — executor-grade only (falsely denies legitimate approvals):
 llama-server -m models/nemotron-mini-4b-instruct-q4_k_m.gguf \
   --host 127.0.0.1 --port 8555 --ctx-size 4096 --no-webui
-
-# 8B-class models (e.g. Llama-3.1-Nemotron-Nano-8B) are ≥24 GB-RAM material; the GGUF
-# was deleted from this machine after it caused a crash-level swap storm. Re-download
-# only on a bigger machine.
 ```
 
+On this path the zero-egress evidence is weaker: the client refuses non-loopback URLs and
+`plva-mediator probe` runs a point-in-time `lsof` audit (flags any non-loopback bind or
+remote connection of the serving process). Fine for development; the sandbox path is the
+demo/trust story. Avoid Ollama for the cleartext mediator on either path — its daemon has
+its own network reach, and its decode path lacks the grammar enforcement the 4B needs.
+
 Defaults expected by the client: `http://127.0.0.1:8555/v1`; the model-name field is
-advisory for llama-server (it serves whatever is loaded). Override with
-`PLVA_LOCAL_LLM_URL` / `PLVA_LOCAL_LLM_MODEL` or `plva-mediator --url/--model`.
-
-**Accepted for development: Ollama** (`ollama pull nemotron-mini`, then
-`PLVA_LOCAL_LLM_URL=http://127.0.0.1:11434/v1`). Caveat: the Ollama daemon itself can reach
-the network (model pulls, updates), so the no-egress audit will flag it whenever it does —
-do not use it as the trusted cleartext mediator in a real run.
-
-## 2. Sandboxing (per ADR-0001)
-
-- **Linux hosts:** launch the server inside OpenShell with deny-all egress and verify with
-  `openshell policy prove`; reach it via `openshell forward service` on loopback. Only trust
-  it if enforcement (not observation mode) is confirmed by a deny-test from inside.
-- **This macOS host:** OpenShell cannot enforce, so the substitute is (a) the client refuses
-  any non-loopback URL and never follows redirects, and (b) `plva-mediator probe` runs a
-  point-in-time `lsof` audit that flags any non-loopback bind or remote connection of the
-  serving process. That audit is best-effort evidence, not a proof — same status as the
-  pf-anchor layer in ADR-0001.
+advisory for llama-server (it serves whatever is loaded; the sandbox and host launches
+both use alias `qwen3-4b`). Override with `PLVA_LOCAL_LLM_URL` / `PLVA_LOCAL_LLM_MODEL`
+or `plva-mediator --url/--model`.
 
 ## 3. Verify
 
 ```bash
-uv run plva-mediator probe          # reachability + no-egress audit (exit 0 = clean)
+./run_mediator_sandbox.sh up        # sandbox path: includes the in-sandbox deny-test gate
+uv run plva-mediator probe          # reachability (+ lsof audit — host-path evidence)
 uv run plva-mediator demo-approval  # synthetic API_KEY approval verdict
 uv run plva-mediator demo-trace     # synthetic misbehavior trace -> continue/warn/halt
 uv run plva-mediator demo-sort      # synthetic token sort + leak scan of the observation
+./run_mediator_sandbox.sh down      # after the session
 ```
 
 All demos use fixed synthetic values; nothing sensitive is read, sent, or logged.
@@ -81,17 +99,29 @@ echoes the cleartext it was shown is withheld and converted to a deny; semantic 
 tokens-only by construction (membership-validated against the input tokens, raw model text
 discarded).
 
-## 5. Plug points (the not-yet-built bridge)
+## 5. The bridge (BUILT — `src/plva_proxy/tool_channel.py` + proxy flags)
 
-- **Approval gate:** where the proxy today denies an `approval`-class resolution without a
-  grant, build an `ApprovalRequest` from the action context and, on an approving verdict,
-  call `vault.grant_approval(request.placeholder, **verdict.grant_kwargs(request))`.
-- **Watchdog:** feed value-free `TraceEvent`s (denied resolutions, forged tokens) into
-  `Mediator.should_review`; when it fires, `review_trace` — action `halt` means terminate
-  the CUA run.
-- **Semantic ops:** parse the Step 6.5 marker `⟦PLVA_TOOL:<verb>:<request_id>⟧` against the
-  allowlist (`sort`, `select`), build a `SemanticOpRequest` with `resolver=vault.resolve`,
-  and inject `result.observation_text()` into the next observation. The same call is the
-  app/proxy-initiated fallback when the model never emits the marker.
-- **Rampart backstop:** pass the history-leg scrub as `scrubber=` to `Mediator` so verdict
-  text gets the same reclassify pass as scrubbed history.
+Run the proxy with `--privacy --privacy-tools --privacy-mediator` (endpoint from
+`PLVA_LOCAL_LLM_URL`, default `http://127.0.0.1:8555/v1` — i.e. the sandbox forward):
+
+- **Tool channel (Step 13):** the request hook injects `[PLVA_TOOLS]` teaching; the CUA
+  emits `⟦PLVA_TOOL:<verb>:<tokens>:<id>[:<instruction>]⟧` in thought text; the response
+  hook validates it against the verb allowlist (`sort`, `select`), executes — `sort`
+  without instruction runs the deterministic library (A) in-proxy, instruction-bearing
+  ops run the sandboxed model (B) with the tokens-only contract — and the value-free
+  `⟦PLVA_TOOL_RESULT:…⟧` line is injected into the next observation beside the manifest.
+  `POST /viewer/tools` `{verb, tokens[], instruction?}` is the mandatory proxy/app-initiated
+  fallback (Step 6.5: marker compliance varies). The Step 6.5 spike loop in `tools.py`
+  (`--tools`, synthetic echo/add/sort, no vault access) is untouched and separate.
+- **Approval gate (Step 7):** an `approval`-class resolution without a grant consults the
+  mediator with the action context (tool, argument path, destination, scrubbed task text);
+  an approving verdict mints the exact vault grant via `verdict.grant_kwargs()` and the
+  resolution is retried once; anything else keeps the original fail-closed denial.
+- **Watchdog:** denials/tool events accumulate as value-free `TraceEvent`s; the
+  deterministic trigger fires at most one `review_trace` per window; `halt` blocks every
+  further forwarded request (fail closed), `warn` injects a `[PLVA_MEDIATOR]` notice.
+- **Rampart backstop:** verdict text passes through the history-leg scrub before leaving
+  the mediator; scrub failure withholds the text.
+
+Mediator/executor calls block the proxy request briefly (~seconds on the sandbox CPU path)
+— acceptable because both are consulted sparingly by design.

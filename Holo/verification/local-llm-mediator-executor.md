@@ -54,6 +54,39 @@ bridged into the proxy** (the bridge is a later, small step — plug points belo
   destination context when the bridge is built. Denials never block the human path: the
   Step 7 manual grant UI still works.
 
+## NemoClaw/OpenShell sandbox path (added later on 2026-07-12 — now the primary serving path)
+
+The model now runs **inside an OpenShell sandbox** (gateway 0.0.80, Docker driver, Ubuntu
+24.04 arm64 container capped at 3.5 GB inside a 4 GB Docker VM), managed by
+`run_mediator_sandbox.sh`. Everything below was established empirically, per the operator's
+instruction not to trust the blueprint/ADR:
+
+- **Enforcement is real, not observation.** With the image's default policy, an allowlisted
+  host (ollama.com) returned HTTP 200 from inside while a non-allowlisted host and a raw IP
+  failed — deny-by-default confirmed. After applying
+  `config/openshell-mediator-policy.yaml` (`network_policies: {}`), **every** channel is
+  blocked from inside: HTTPS 403 (including previously-allowlisted hosts), plain HTTP 403,
+  raw-IP 403, and DNS resolution fails. `run_mediator_sandbox.sh up` re-runs this deny-test
+  every start and refuses to serve if any probe escapes.
+- **Two pitfalls worth knowing:** the community `ollama` image ships a permissive built-in
+  allowlist (ollama registry, GitHub, npm, nvidia, api.anthropic.com) — zero-egress must be
+  applied explicitly; and `policy set` on a live sandbox takes a few seconds to reach the
+  data plane (first re-test still showed the old allowlist).
+- **`policy prove` is inconclusive here:** it PASSed our zero-egress policy, but a
+  deliberately leaky negative control (curl + attacker endpoint) also PASSed with our
+  hand-written credential descriptor, so its PASS carries no weight; the live deny-test is
+  the load-bearing evidence.
+- **Serving engine inside the sandbox:** llama.cpp `llama-server` b9977 (linux-arm64),
+  uploaded with the GGUF via `openshell sandbox upload` (no sandbox egress involved),
+  because Ollama's decode path lacks grammar enforcement and measurably degraded judgment
+  (same model: approve→deny, warn→continue). Through the sandboxed llama-server, all
+  results match the host run exactly: approval fixture **approved** with bounded scope, the
+  chat-box misuse **denied** citing the violated clause, watchdog `warn` accurate, sort
+  correct and leak-clean. Latency ≈27 s per verdict (CPU-only in the VM; no Metal) —
+  acceptable for a sparingly-consulted mediator.
+- The host reaches the model only through `openshell forward service` (host loopback 8555 →
+  sandbox loopback 11500); the client's own loopback pinning still applies.
+
 ## Gates
 
 Full suite after integration: **260 tests pass**, repo coverage 82% (gate ≥80%); ruff format,
