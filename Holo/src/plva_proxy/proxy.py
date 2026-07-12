@@ -279,13 +279,17 @@ def grammar_capture_hook(out_path: Path) -> RequestHook:
     that can carry frames or values — is never written.
     """
 
-    captured = threading.Event()
+    lock = threading.Lock()
+    captured = False
 
     def capture(
         document: dict[str, Any], headers: dict[str, str]
     ) -> tuple[dict[str, Any], dict[str, str]]:
-        if not captured.is_set():
-            captured.set()
+        nonlocal captured
+        with lock:
+            first = not captured
+            captured = True
+        if first:
             request_keys = sorted(document)
             snapshot = {
                 "request_keys": request_keys,
@@ -293,7 +297,10 @@ def grammar_capture_hook(out_path: Path) -> RequestHook:
                 "structured_outputs": document.get("structured_outputs"),
                 "chat_template_kwargs": document.get("chat_template_kwargs"),
             }
-            out_path.write_text(json.dumps(snapshot, indent=2) + "\n")
+            try:
+                out_path.write_text(json.dumps(snapshot, indent=2) + "\n")
+            except OSError as exc:
+                raise HookError("grammar snapshot could not be written") from exc
             _LOGGER.info("grammar snapshot written: keys=%d", len(request_keys))
         return document, headers
 

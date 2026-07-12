@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from plva_proxy.proxy import grammar_capture_hook
+import pytest
+
+from plva_proxy.proxy import HookError, grammar_capture_hook
 
 
 def test_grammar_capture_writes_schema_only(tmp_path: Path) -> None:
@@ -36,3 +38,9 @@ def test_grammar_capture_only_first_request(tmp_path: Path) -> None:
     hook({"model": "first", "structured_outputs": {}}, {})
     hook({"model": "second", "structured_outputs": {}}, {})
     assert json.loads(out.read_text())["model"] == "first"
+
+
+def test_grammar_capture_write_failure_raises_hook_error(tmp_path: Path) -> None:
+    hook = grammar_capture_hook(tmp_path)  # a directory: write_text raises OSError
+    with pytest.raises(HookError):
+        hook({"model": "m", "structured_outputs": {}}, {})
