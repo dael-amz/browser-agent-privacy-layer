@@ -138,7 +138,12 @@ def test_controller_starts_with_memory_only_environment_and_can_stop(
         ("--- redaction ON (vision)", "Privacy engine ready"),
         ("--- redaction OFF", "PLVA bypassed"),
         ("--- preflight: provider=hcompany", "Checking provider"),
-        ("holo3 advertised: True", "Provider connected"),
+        ("holo3 advertised: True", "Model found"),
+        ("--- preflight: holo3 answered a 1-token probe", "Provider connected"),
+        (
+            "ERROR: model holo3 is advertised but rejected a 1-token probe (HTTP 402)",
+            "Model unavailable",
+        ),
         ("--- runs dir shredded", "Private artifacts cleared"),
         ("--- holo exit: 0", "Agent finished"),
         ("ERROR provider failed", "Runner reported an error"),
@@ -378,8 +383,118 @@ def test_demo_ui_file_is_packaged() -> None:
     assert "PLVA protection" in ui
     assert "Agent trace" in ui
     assert demo.LANDING_PATH.is_file()
-    assert 'href="/app"' in demo.LANDING_PATH.read_text("utf-8")
+    landing = demo.LANDING_PATH.read_text("utf-8")
+    assert 'href="/app"' in landing
+    assert 'href="/redact"' in landing
+    assert demo.REDACT_PATH.is_file()
+    assert "Batch redaction" in demo.REDACT_PATH.read_text("utf-8")
     assert Path(demo.ROOT / "run_demo.sh").is_file()
+
+
+async def test_demo_history_clear_endpoint_deletes_runs_unless_running(
+    tmp_path: Path,
+) -> None:
+    controller = demo.DemoController(history_root=tmp_path)
+    run_id = controller._history.create_run("synthetic task", {}, {})
+    assert run_id is not None and (tmp_path / run_id).is_dir()
+    app = demo.create_demo_app(controller)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://demo.test"
+    ) as client:
+        controller._process = FakeProcess()
+        blocked = await client.post("/api/history/clear")
+        assert (tmp_path / run_id).is_dir()
+        controller._process = None
+        cleared = await client.post("/api/history/clear")
+        after = await client.get("/api/history/runs")
+
+    assert blocked.status_code == 409
+    assert cleared.status_code == 200 and cleared.json()["cleared"] == 1
+    assert after.json()["runs"] == []
+    assert not (tmp_path / run_id).exists()
+
+
+def _synthetic_image(format: str) -> bytes:
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 30, 30)).save(buffer, format=format)
+    return buffer.getvalue()
+
+
+async def test_demo_redact_endpoint_redacts_uploads_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = demo.DemoController()
+    received: list[bytes] = []
+
+    def fake_redactor(png: bytes) -> bytes:
+        received.append(png)
+        return b"painted-" + png[:8]
+
+    monkeypatch.setattr(controller, "_ensure_batch_redactor", lambda: fake_redactor)
+    app = demo.create_demo_app(controller)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://demo.test"
+    ) as client:
+        page = await client.get("/redact")
+        jpeg = await client.post(
+            "/api/redact",
+            content=_synthetic_image("JPEG"),
+            headers={"content-type": "image/jpeg"},
+        )
+        wrong_type = await client.post(
+            "/api/redact", content=b"hello", headers={"content-type": "text/plain"}
+        )
+        not_an_image = await client.post(
+            "/api/redact", content=b"not-a-png", headers={"content-type": "image/png"}
+        )
+        empty = await client.post(
+            "/api/redact", content=b"", headers={"content-type": "image/png"}
+        )
+
+    assert page.status_code == 200 and "Batch redaction" in page.text
+    assert jpeg.status_code == 200
+    assert jpeg.headers["content-type"] == "image/png"
+    assert jpeg.content.startswith(b"painted-\x89PNG")
+    assert received and received[0].startswith(b"\x89PNG")
+    assert wrong_type.status_code == 415
+    assert not_an_image.status_code == 415
+    assert empty.status_code == 415
+
+
+async def test_demo_redact_endpoint_reports_worker_failures_without_leaking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from plva_proxy.redactor import RedactionError
+
+    controller = demo.DemoController()
+    app = demo.create_demo_app(controller)
+    png = _synthetic_image("PNG")
+
+    def missing_worker() -> Any:
+        raise RuntimeError("the on-device vision worker is not installed")
+
+    def broken_redactor(_: bytes) -> bytes:
+        raise RedactionError("worker crashed on secret-value")
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://demo.test"
+    ) as client:
+        monkeypatch.setattr(controller, "_ensure_batch_redactor", missing_worker)
+        unavailable = await client.post(
+            "/api/redact", content=png, headers={"content-type": "image/png"}
+        )
+        monkeypatch.setattr(controller, "_ensure_batch_redactor", lambda: broken_redactor)
+        failed = await client.post(
+            "/api/redact", content=png, headers={"content-type": "image/png"}
+        )
+
+    assert unavailable.status_code == 503
+    assert failed.status_code == 502
+    assert "secret-value" not in failed.text
 
 
 def test_model_catalog_falls_back_to_frozen_presets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -430,6 +545,7 @@ def test_settings_gate_v3_detector_on_the_installed_bundle(
         "provider": "hcompany",
         "vision_mode": "cascade",
         "lifecycle": "eager",
+        "visual_detector": "on",
         "features": {name: True for name in demo.FEATURE_ENV},
     }
     with pytest.raises(ValueError, match="not installed"):

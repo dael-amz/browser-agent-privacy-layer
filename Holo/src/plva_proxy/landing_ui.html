@@ -43,6 +43,10 @@
     .wordmark{font-size:18px;line-height:24px;font-weight:500;letter-spacing:-.2px}
     .betachip{font-size:12px;line-height:16px;padding:2px 9px;border:1px solid var(--border-soft);
       border-radius:var(--radius-full);color:var(--fore-secondary)}
+    .topnav{display:flex;align-items:center;gap:16px}
+    .navlink{font-size:15px;line-height:20px;color:var(--fore-secondary);
+      transition:color var(--duration-quick) var(--ease-smooth-out)}
+    .navlink:hover{color:var(--fore-primary)}
     .launch-pill{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:7px 16px;
       border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;
       background:var(--back-inverse);color:var(--fore-inverse);
@@ -126,7 +130,10 @@
   <div class="page">
     <header class="topbar">
       <div class="brand"><span class="wordmark">Holo</span><span class="betachip">Beta</span></div>
-      <a class="launch-pill" href="/app">Launch</a>
+      <nav class="topnav">
+        <a class="navlink" href="/redact">Batch redaction</a>
+        <a class="launch-pill" href="/app">Launch</a>
+      </nav>
     </header>
 
     <main class="hero t-stagger" id="hero">

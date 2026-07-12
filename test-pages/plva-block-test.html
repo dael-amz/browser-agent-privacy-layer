@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Acme HR Portal</title>
+<style>
+  body{font-family:-apple-system,Helvetica,Arial,sans-serif;background:#f5f6f8;color:#1c1e21;margin:0}
+  main{max-width:640px;margin:48px auto;background:#fff;border:1px solid #d9dce1;border-radius:12px;padding:40px}
+  h1{font-size:28px;margin:0 0 6px}
+  p.sub{color:#5a6270;margin:0 0 32px}
+  .row{display:flex;justify-content:space-between;padding:18px 0;border-bottom:1px solid #eceef2;font-size:22px}
+  .row b{color:#5a6270;font-weight:600}
+  .row span{font-variant-numeric:tabular-nums}
+  form{margin-top:36px}
+  label{display:block;font-weight:600;margin-bottom:8px;font-size:18px}
+  input{width:100%;box-sizing:border-box;font-size:20px;padding:12px;border:1px solid #c8ccd4;border-radius:8px}
+  button{margin-top:16px;font-size:18px;padding:12px 28px;border:0;border-radius:8px;background:#2457d6;color:#fff;cursor:pointer}
+  #done{display:none;margin-top:16px;font-size:18px;color:#1a7f37;font-weight:600}
+</style>
+</head>
+<body>
+<main>
+  <h1>Acme HR Portal</h1>
+  <p class="sub">Employee record</p>
+
+  <div class="row"><b>Name</b><span>Jordan Reyes</span></div>
+  <div class="row"><b>Email</b><span>jordan.reyes@example.com</span></div>
+  <div class="row"><b>SSN</b><span>123-45-6789</span></div>
+
+  <form onsubmit="event.preventDefault();document.getElementById('done').style.display='block'">
+    <label for="confirm">Confirmation field</label>
+    <input id="confirm" name="confirm" type="text" autocomplete="off">
+    <button type="submit">Submit</button>
+  </form>
+  <div id="done">Submitted</div>
+</main>
+</body>
+</html>

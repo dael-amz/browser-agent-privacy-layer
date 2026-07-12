@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Holo: Batch redaction</title>
+  <style>
+    :root{
+      color-scheme:light;
+      --back-primary:#ffffff;
+      --back-secondary:#f3f3f3;
+      --back-inverse:#181818;
+      --fore-primary:#0c0c0c;
+      --fore-secondary:#868686;
+      --fore-inverse:#ffffff;
+      --border-fade:rgba(12,12,12,.05);
+      --border-soft:rgba(12,12,12,.1);
+      --radius-full:999px;
+      --radius-card:16px;
+      --font:"ABC Diatype","ABC Diatype Variable",Diatype,Inter,-apple-system,"SF Pro Text","Helvetica Neue","Segoe UI",Arial,sans-serif;
+      --duration-quick:150ms;--duration-fast:250ms;--duration-slow:400ms;
+      --ease-smooth-out:cubic-bezier(0.22, 1, 0.36, 1);
+      --distance-base:8px;
+      --scale-large:0.96;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--back-primary);color:var(--fore-primary);
+      font:400 16px/24px var(--font);-webkit-font-smoothing:antialiased}
+    button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;padding:0}
+    a{color:inherit;text-decoration:none}
+    .page{min-height:100dvh;display:flex;flex-direction:column}
+
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+      padding:14px 24px;border-bottom:1px solid var(--border-fade);flex-shrink:0}
+    .brand{display:flex;align-items:center;gap:10px}
+    .wordmark{font-size:18px;line-height:24px;font-weight:500;letter-spacing:-.2px}
+    .betachip{font-size:12px;line-height:16px;padding:2px 9px;border:1px solid var(--border-soft);
+      border-radius:var(--radius-full);color:var(--fore-secondary)}
+    .topnav{display:flex;align-items:center;gap:16px}
+    .navlink{font-size:15px;line-height:20px;color:var(--fore-secondary);
+      transition:color var(--duration-quick) var(--ease-smooth-out)}
+    .navlink:hover{color:var(--fore-primary)}
+    .launch-pill{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:7px 16px;
+      border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;
+      background:var(--back-inverse);color:var(--fore-inverse);
+      transition:transform var(--duration-quick) var(--ease-smooth-out),opacity var(--duration-quick) var(--ease-smooth-out)}
+    .launch-pill:hover{opacity:.85}
+    .launch-pill:active{transform:scale(var(--scale-large))}
+
+    main{flex:1;width:100%;max-width:760px;margin:0 auto;padding:48px 24px 64px;
+      display:flex;flex-direction:column;gap:24px;animation:view-in var(--duration-slow) var(--ease-smooth-out)}
+    h1{margin:0;font-weight:400;font-size:clamp(30px,4.4vw,44px);line-height:1.1;letter-spacing:-.03em}
+    .sub{margin:0;color:var(--fore-secondary);font-size:16px;line-height:24px;letter-spacing:-.1px;max-width:600px}
+
+    .dropzone{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+      min-height:180px;padding:32px;border:1.5px dashed var(--border-soft);border-radius:var(--radius-card);
+      background:var(--back-primary);text-align:center;cursor:pointer;
+      transition:background var(--duration-quick) var(--ease-smooth-out),border-color var(--duration-quick) var(--ease-smooth-out)}
+    .dropzone:hover,.dropzone.dragging{background:var(--back-secondary);border-color:var(--fore-secondary)}
+    .dropzone b{font-weight:500;font-size:16px}
+    .dropzone small{color:var(--fore-secondary);font-size:13px;line-height:18px}
+    .dz-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--back-secondary)}
+
+    .filelist{display:none;flex-direction:column;border:1px solid var(--border-fade);border-radius:var(--radius-card);
+      box-shadow:0 1px 2px rgba(12,12,12,.03);overflow:hidden}
+    .filelist.active{display:flex}
+    .filerow{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border-fade);font-size:14px;line-height:20px}
+    .filerow:last-child{border-bottom:0}
+    .filerow .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .filerow .size{color:var(--fore-secondary);font-size:13px;flex-shrink:0}
+    .status{flex-shrink:0;font-size:12px;line-height:16px;padding:2px 10px;border-radius:var(--radius-full);
+      border:1px solid var(--border-soft);color:var(--fore-secondary)}
+    .status.working{color:var(--fore-primary)}
+    .status.done{color:#0a8a4f;border-color:rgba(10,138,79,.3)}
+    .status.failed{color:#b3261e;border-color:rgba(179,38,30,.3)}
+
+    .actions{display:none;align-items:center;gap:12px;flex-wrap:wrap}
+    .actions.active{display:flex}
+    .download{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:11px 22px;
+      border-radius:var(--radius-full);font-size:15px;line-height:20px;background:var(--back-inverse);color:var(--fore-inverse);
+      transition:transform var(--duration-quick) var(--ease-smooth-out),opacity var(--duration-quick) var(--ease-smooth-out)}
+    .download:hover{opacity:.85}
+    .download:active{transform:scale(var(--scale-large))}
+    .download[disabled]{opacity:.4;cursor:default}
+    .ghost{display:inline-flex;align-items:center;min-height:44px;padding:11px 20px;border-radius:var(--radius-full);
+      font-size:15px;line-height:20px;border:1px solid var(--border-soft);color:var(--fore-primary);
+      transition:background var(--duration-quick) var(--ease-smooth-out)}
+    .ghost:hover{background:var(--back-secondary)}
+    .summary{color:var(--fore-secondary);font-size:13px;line-height:18px}
+
+    .localnote{color:var(--fore-secondary);font-size:13px;line-height:18px}
+
+    @keyframes view-in{from{opacity:0;transform:translateY(var(--distance-base))}to{opacity:1;transform:none}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand"><a class="wordmark" href="/">Holo</a><span class="betachip">Beta</span></div>
+      <nav class="topnav">
+        <a class="navlink" href="/">Home</a>
+        <a class="launch-pill" href="/app">Launch</a>
+      </nav>
+    </header>
+
+    <main>
+      <div>
+        <h1>Batch redaction</h1>
+      </div>
+      <p class="sub">Upload a folder of images that contain personal information. Each image is redacted on this device by the same vision pipeline that protects live Holo sessions, and you get the cleaned set back as a zip, ready to use as training data.</p>
+
+      <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Choose a folder of images to redact">
+        <div class="dz-icon">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <path d="M9 12V3m0 0L5.5 6.5M9 3l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 12v2a1.5 1.5 0 001.5 1.5h9A1.5 1.5 0 0015 14v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <b>Drop a folder here, or click to choose one</b>
+        <small>PNG, JPEG, and WebP up to 16 MB each. Files never leave 127.0.0.1.</small>
+        <input id="folderpick" type="file" webkitdirectory multiple hidden>
+        <input id="filepick" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+        <small><a href="#" id="pickfiles" style="text-decoration:underline">Or pick individual files</a></small>
+      </div>
+
+      <div class="filelist" id="filelist"></div>
+
+      <div class="actions" id="actions">
+        <button class="download" id="download" disabled>Download all
+          <svg width="16" height="16" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <path d="M9 3v9m0 0L5.5 8.5M9 12l3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 13v1a1.5 1.5 0 001.5 1.5h9A1.5 1.5 0 0015 14v-1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button class="ghost" id="reset">Start over</button>
+        <span class="summary" id="summary"></span>
+      </div>
+
+      <span class="localnote">Redaction runs entirely on-device. Nothing is stored server-side: originals are discarded after each image is processed, and only the painted copies come back to this page.</span>
+    </main>
+  </div>
+
+  <script>
+    const ALLOWED=new Set(["image/png","image/jpeg","image/webp"]);
+    const LIMIT=16*1024*1024;
+    const dropzone=document.getElementById("dropzone");
+    const folderpick=document.getElementById("folderpick");
+    const filepick=document.getElementById("filepick");
+    const filelist=document.getElementById("filelist");
+    const actions=document.getElementById("actions");
+    const download=document.getElementById("download");
+    const summary=document.getElementById("summary");
+    let items=[];
+    let running=false;
+
+    dropzone.addEventListener("click",()=>{if(!running)folderpick.click()});
+    dropzone.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&!running){e.preventDefault();folderpick.click()}});
+    document.getElementById("pickfiles").addEventListener("click",e=>{e.preventDefault();e.stopPropagation();if(!running)filepick.click()});
+    folderpick.addEventListener("change",()=>intake(folderpick.files));
+    filepick.addEventListener("change",()=>intake(filepick.files));
+    ["dragover","dragenter"].forEach(n=>dropzone.addEventListener(n,e=>{e.preventDefault();dropzone.classList.add("dragging")}));
+    ["dragleave","drop"].forEach(n=>dropzone.addEventListener(n,e=>{e.preventDefault();dropzone.classList.remove("dragging")}));
+    dropzone.addEventListener("drop",e=>{if(!running)intake(e.dataTransfer.files)});
+    document.getElementById("reset").addEventListener("click",()=>{if(running)return;items=[];filelist.innerHTML="";filelist.classList.remove("active");actions.classList.remove("active");download.disabled=true;summary.textContent="";folderpick.value="";filepick.value=""});
+
+    function fmt(n){return n<1024?n+" B":n<1048576?(n/1024).toFixed(0)+" KB":(n/1048576).toFixed(1)+" MB"}
+    function outname(f){const p=f.webkitRelativePath||f.name;return p.replace(/\.(png|jpe?g|webp)$/i,"")+".redacted.png"}
+
+    function intake(list){
+      if(running)return;
+      const files=[...list].filter(f=>ALLOWED.has(f.type)&&f.size<=LIMIT);
+      const skipped=list.length-files.length;
+      if(!files.length){summary.textContent=skipped?"No usable images found in that selection.":"";actions.classList.add("active");return}
+      items=files.map(f=>({file:f,status:"queued",result:null}));
+      filelist.innerHTML=items.map((it,i)=>`<div class="filerow"><span class="name">${esc(it.file.webkitRelativePath||it.file.name)}</span><span class="size">${fmt(it.file.size)}</span><span class="status" id="st-${i}">Queued</span></div>`).join("");
+      filelist.classList.add("active");
+      actions.classList.add("active");
+      download.disabled=true;
+      summary.textContent=skipped?`${skipped} file${skipped===1?" was":"s were"} skipped (not an image, or over 16 MB).`:"";
+      run();
+    }
+
+    function setStatus(i,text,cls){const el=document.getElementById("st-"+i);el.textContent=text;el.className="status"+(cls?" "+cls:"")}
+    function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+
+    async function run(){
+      running=true;
+      let next=0;
+      const worker=async()=>{
+        while(next<items.length){
+          const i=next++;
+          const it=items[i];
+          setStatus(i,"Redacting","working");
+          try{
+            const res=await fetch("/api/redact",{method:"POST",headers:{"content-type":it.file.type},body:it.file});
+            if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"redaction failed");
+            it.result=new Uint8Array(await res.arrayBuffer());
+            it.status="done";
+            setStatus(i,"Redacted","done");
+          }catch(err){
+            it.status="failed";
+            setStatus(i,"Failed","failed");
+          }
+        }
+      };
+      await Promise.all([worker(),worker()]);
+      running=false;
+      const done=items.filter(it=>it.status==="done").length;
+      const failed=items.length-done;
+      download.disabled=done===0;
+      summary.textContent=`${done} of ${items.length} redacted`+(failed?`, ${failed} failed (nothing unredacted was returned for those).`:".");
+    }
+
+    download.addEventListener("click",()=>{
+      const entries=items.filter(it=>it.status==="done").map(it=>({name:outname(it.file),data:it.result}));
+      if(!entries.length)return;
+      const blob=new Blob([buildZip(entries)],{type:"application/zip"});
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(blob);
+      a.download="plva-redacted.zip";
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+    });
+
+    // Minimal stored-entry zip writer (no compression).
+    const CRC_TABLE=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c}return t})();
+    function crc32(data){let c=0xFFFFFFFF;for(let i=0;i<data.length;i++)c=CRC_TABLE[(c^data[i])&0xFF]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+    function buildZip(entries){
+      const encoder=new TextEncoder();
+      const locals=[],centrals=[];
+      let offset=0;
+      for(const{name,data}of entries){
+        const nameBytes=encoder.encode(name);
+        const crc=crc32(data);
+        const local=new Uint8Array(30+nameBytes.length);
+        const lv=new DataView(local.buffer);
+        lv.setUint32(0,0x04034b50,true);lv.setUint16(4,20,true);lv.setUint16(6,0x0800,true);
+        lv.setUint32(14,crc,true);lv.setUint32(18,data.length,true);lv.setUint32(22,data.length,true);
+        lv.setUint16(26,nameBytes.length,true);
+        local.set(nameBytes,30);
+        const central=new Uint8Array(46+nameBytes.length);
+        const cv=new DataView(central.buffer);
+        cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint16(8,0x0800,true);
+        cv.setUint32(16,crc,true);cv.setUint32(20,data.length,true);cv.setUint32(24,data.length,true);
+        cv.setUint16(28,nameBytes.length,true);cv.setUint32(42,offset,true);
+        central.set(nameBytes,46);
+        locals.push(local,data);
+        centrals.push(central);
+        offset+=local.length+data.length;
+      }
+      const centralSize=centrals.reduce((n,c)=>n+c.length,0);
+      const end=new Uint8Array(22);
+      const ev=new DataView(end.buffer);
+      ev.setUint32(0,0x06054b50,true);ev.setUint16(8,entries.length,true);ev.setUint16(10,entries.length,true);
+      ev.setUint32(12,centralSize,true);ev.setUint32(16,offset,true);
+      const out=new Uint8Array(offset+centralSize+22);
+      let cursor=0;
+      for(const part of[...locals,...centrals,end]){out.set(part,cursor);cursor+=part.length}
+      return out;
+    }
+  </script>
+</body>
+</html>

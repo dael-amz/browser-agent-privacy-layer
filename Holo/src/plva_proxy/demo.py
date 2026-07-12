@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import argparse
 import copy
+import io
 import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import subprocess
 import threading
@@ -27,6 +29,8 @@ from typing import Any, Final
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
+from PIL import Image, UnidentifiedImageError
+from starlette.concurrency import run_in_threadpool
 
 from plva_proxy.credentials import (
     CREDENTIAL_SOURCES,
@@ -36,11 +40,18 @@ from plva_proxy.credentials import (
 )
 from plva_proxy.privacy import SafetyPolicy
 from plva_proxy.providers import PROVIDERS, ProviderSpec
+from plva_proxy.redactor import (
+    AcceleratedRedactor,
+    AcceleratedRedactorConfig,
+    RedactionError,
+)
 from plva_proxy.runtime_capture import LOOPBACK_HOST
 
 ROOT: Final = Path(__file__).resolve().parents[2]
 UI_PATH: Final = Path(__file__).with_name("demo_ui.html")
 LANDING_PATH: Final = Path(__file__).with_name("landing_ui.html")
+REDACT_PATH: Final = Path(__file__).with_name("redact_ui.html")
+UPLOAD_LIMIT: Final = 16 * 1024 * 1024
 HISTORY_ROOT: Final = ROOT / "history"
 _RUN_ID: Final = re.compile(r"^run-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
 _IMAGE_SUFFIXES: Final = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
@@ -197,6 +208,25 @@ class HistoryStore:
             except OSError:
                 return
 
+    def clear_runs(self) -> int:
+        """Delete every recorded run directory; returns how many were removed."""
+
+        removed = 0
+        with self._lock:
+            try:
+                children = list(self._root.iterdir())
+            except OSError:
+                return 0
+            for child in children:
+                if not child.is_dir() or _RUN_ID.match(child.name) is None:
+                    continue
+                try:
+                    shutil.rmtree(child)
+                    removed += 1
+                except OSError:
+                    continue
+        return removed
+
     def runs(self) -> list[dict[str, Any]]:
         with self._lock:
             try:
@@ -329,6 +359,7 @@ class DemoController:
             "tools": "off",
             "features": {name: True for name in FEATURE_ENV},
         }
+        self._batch_redactor: AcceleratedRedactor | None = None
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -530,6 +561,54 @@ class DemoController:
 
     def close(self) -> None:
         self.stop()
+        with self._lock:
+            redactor = self._batch_redactor
+            self._batch_redactor = None
+        if redactor is not None:
+            redactor.close()
+
+    def redact_upload(self, media_type: str, data: bytes) -> bytes:
+        """Redact one uploaded image and return painted PNG bytes, failing closed."""
+
+        if media_type not in _IMAGE_SUFFIXES:
+            raise ValueError("upload must be a png, jpeg, or webp image")
+        if not data:
+            raise ValueError("upload is empty")
+        if len(data) > UPLOAD_LIMIT:
+            raise ValueError("upload exceeds the 16 MB limit")
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                buffer = io.BytesIO()
+                image.convert("RGB").save(buffer, format="PNG")
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise ValueError("upload is not a decodable image") from exc
+        return self._ensure_batch_redactor()(buffer.getvalue())
+
+    def _ensure_batch_redactor(self) -> AcceleratedRedactor:
+        with self._lock:
+            if self._batch_redactor is not None:
+                return self._batch_redactor
+            vision_root = ROOT / "coreml-redactor"
+            python = vision_root / ".venv" / "bin" / "python"
+            module = vision_root / "src" / "plva_coreml" / "worker.py"
+            if not python.is_file() or not module.is_file():
+                raise RuntimeError("the on-device vision worker is not installed")
+            settings = self._settings
+            self._batch_redactor = AcceleratedRedactor(
+                AcceleratedRedactorConfig(
+                    baseline_root=ROOT / "plva-v2-baseline",
+                    worker_script=module,
+                    node_path=str(python),
+                    worker_kind="vision",
+                    worker_root=vision_root,
+                    cache_root=vision_root / ".cache",
+                    vision_mode=str(settings["vision_mode"]),
+                    ocr_engine=str(settings["ocr_engine"]),
+                    visual_enabled=settings["visual_detector"] != "off",
+                    semantic_engine=str(settings["semantic_engine"]),
+                )
+            )
+            return self._batch_redactor
 
     def frame(self) -> bytes | None:
         with self._lock:
@@ -610,6 +689,14 @@ class DemoController:
                 "dropped": self._traces_dropped,
                 "memory_only": True,
             }
+
+    def clear_history(self) -> int:
+        with self._lock:
+            process = self._process
+            if process is not None and process.poll() is None:
+                raise RuntimeError("Stop the task before clearing history")
+            self._run_id = None
+        return self._history.clear_runs()
 
     def history_runs(self) -> list[dict[str, Any]]:
         runs = self._history.runs()
@@ -819,15 +906,22 @@ def _safe_runner_event(line: str) -> tuple[str, str] | None:
         return "Privacy engine ready", "Vision, Core ML, OCR, and the vault are active."
     if text.startswith("--- redaction OFF"):
         return "PLVA bypassed", "This diagnostic task is running without redaction."
+    if text.endswith("advertised: True"):
+        return "Model found", "The provider lists the selected Holo model."
+    if text.startswith("--- preflight:") and text.endswith("answered a 1-token probe"):
+        return "Provider connected", "The selected Holo model accepted a safe text-only probe."
     if text.startswith("--- preflight:"):
         return "Checking provider", "Verifying the selected model without sending a frame."
-    if text.endswith("advertised: True"):
-        return "Provider connected", "The selected Holo model is available."
+    if text.startswith("ERROR: model ") and "rejected a 1-token probe (HTTP 402)" in text:
+        return (
+            "Model unavailable",
+            "The selected model is not available on this account tier. Choose another model.",
+        )
     if text.startswith(("--- runs dir shredded", "--- ephemeral runs dir removed")):
         return "Private artifacts cleared", "Temporary runtime files were removed."
     if text.startswith("--- holo exit: 0"):
         return "Agent finished", "The requested task completed end-to-end."
-    if "ERROR" in text.upper():
+    if "ERROR" in text.upper() and not text.startswith(("{", "[")):
         return "Runner reported an error", "Sensitive command output is intentionally hidden here."
     return None
 
@@ -919,6 +1013,26 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
     @app.get("/app")
     async def dashboard() -> HTMLResponse:
         return HTMLResponse(UI_PATH.read_text("utf-8"), headers={"cache-control": "no-store"})
+
+    @app.get("/redact")
+    async def redact_page() -> HTMLResponse:
+        return HTMLResponse(REDACT_PATH.read_text("utf-8"), headers={"cache-control": "no-store"})
+
+    @app.post("/api/redact")
+    async def redact_upload(request: Request) -> Response:
+        media_type = (request.headers.get("content-type") or "").partition(";")[0].strip().lower()
+        data = await request.body()
+        try:
+            redacted = await run_in_threadpool(active.redact_upload, media_type, data)
+        except ValueError as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
+        except RedactionError as exc:
+            raise HTTPException(
+                status_code=502, detail="redaction failed; no image was returned"
+            ) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return Response(redacted, media_type="image/png", headers={"cache-control": "no-store"})
 
     @app.get("/api/state")
     async def state() -> Response:
@@ -1035,6 +1149,14 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
     @app.get("/api/history/runs")
     async def history_runs() -> Response:
         return _json_response({"runs": active.history_runs()})
+
+    @app.post("/api/history/clear")
+    async def history_clear() -> Response:
+        try:
+            removed = active.clear_history()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _json_response({"cleared": removed})
 
     @app.get("/api/history/runs/{run_id}")
     async def history_run(run_id: str) -> Response:

@@ -894,12 +894,24 @@
       return `<div class="panel"><div class="panelinner" style="max-width:980px">
         <h1>Audit timeline</h1>
         <p class="sub">Every run is recorded to this device's local history: the redacted frames, scrubbed text, and raw placeholder replies that crossed the privacy boundary. Pick a run and scrub through its model calls like a replay.</p>
-        <div class="toolbar"><button class="linkbtn" id="export-run">Export audit log</button></div>
+        <div class="toolbar"><button class="linkbtn" id="export-run">Export audit log</button><button class="linkbtn" id="clear-history">Clear history</button></div>
         <div class="runsrail" id="runs-rail"></div>
         <div id="replay"></div>
       </div></div>`;
     }
-    function resetHistoryView(){runsSig="";detailSig="";inspectKey="";stopPlay();const eb=$("#export-run");if(eb)eb.onclick=exportRun}
+    function resetHistoryView(){runsSig="";detailSig="";inspectKey="";stopPlay();const eb=$("#export-run");if(eb)eb.onclick=exportRun;const cb=$("#clear-history");if(cb)cb.onclick=clearHistory}
+    async function clearHistory(){
+      if(!confirm("Delete every recorded run from this device? This cannot be undone."))return;
+      const btn=$("#clear-history");
+      if(btn){btn.disabled=true;btn.textContent="Clearing…"}
+      try{
+        const res=await api("/api/history/clear",{method:"POST"});
+        curRun=null;runDetail=null;curIdx=0;runsSig="";detailSig="";stopPlay();
+        await updateHistory(true);
+        toast(res.cleared?`${res.cleared} run${res.cleared===1?"":"s"} deleted from local history`:"History is already empty");
+      }catch(e){toast(e.message||"Clear failed")}
+      finally{if(btn){btn.disabled=false;btn.textContent="Clear history"}}
+    }
     async function exportRun(){
       if(!curRun)return toast("Select a run to export first");
       const btn=$("#export-run");
