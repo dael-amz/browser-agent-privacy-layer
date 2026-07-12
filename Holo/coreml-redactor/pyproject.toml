@@ -1,0 +1,41 @@
+[project]
+name = "plva-coreml-redactor"
+version = "0.1.0"
+description = "Separate Apple Neural Engine feasibility backend for PLVA"
+requires-python = ">=3.12"
+dependencies = [
+  "numpy>=2.4,<3",
+  "onnx>=1.20,<2",
+  "onnxruntime>=1.27,<1.28",
+  "pillow>=12.1,<13",
+]
+
+[project.scripts]
+plva-ane-probe = "plva_coreml.probe:main"
+plva-ane-live = "plva_coreml.live:main"
+
+[build-system]
+requires = ["hatchling>=1.28"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plva_coreml"]
+
+[dependency-groups]
+dev = [
+  "pytest>=9,<10",
+  "ruff>=0.14,<0.15",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/plva_coreml/live.py" = ["E501"] # embedded viewer HTML/CSS/JS

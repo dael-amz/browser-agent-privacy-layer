@@ -5,7 +5,7 @@ added, moved, removed, or given a materially different responsibility. Generated
 caches, build output, and privacy-sensitive runtime artifacts are intentionally omitted from the
 tree.
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 ## Directory tree
 
@@ -23,6 +23,13 @@ Hackathon/
     │   ├── vite.config.js               Derived build against the separate frozen baseline
     │   ├── package.json                 Browser inference/build dependencies
     │   └── package-lock.json            Reproducible Node dependency lock
+    ├── coreml-redactor/                 Separate, non-production ANE visual-inference backend
+    │   ├── src/plva_coreml/visual_ane.py Static-shape Core ML/ANE session boundary
+    │   ├── src/plva_coreml/visual_redactor.py Preprocess, decode, NMS, and mask rendering
+    │   ├── src/plva_coreml/live.py       Local screen/fixture loop and localhost viewer
+    │   ├── src/plva_coreml/probe.py      Synthetic-fixture latency and parity probe
+    │   ├── pyproject.toml                Isolated Core ML probe dependencies
+    │   └── README.md                     Results, limitations, and native-worker seam
     ├── plva-v2-baseline/                Frozen v2 detector harness — NOT vaulted in git; pulled from a
     │                                    separate clone and fed via `--redact <path>` (gitignored, AGPL, dev-only)
     ├── pyproject.toml                   Package metadata, dependencies, commands, and quality gates
@@ -69,6 +76,7 @@ Hackathon/
 | `BLUEPRINT.md` | Source of truth. Its step ordering and hard constraints override convenience. |
 | `src/plva_proxy/` | Installable production/probe code. New proxy modules belong here, not beside `pyproject.toml`. |
 | `redactor-worker/` | Derived persistent browser worker source; generated `dist/` and `node_modules/` remain ignored. |
+| `coreml-redactor/` | Isolated ANE feasibility backend; not connected to outbound redaction until positive-detection parity passes. |
 | `tests/` | Automated acceptance and privacy-regression tests. The configured gate requires at least 80% coverage. |
 | `docs/decisions/` | Architecture decision records (ADRs). One numbered file per resolved blueprint decision. |
 | `verification/` | Human-readable evidence and decisions from each blueprint checkpoint. It must not contain captured frames, request bodies, transcripts, credentials, or vault values. |
