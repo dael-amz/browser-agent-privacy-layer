@@ -646,10 +646,11 @@
       }
       if(activeView==="trace"){
         let data=await api("/api/traces");let rows=data.entries||[];
-        box.className=reveal?"card viewcard revealed":"card viewcard";
-        box.innerHTML=`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local trace</button></div>${rows.length?`<div class="tracefeed" id="tracefeed">${rows.map(r=>`<div class="traceitem"><time>${esc(r.time)}</time><span class="tracechannel ${esc(r.channel)}">${esc(r.channel)}</span><span class="tracetext secret">${esc(r.text)}</span></div>`).join("")}</div>`:`<div class="empty">Agent reasoning and actions will appear here once the run begins.</div>`}<p class="sub" style="margin:12px 0 0;font-size:13px">Memory-only. The original prompt is excluded; resolved action values may appear, so trace text is hidden until revealed.</p>`;
-        $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
-        const feed=$("#tracefeed");if(feed)feed.scrollTop=feed.scrollHeight;
+        const changed=setView(box,reveal?"card viewcard revealed":"card viewcard",`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local trace</button></div>${rows.length?`<div class="tracefeed" id="tracefeed">${rows.map(r=>`<div class="traceitem"><time>${esc(r.time)}</time><span class="tracechannel ${esc(r.channel)}">${esc(r.channel)}</span><span class="tracetext secret">${esc(r.text)}</span></div>`).join("")}</div>`:`<div class="empty">Agent reasoning and actions will appear here once the run begins.</div>`}<p class="sub" style="margin:12px 0 0;font-size:13px">Memory-only. The original prompt is excluded; resolved action values may appear, so trace text is hidden until revealed.</p>`);
+        if(changed){
+          $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
+          const feed=$("#tracefeed");if(feed)feed.scrollTop=feed.scrollHeight;
+        }
         return;
       }
       let d=await api("/api/filter");
