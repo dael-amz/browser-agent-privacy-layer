@@ -151,6 +151,51 @@ def test_vault_redactor_caches_final_painted_frame_and_manifest() -> None:
     assert detector.calls == 1
 
 
+def test_vault_redactor_remasks_clipped_suffix_of_previously_vaulted_value() -> None:
+    class ClippedFindingRedactor:
+        def __init__(self) -> None:
+            self._analysis: dict[str, Any] = {}
+
+        @property
+        def latest_analysis(self) -> dict[str, Any]:
+            return self._analysis
+
+        def start(self) -> None:
+            return
+
+        def close(self) -> None:
+            self._analysis = {}
+
+        def __call__(self, png: bytes) -> bytes:
+            self._analysis = {
+                "backend": "clipped-fixture",
+                "findings": [
+                    {
+                        "x1": 20,
+                        "y1": 20,
+                        "x2": 220,
+                        "y2": 55,
+                        "text": "benchmark@example.com",
+                        "labels": [],
+                        "values": [],
+                        "sensitive": False,
+                    }
+                ],
+            }
+            return png
+
+    vault = SessionVault(nonce="a3f9")
+    token = vault.store("EMAIL", "alice.benchmark@example.com")
+    redactor = VaultRedactor(ClippedFindingRedactor(), vault)
+
+    painted, manifest = redactor.redact_with_manifest(png_fixture())
+
+    assert manifest == ({"token": token, "class": "EMAIL", "safety_level": "hide_use"},)
+    assert redactor.latest_analysis["findings"][0]["vault_matches"] == [token]
+    with Image.open(io.BytesIO(png_fixture())) as before, Image.open(io.BytesIO(painted)) as after:
+        assert after.getpixel((25, 25)) != before.getpixel((25, 25))
+
+
 def test_stub_and_vault_redactor_lifecycle_and_invalid_inputs() -> None:
     value = "a@example.com"
     stub = StubRedactor((StubSpan("EMAIL", value, (0, 0, 20, 20)),))
@@ -207,6 +252,32 @@ def test_history_scrub_fails_closed_when_classifier_has_no_exact_value() -> None
 
     with pytest.raises(PrivacyError, match="without an exact"):
         scrubber.scrub(("password field",))
+
+
+def test_history_scrub_masks_blocked_value_without_vaulting_it() -> None:
+    value = "not-a-real-password"
+
+    def classify(texts: tuple[str, ...]) -> list[dict[str, object]]:
+        start = texts[0].index(value)
+        return [
+            {
+                "sensitive": True,
+                "values": [
+                    {
+                        "label": "PASSWORD",
+                        "value": value,
+                        "start": start,
+                        "end": start + len(value),
+                    }
+                ],
+            }
+        ]
+
+    vault = SessionVault(nonce="a3f9")
+    scrubbed = HistoryScrubber(vault, classify).scrub((f"Credential: {value}",))
+
+    assert scrubbed == ("Credential: [PLVA_BLOCKED_PASSWORD]",)
+    assert vault.entries() == ()
 
 
 def test_history_scrub_rejects_malformed_classifier_results() -> None:

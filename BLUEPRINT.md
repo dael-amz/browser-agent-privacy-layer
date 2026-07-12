@@ -306,10 +306,11 @@ ready; response shape recorded (structured JSON action in `message.content`, `to
 passed:** the closed runtime sends its screenshot through the configurable base URL (proven against
 a loopback stub). Evidence in `Holo/verification/step-0-*`.
 
-### ✅ Step 1 — HoloDesktop under isolation — **BUILT; live run pending key**
+### ✅ Step 1 — HoloDesktop under isolation — **LIVE ACCEPTANCE PASS**
 Pass-through proxy is the runtime's sole endpoint and sole provider egress. §7 egress decision
-resolved (ADR-0001). The one-command `run_step1.sh` closes the end-to-end run once the operator's
-Overshoot key is in `Holo/.env`. Live-frame streaming for that run is operator-authorized.
+resolved (ADR-0001). A real Holo/H Company run completed a controlled two-step form flow through
+PLVA with provider egress monitoring enabled; the loopback fixture independently verified the exact
+private value was submitted after local placeholder resolution.
 
 ### ✅/⚙️ Step 2 — Overshoot inference + latency — **inference done; latency pending**
 The proxy targets Overshoot by default. Remaining: record per-step and end-to-end latency
@@ -425,7 +426,7 @@ opaque mask but receive no token or vault entry; `approval` tokens are stored bu
 denied until Step 7 supplies a local approver. The consumer app exposes all 15 classes and three
 levels. See `Holo/verification/step-6-policy.md`.
 
-### 🔲 Step 7 — LLM mediator (OpenShell) for approvals + steering
+### ✅/⚙️ Step 7 — Local approval capabilities built; LLM mediator automation pending
 - **Goal:** `approval`-class resolutions and configurable risk flags are decided by a mediator
   against user-defined criteria, safely.
 - **Build:** proxy consults the mediator on a tripped flag (synchronous gate for approvals; async
@@ -435,6 +436,13 @@ levels. See `Holo/verification/step-6-policy.md`.
 - **Verify:** an `approval` value resolves only after approval and only within granted scope; a
   denied request blocks with no real value used; mediator sandbox has provably no egress; with the
   mediator down, everything gated fails closed.
+
+**Completed locally 2026-07-12:** exact short-lived approval capabilities are now implemented in
+the session vault and enforced atomically during action resolution. Grants bind issued token, tool,
+argument path, optional target, TTL, and bounded uses; mismatch, expiry, exhaustion, and revocation
+fail closed. The loopback proxy exposes value-free grant/list/revoke endpoints and the app Vault
+view can authorize one exact private write. A local LLM mediator remains an automation/steering
+extension, not a prerequisite for manual approval-gated use.
 
 ### 🔲 Step 8 — SPEAK-mechanism spike (prerequisite for voice-read)
 - **Goal:** determine empirically *how*, if at all, Holo3 can signal "read this aloud" — before

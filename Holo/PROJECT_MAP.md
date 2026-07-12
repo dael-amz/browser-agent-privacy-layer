@@ -75,13 +75,14 @@ Hackathon/
         ├── step-0-wrap-up.md            Earlier partial pass before this resume audit
         ├── step-0-resume-audit.md       Prior blockers, now annotated with their resolution
         ├── step-0-runtime-capture.md    PASS: real runtime screenshot traversed the base URL
-        ├── step-1-status.md             §7 decision recorded; resume notes: ready to run
+        ├── step-1-status.md             §7 decision plus completed live acceptance status
         ├── step-1-runbook.md            One-pass instructions to close Step 1 once the key exists
-        ├── step-3-status.md             Interception hooks built; local verify PASS, live verify pending
+        ├── step-3-status.md             Interception hooks built; local and live verification evidence
         ├── step-4-accelerated-redaction.md  Persistent parallel GPU worker evidence and benchmark
         ├── step-4-obscuring.md          Real obscuring via frozen v2 detector + /viewer
         ├── step-5-privacy-core.md       PASS: vault, chips, resolution, and history scrub
-        └── cua-placeholder-optimization.md  Multi-step token reuse, cache, readiness, and residual gates
+        ├── cua-placeholder-optimization.md  Multi-step token reuse, cache, readiness, and residual gates
+        └── cua-live-acceptance.md       PASS: real Holo two-step placeholder reuse and local submission
 ```
 
 ## What each area is for
@@ -104,16 +105,16 @@ path are stale.
 
 ## Current blueprint checkpoint
 
-**Step 0 is COMPLETE** (including the critical transport gate). **Step 1 is READY TO RUN**: the §7
+**Step 0 is COMPLETE** (including the critical transport gate). **Step 1 is COMPLETE**: the §7
 decision is resolved, the pass-through proxy (the ADR's sole-egress component, functionally the
-Step 3 pass-through core built early) is implemented and gated, the pf egress rule set is authored,
-and `verification/step-1-runbook.md` closes the step in one pass — it waits only on the operator's
-Overshoot key in `.env`. **Step 3 is BUILT and locally verified** (2026-07-11, on operator
-instruction): the proxy now exposes a request/response mutation hook seam (`--hook test` enables
+Step 3 pass-through core built early) is implemented and gated, and a real Holo/H Company run
+completed the controlled two-step PLVA acceptance fixture with independent local verification.
+The pf egress rule set is authored; installing that additional host-wide layer remains an optional
+administrator hardening step. **Step 3 is BUILT and live verified** (2026-07-12): the proxy exposes
+a request/response mutation hook seam (`--hook test` enables
 the blueprint's test hooks; default remains pass-through), with SSE responses buffered,
 reconstructed, mutated, and re-emitted under a response hook, and every hook/parse failure failing
-closed. Its live verify (the Step 1/2 task running unchanged through pass-through and hook modes)
-rides on the pending live run. **Step 4 is PARTIAL** (2026-07-11): real *obscuring* works through
+closed. **Step 4 is PARTIAL** (2026-07-11): real *obscuring* works through
 a persistent accelerated worker by default. Its visual model uses WebGPU on supported hardware,
 OCR runs concurrently through a separate WASM runtime, sessions stay warm during active CUA
 bursts and release after 60 idle seconds, and exact repeated frames use a bounded
@@ -126,10 +127,14 @@ plus warm Core ML Rampart. Synthetic Holo cooperation and end-to-end resolution 
 `verification/step-5-privacy-core.md`.
 The CUA/placeholder optimization pass additionally binds each launch to its own proxy instance,
 supports issued-token reuse across later frames, hardens action grammar handling, and removes the
-frame/history cache-thrash paths. Its local integration gate passes; a controlled live PLVA-off/on
-task corpus is still required. The current detector is release eligible; the development-only
+frame/history cache-thrash paths. Its local integration gate and controlled live PLVA-on acceptance
+pass. The current detector is release eligible; the development-only
 language in the frozen July 11 v2 baseline describes historical provenance, not current status.
 See `verification/cua-placeholder-optimization.md`.
+The controlled PLVA-on live acceptance now passes against the real Holo runtime and H Company
+provider: it navigated a two-step loopback form, reused an issued email token after the value left
+the screen, resolved locally, and submitted the exact value. Independent server verification—not
+runtime exit—established success. See `verification/cua-live-acceptance.md`.
 Step 2 (Overshoot latency measurement) has not started.
 
 Completed evidence:
@@ -144,24 +149,23 @@ Completed evidence:
   `tools`), envelope uses plural `tool_calls`. Frame stayed local and was shredded; nothing reached
   the repo. See `verification/step-0-runtime-capture.md`.
 - **§7 decision recorded** in `docs/decisions/0001-openshell-sec7-egress-topology.md`.
-- The main automated gate is 146 passing tests with at least 80% coverage; the Core ML package has
+- The main automated gate is 178 passing tests with at least 80% coverage; the Core ML package has
   17 passing tests. Formatting, Ruff, strict mypy,
   lock validation, sdist, and wheel checks pass.
 - **Pass-through proxy built and gated** (2026-07-11 resume): loopback-only, verbatim body relay,
   credential injection, SSE streamed through, fail-closed, privacy-safe logs; live loopback smoke
   passed. Enforcing pf rules authored in `docs/egress/pf-plva.anchor` (operator sudo to apply).
 
-Active blockers / open items:
+Active hardening / open items:
 
-- **Step 1 live run awaits a provider key** in `Holo/.env`: `API_KEY=...` for Overshoot or
-  `HAI_API_KEY=...` with `PLVA_PROVIDER=hcompany`, then one pass of
-  `verification/step-1-runbook.md`. Live-frame streaming for this run was
-  authorized by the operator on 2026-07-11 ("finish step 1").
+- A broader repeated-task PLVA-off/on corpus is still useful for success-rate and p50/p95 trend
+  tracking. The production acceptance path itself is no longer waiting on a provider key or first
+  live run.
 - The closed runtime writes frame-bearing `events.jsonl` with no disable knob; every real run must
   relocate `--runs-dir` to an ephemeral local path and shred it. `~/.holo/runs` is off-limits.
-- The outer Git repository still represents the move into `Holo/` as deleted tracked root
-  files plus an untracked directory. That user-created repository reorganization has not been
-  staged, committed, or reversed.
+- Installing the optional macOS `pf` anchor requires an administrator. The tested runtime-level
+  monitor already fails closed on non-loopback runtime connections and allows the required local
+  proxy and Agent API traffic.
 
 ## Installed project commands
 

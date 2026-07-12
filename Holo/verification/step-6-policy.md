@@ -9,7 +9,8 @@ Verified 2026-07-12 using synthetic values only.
   override used by the GUI.
 - Unknown classes and malformed configurations fail closed.
 - `hide_use` values receive a session token and may resolve only in executed action fields.
-- `approval` values receive a token but resolution is denied until Step 7 adds a local approver.
+- `approval` values receive a token and require an exact, short-lived local capability. The Vault
+  view can grant one private write; mismatched, expired, exhausted, or revoked grants fail closed.
 - `blocked` values receive no placeholder, are never stored, and retain the detector's opaque mask.
 - The current-frame manifest includes each token's class and level without including its value.
 - Holo receives the active value-free policy in its existing system message.

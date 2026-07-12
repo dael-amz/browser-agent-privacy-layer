@@ -28,3 +28,4 @@ vault/
 
 # PLVA detector bundle — pulled/fed from a separate clone, not vendored here
 plva-v2-baseline/
+history/
