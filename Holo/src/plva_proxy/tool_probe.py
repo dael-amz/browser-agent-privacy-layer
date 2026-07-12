@@ -159,17 +159,14 @@ def schema_summary(document: Mapping[str, Any]) -> dict[str, Any]:
 
 def grammar_permits(channel: str, summary: Mapping[str, Any]) -> bool:
     if channel == "native_skill":
-        return bool(summary.get("has_tools")) and "plva_add" in summary.get(
-            "declared_tools", []
-        )
+        return bool(summary.get("has_tools")) and "plva_add" in summary.get("declared_tools", [])
     if channel == "structured_action":
         return bool(summary.get("tool_name_unconstrained")) or "plva_add" in summary.get(
             "tool_name_enums", []
         )
     if channel == "free_text_marker":
         return any(
-            path.rsplit(".", 1)[-1]
-            in {"thought", "note", "reasoning", "content", "text", "answer"}
+            path.rsplit(".", 1)[-1] in {"thought", "note", "reasoning", "content", "text", "answer"}
             for path in summary.get("string_fields", [])
             if isinstance(path, str)
         )
@@ -286,7 +283,12 @@ class ProbeRunner:
             first_status = first.status_code
             if first.status_code != 200:
                 return ChannelResult(
-                    grammar_permits(channel, summary), False, False, False, first_status, None,
+                    grammar_permits(channel, summary),
+                    False,
+                    False,
+                    False,
+                    first_status,
+                    None,
                     "first_http_error",
                 )
             response = first.json()
@@ -294,7 +296,12 @@ class ProbeRunner:
                 raise ValueError
         except (httpx.HTTPError, ValueError):
             return ChannelResult(
-                grammar_permits(channel, summary), False, False, False, first_status, None,
+                grammar_permits(channel, summary),
+                False,
+                False,
+                False,
+                first_status,
+                None,
                 "first_response_invalid",
             )
         emitted = model_emitted(channel, response)
@@ -302,7 +309,12 @@ class ProbeRunner:
         accepted = invocation == Invocation("plva_add", 3, 4, REQUEST_ID)
         if not accepted:
             return ChannelResult(
-                grammar_permits(channel, summary), emitted, False, False, first_status, None,
+                grammar_permits(channel, summary),
+                emitted,
+                False,
+                False,
+                first_status,
+                None,
                 "invocation_not_parseable",
             )
         assert invocation is not None
@@ -313,20 +325,35 @@ class ProbeRunner:
             second_status = second.status_code
             if second.status_code != 200:
                 return ChannelResult(
-                    grammar_permits(channel, summary), emitted, True, False, first_status,
-                    second_status, "second_http_error",
+                    grammar_permits(channel, summary),
+                    emitted,
+                    True,
+                    False,
+                    first_status,
+                    second_status,
+                    "second_http_error",
                 )
             second_response = second.json()
             if not isinstance(second_response, dict):
                 raise ValueError
         except (httpx.HTTPError, ValueError):
             return ChannelResult(
-                grammar_permits(channel, summary), emitted, True, False, first_status,
-                second_status, "second_response_invalid",
+                grammar_permits(channel, summary),
+                emitted,
+                True,
+                False,
+                first_status,
+                second_status,
+                "second_response_invalid",
             )
         return ChannelResult(
-            grammar_permits(channel, summary), emitted, True,
-            consumed_result(second_response), first_status, second_status, "none",
+            grammar_permits(channel, summary),
+            emitted,
+            True,
+            consumed_result(second_response),
+            first_status,
+            second_status,
+            "none",
         )
 
 
@@ -647,14 +674,15 @@ def main() -> None:
     key = _env_value(ROOT / ".env", provider.key_names)
     if key is None:
         parser.error("the selected provider key is unavailable")
-    runner = ProbeRunner(
-        provider_name=args.provider, provider=provider, api_key=key
-    )
+    runner = ProbeRunner(provider_name=args.provider, provider=provider, api_key=key)
     state = ProbeState(runner, provider.model)
     server = uvicorn.Server(
         uvicorn.Config(
-            create_app(state), host=LOOPBACK_HOST, port=args.port, access_log=False,
-            log_level="warning"
+            create_app(state),
+            host=LOOPBACK_HOST,
+            port=args.port,
+            access_log=False,
+            log_level="warning",
         )
     )
     thread = threading.Thread(target=server.run, daemon=True)

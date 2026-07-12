@@ -94,9 +94,9 @@ def test_schema_summary_and_channel_permissions_are_value_free() -> None:
 
 def test_unconstrained_tool_name_permits_novel_structured_action() -> None:
     request = captured_request()
-    request["structured_outputs"]["json"]["properties"]["tool_calls"]["items"][
-        "properties"
-    ]["tool_name"] = {"type": "string"}
+    request["structured_outputs"]["json"]["properties"]["tool_calls"]["items"]["properties"][
+        "tool_name"
+    ] = {"type": "string"}
 
     summary = schema_summary(request)
 
@@ -215,8 +215,7 @@ async def test_probe_app_retains_only_safe_report() -> None:
         skill_loaded=True,
         schema={"has_tools": False},
         channels={
-            name: ChannelResult(False, False, False, False, 200, None, "none")
-            for name in CHANNELS
+            name: ChannelResult(False, False, False, False, 200, None, "none") for name in CHANNELS
         },
         recommendation="proxy_app_pseudo_tool",
         fallback="local injection",
@@ -238,8 +237,11 @@ async def test_probe_app_retains_only_safe_report() -> None:
 
     assert models.json()["data"][0]["id"] == "runtime-model"
     assert response.status_code == 200
-    assert json.loads(response.json()["choices"][0]["message"]["content"])["tool_calls"][0][
-        "tool_name"
-    ] == "answer"
+    assert (
+        json.loads(response.json()["choices"][0]["message"]["content"])["tool_calls"][0][
+            "tool_name"
+        ]
+        == "answer"
+    )
     assert status.json()["report"]["recommendation"] == "proxy_app_pseudo_tool"
     assert "private runtime text" not in status.text

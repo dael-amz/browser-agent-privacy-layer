@@ -1480,6 +1480,24 @@ def main() -> None:
         help="Vision OCR strategy (default: fast full frame + accurate sensitive regions)",
     )
     parser.add_argument(
+        "--ocr-engine",
+        choices=("apple", "rapidocr"),
+        default="apple",
+        help="OCR engine for the Vision worker (default: apple)",
+    )
+    parser.add_argument(
+        "--semantic-engine",
+        choices=("rampart", "gliner2", "openai-pf"),
+        default="rampart",
+        help="local semantic PII engine for the Vision worker (default: rampart)",
+    )
+    parser.add_argument(
+        "--visual-detector",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="enable the visual detector alongside OCR (default: enabled)",
+    )
+    parser.add_argument(
         "--visual-model",
         type=Path,
         default=None,
@@ -1575,6 +1593,12 @@ def main() -> None:
         default=None,
         help="write the first request's structured_outputs schema (never messages) to this file",
     )
+    parser.add_argument(
+        "--tools",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="enable synthetic local tool teaching and the bounded execution loop",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
@@ -1666,6 +1690,9 @@ def main() -> None:
                         cache_root=vision_root / ".cache",
                         vision_mode=args.vision_mode,
                         visual_model=args.visual_model,
+                        ocr_engine=args.ocr_engine,
+                        visual_enabled=args.visual_detector,
+                        semantic_engine=args.semantic_engine,
                     )
                 )
             else:
@@ -1737,6 +1764,12 @@ def main() -> None:
     for extra_hook in (image_hook, redact_hook):
         if extra_hook is not None:
             hooks = _combine_hooks(hooks, Hooks(on_request=extra_hook))
+    tool_loop = ToolLoop(ToolRegistry()) if args.tools else None
+    if tool_loop is not None:
+        hooks = _combine_hooks(
+            hooks,
+            Hooks(on_request=tool_teaching_request_hook(tool_loop)),
+        )
     hooks = _combine_hooks(hooks, privacy_hooks)
     if args.capture_grammar is not None:
         hooks = _combine_hooks(Hooks(on_request=grammar_capture_hook(args.capture_grammar)), hooks)
@@ -1767,6 +1800,8 @@ def main() -> None:
         app_options["vault"] = vault_store
     if history_scrubber is not None:
         app_options["scrubber"] = history_scrubber
+    if tool_loop is not None:
+        app_options["tool_loop"] = tool_loop
     uvicorn.run(
         create_app(
             ProxyConfig(

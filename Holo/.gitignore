@@ -29,3 +29,6 @@ history/
 
 # PLVA detector bundle -- pulled/fed from a separate clone, not vendored here
 plva-v2-baseline/
+
+# Local LLM weights (mediator/semantic executor) — never commit model binaries
+models/

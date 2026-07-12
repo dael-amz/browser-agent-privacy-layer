@@ -47,6 +47,10 @@ PLVA_REDACT_LIFECYCLE=eager \
 ./run_step1.sh "your task"
 ```
 
+Live runs use the `balanced` detector profile by default so uncertain OCR and low-confidence
+visual detections do not obscure ordinary controls. Set `PLVA_REDACT_PROFILE=high-recall` when
+testing maximum recall on synthetic screens.
+
 When `plvas-v3/` is present, this path uses its bundled visual detector while retaining the
 existing accelerated OCR and Rampart assets. Override it with
 `PLVA_VISUAL_MODEL=/path/to/detector.onnx`; the content-addressed Core ML cache recompiles only

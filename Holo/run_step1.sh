@@ -31,11 +31,16 @@ UV="${UV:-$HOME/.local/bin/uv}"
 TASK="${1:-$DEFAULT_TASK}"
 PROVIDER="${PLVA_PROVIDER:-overshoot}"
 REDACT_ENGINE="${PLVA_REDACT_ENGINE:-accelerated}"
+REDACT_PROFILE="${PLVA_REDACT_PROFILE:-balanced}"
 INSTANCE_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
 MAX_STEPS="${PLVA_MAX_STEPS:-20}"
 MAX_TIME_S="${PLVA_MAX_TIME_S:-300}"
 if [[ ! "$MAX_STEPS" =~ ^[1-9][0-9]*$ || ! "$MAX_TIME_S" =~ ^[1-9][0-9]*$ ]]; then
   echo "ERROR: PLVA_MAX_STEPS and PLVA_MAX_TIME_S must be positive integers" >&2
+  exit 1
+fi
+if [[ "$REDACT_PROFILE" != "balanced" && "$REDACT_PROFILE" != "high-recall" ]]; then
+  echo "ERROR: PLVA_REDACT_PROFILE must be balanced or high-recall" >&2
   exit 1
 fi
 case "${PLVA_AUDIT:-0}" in
@@ -138,6 +143,7 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
   HOOK_ARGS+=(
     --redact plva-v2-baseline
     --redact-engine "$REDACT_ENGINE"
+    --redact-profile "$REDACT_PROFILE"
     --redact-backend "${PLVA_REDACT_BACKEND:-auto}"
     --vision-worker "${PLVA_VISION_WORKER:-coreml-redactor}"
     --vision-mode "${PLVA_VISION_MODE:-cascade}"
@@ -216,7 +222,7 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
     [[ "$PRIVACY_RESOLUTION" == 0 ]] && HOOK_ARGS+=(--no-privacy-resolution)
     [[ "$PRIVACY_POLICY_TEACHING" == 0 ]] && HOOK_ARGS+=(--no-privacy-policy-teaching)
   fi
-  echo "--- redaction ON ($REDACT_ENGINE, ${PLVA_REDACT_LIFECYCLE:-adaptive}); privacy=$PRIVACY_ENABLED; watch frames at http://127.0.0.1:$PORT/viewer and OCR at /viewer/findings"
+  echo "--- redaction ON ($REDACT_ENGINE, $REDACT_PROFILE, ${PLVA_REDACT_LIFECYCLE:-adaptive}); privacy=$PRIVACY_ENABLED; watch frames at http://127.0.0.1:$PORT/viewer and OCR at /viewer/findings"
   if [[ "$PRIVACY_ENABLED" == 1 ]]; then
     echo "--- privacy features: chips=$PRIVACY_CHIPS history_scrub=$PRIVACY_HISTORY_SCRUB scheme=$PRIVACY_SCHEME duplicate_warning=$PRIVACY_DUPLICATE_WARNING manifest=$PRIVACY_MANIFEST resolution=$PRIVACY_RESOLUTION policy_teaching=$PRIVACY_POLICY_TEACHING"
     if [[ "$PRIVACY_HISTORY_SCRUB" == 0 || "$PRIVACY_RESOLUTION" == 0 ]]; then

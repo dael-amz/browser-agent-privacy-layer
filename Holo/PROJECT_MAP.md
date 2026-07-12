@@ -51,6 +51,9 @@ Hackathon/
     │       ├── __init__.py              Python package marker
     │       ├── contract_probe.py        Privacy-safe Overshoot model/JSON/SSE contract probe
     │       ├── live.py                  Continuous local capture→redact→viewer loop (no upstream)
+    │       ├── local_llm.py             Loopback-pinned fail-closed client for the sandboxed local LLM + no-egress audit
+    │       ├── mediator.py              §7 local LLM mediator: approval verdicts, trace watchdog, and CLI demos
+    │       ├── semantic_executor.py     Step 13(B) placeholder-preserving sort/select via the local LLM (token-only returns)
     │       ├── privacy.py               Session vault, chip painter, resolver, and history scrub
     │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks + memory-only sent-frame audit viewer (fail-closed, SSE-safe)
     │       ├── providers.py             Overshoot and H Company endpoint/model/key presets
@@ -61,13 +64,20 @@ Hackathon/
     │   ├── test_accelerated_redactor.py Persistent protocol, cache, lifecycle, and failure tests
     │   ├── test_proxy.py                Relay fidelity, credential, SSE, fail-closed, and log-hygiene tests
     │   ├── test_proxy_hooks.py          Step 3 hook seam: mutation, SSE re-emit, and fail-closed tests
+    │   ├── test_local_llm.py            Loopback pinning, JSON extraction, leak scan, and egress-audit tests
+    │   ├── test_mediator.py             Criteria validation, fail-closed verdicts, watchdog trigger, and CLI tests
+    │   ├── test_semantic_executor.py    Token-only contract, retry/fail-closed, and validation tests
     │   ├── test_privacy.py              Vault, chip, scrub, resolution, and detector-stub tests
     │   ├── test_privacy_integration.py  Full request/response privacy loop and SSE tests
     │   ├── test_redaction.py            Redaction hook, FrameStore/viewer, and redactor wrapper tests
     │   └── test_runtime_capture.py      Capture validation, JSON/SSE, health, privacy, and bind tests
+    ├── config/
+    │   ├── privacy-policy.json          Step 6 editable per-class safety levels
+    │   └── mediator-criteria.json       User-written rules for approval-gated classes + trace-review thresholds
     ├── docs/
     │   ├── decisions/
     │   │   └── 0001-openshell-sec7-egress-topology.md   §7 topology decision (egress-isolation)
+    │   ├── local-llm-runbook.md         How to serve, sandbox, and verify the local Nemotron mediator/executor
     │   └── egress/
     │       └── pf-plva.anchor           macOS pf rules: only the proxy role user reaches the provider
     └── verification/
@@ -82,7 +92,8 @@ Hackathon/
         ├── step-4-obscuring.md          Real obscuring via frozen v2 detector + /viewer
         ├── step-5-privacy-core.md       PASS: vault, chips, resolution, and history scrub
         ├── cua-placeholder-optimization.md  Multi-step token reuse, cache, readiness, and residual gates
-        └── cua-live-acceptance.md       PASS: real Holo two-step placeholder reuse and local submission
+        ├── cua-live-acceptance.md       PASS: real Holo two-step placeholder reuse and local submission
+        └── local-llm-mediator-executor.md  Step 7 mediator automation + Step 13(B) executor live evidence
 ```
 
 ## What each area is for
@@ -175,6 +186,7 @@ Active hardening / open items:
 | `plva-probe` | Run the live synthetic Overshoot contract probe when `API_KEY` is supplied. |
 | `plva-proxy` | Loopback proxy; `--provider` selects Overshoot or H Company; `--redact-engine vision` selects native Vision/Core ML, `accelerated` selects WebGPU/WASM, and `baseline` retains the oracle; `/viewer` and `/viewer/findings` are memory-only. |
 | `plva-runtime-capture` | Start the metadata-only capture stub on `127.0.0.1`; it never contacts a provider. |
+| `plva-mediator` | Probe the loopback local LLM (reachability + no-egress audit) and run synthetic approval/trace/sort demos; see `docs/local-llm-runbook.md`. |
 
 `plva-proxy` is the runtime's sole endpoint and the sole provider egress (Step 1/ADR-0001 role),
 now with the Step 3 mutation seam (`Hooks`): request hooks rewrite body + upstream headers,

@@ -505,6 +505,17 @@ fail closed. The loopback proxy exposes value-free grant/list/revoke endpoints a
 view can authorize one exact private write. A local LLM mediator remains an automation/steering
 extension, not a prerequisite for manual approval-gated use.
 
+**Mediator component built 2026-07-12 (not yet bridged):** `plva_proxy.mediator` consults a local
+Nemotron model over a loopback-pinned fail-closed client (`plva_proxy.local_llm`) for
+`{approve|deny|modify, steering?, scope?}` verdicts against user criteria
+(`config/mediator-criteria.json`), plus a trace watchdog (`should_review` deterministic trigger →
+`review_trace` → continue/warn/halt) for killing a misbehaving CUA. Outage/malformed output fails
+closed (deny/halt); verdicts echoing shown cleartext are withheld; an approving verdict's
+`grant_kwargs()` maps 1:1 onto `SessionVault.grant_approval`. On this host the zero-egress
+invariant is evidenced by an `lsof` audit (`plva-mediator probe`) per ADR-0001, not OpenShell.
+Evidence: `Holo/verification/local-llm-mediator-executor.md`; runbook:
+`Holo/docs/local-llm-runbook.md`.
+
 ### 🔲 Step 8 — SPEAK-mechanism spike (prerequisite for voice-read)
 - **Goal:** determine empirically *how*, if at all, Holo3 can signal "read this aloud" — before
   building voice-read (Step 9). One instrumented run also captures Holo3's `structured_outputs`
@@ -654,6 +665,17 @@ for the explicitly deferred Step 7/9/10/12 controls.
 > silently break the guarantee). Keep **(B)** as the *"and it generalizes to arbitrary reasoning"*
 > talking point / stretch goal — it is little extra plumbing because it reuses the Step 7 sandbox,
 > but it should not be on the critical path for the demo.
+
+**Executor (B) component built 2026-07-12 (not yet bridged):** `plva_proxy.semantic_executor`
+runs `sort`/`select` over issued tokens through the same local model. The model answers with
+exact item texts (grammar-constrained to that enum on grammar-capable servers); the executor maps
+answers back to tokens and discards the completion, so the return to the CUA is tokens-only by
+construction. Live: correct alphabetical sort and a correct "personal vs work email" select with
+leak-clean injected observations; the primary filter caught and failed closed on a real
+cleartext-echo attempt by the 4B model during development. Kind names and `request_id` align with
+the Step 6.5 marker channel (`⟦PLVA_TOOL:sort:request_42⟧`), and `observation_text()` renders the
+value-free result line for injection. Deterministic library (A) remains unbuilt and separate.
+Evidence: `Holo/verification/local-llm-mediator-executor.md`.
 
 ---
 

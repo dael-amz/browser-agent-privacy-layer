@@ -112,9 +112,7 @@ def main() -> None:  # pragma: no cover - thin CLI wiring, exercised manually
     parser.add_argument("--redact-backend", choices=BACKENDS, default="auto")
     parser.add_argument("--redact-worker", type=Path, default=Path("redactor-worker"))
     parser.add_argument("--vision-worker", type=Path, default=Path("coreml-redactor"))
-    parser.add_argument(
-        "--vision-mode", choices=("fast", "cascade", "accurate"), default="cascade"
-    )
+    parser.add_argument("--vision-mode", choices=("fast", "cascade", "accurate"), default="cascade")
     parser.add_argument(
         "--visual-model",
         type=Path,
@@ -166,9 +164,10 @@ def main() -> None:  # pragma: no cover - thin CLI wiring, exercised manually
             )
         else:
             worker_script = args.redact_worker / "bin" / "redactor-worker.mjs"
-            if not worker_script.is_file() or not (
-                args.redact_worker / "dist/index.html"
-            ).is_file():
+            if (
+                not worker_script.is_file()
+                or not (args.redact_worker / "dist/index.html").is_file()
+            ):
                 parser.error(
                     f"accelerated worker is not built in {args.redact_worker}; "
                     "run npm install && npm run build there"

@@ -71,7 +71,16 @@ def test_call_store_rejects_bad_capacity_and_tolerates_odd_shapes() -> None:
         CallStore(capacity=0)
     store = CallStore()
     call_id = store.record(
-        {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "https://cdn.example/x.png"}}]}]},
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "https://cdn.example/x.png"}}
+                    ],
+                }
+            ]
+        },
         status=502,
         response=None,
         duration_ms=0,

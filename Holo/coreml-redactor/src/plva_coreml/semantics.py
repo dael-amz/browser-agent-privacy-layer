@@ -6,7 +6,7 @@ import re
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import numpy as np
 from tokenizers import Tokenizer
@@ -17,6 +17,9 @@ from plva_coreml.ocr import OCRFinding, PIIValue
 
 SEQUENCE_LENGTH: Final = 128
 RAMPART_MIN_SCORE: Final = 0.4
+COMPLETE_NAME_MIN_SCORE: Final = RAMPART_MIN_SCORE
+CONTEXTUAL_NAME_MIN_SCORE: Final = 0.5
+MULTIWORD_NAME_MIN_SCORE: Final = 0.72
 KEEP_LABELS: Final = frozenset({"CITY", "STATE", "ZIP_CODE"})
 SEMANTIC_ENGINES: Final = ("rampart", "gliner2", "openai-pf")
 # Alternative engines load frozen local copies only; no runtime downloads.
@@ -74,6 +77,7 @@ _OPENAI_PF_LABELS: Final = {
     "private_credential": "SECRET",
     "private_date": "DATE_OF_BIRTH",
 }
+NAME_LABELS: Final = frozenset({"GIVEN_NAME", "SURNAME"})
 ID_TO_LABEL: Final = (
     "O",
     "B-GIVEN_NAME",
@@ -239,7 +243,7 @@ class SemanticPipeline:
         self, masked: str, raw: str, raw_starts: list[int], raw_ends: list[int]
     ) -> list[Span]:
         if self._alt is not None:
-            spans: list[Span] = []
+            alternative_spans: list[Span] = []
             for start, end, label, score in self._alt.detect(masked):
                 start = max(0, start)
                 end = min(end, len(raw_ends))
@@ -248,10 +252,10 @@ class SemanticPipeline:
                 raw_start = raw_starts[start]
                 raw_end = raw_ends[end - 1]
                 if raw_end > raw_start:
-                    spans.append(
+                    alternative_spans.append(
                         Span(raw_start, raw_end, label, score, "ner", raw[raw_start:raw_end])
                     )
-            return _merge_spans(spans)
+            return _merge_spans(alternative_spans)
         encoding = self._tokenizer.encode(masked)
         encodings = [encoding, *encoding.overflowing]
         spans: list[Span] = []
@@ -338,6 +342,11 @@ def _aggregate_tokens(
     for index, (start, end) in enumerate(offsets):
         if start == end or start >= len(masked):
             continue
+        if current is not None and "\n" in masked[current[2] : start]:
+            # OCR findings are joined with newlines. An I-* token at the start
+            # of the next finding must not inherit an entity from the previous
+            # box, or unrelated UI words can become one large PII span.
+            flush()
         label_id = int(np.argmax(probabilities[index]))
         raw_label = ID_TO_LABEL[label_id]
         if raw_label == "O":
@@ -436,7 +445,7 @@ def _preferred(left: Span, right: Span) -> Span:
 def _filter_contextual_hits(hits: list[Span], text: str) -> list[Span]:
     address_labels = {"BUILDING_NUMBER", "STREET_NAME", "SECONDARY_ADDRESS"}
     kinds = {hit.label for hit in hits if hit.label in address_labels}
-    has_context = (
+    has_address_context = (
         bool(
             re.search(
                 r"\b(?:address|street|st\.?|road|rd\.?|avenue|ave\.?|lane|ln\.?|boulevard|blvd\.?|drive|dr\.?|way|court|ct\.?|terrace|suite|apt\.?|apartment|ship\s+to|deliver\s+to)\b",
@@ -446,27 +455,97 @@ def _filter_contextual_hits(hits: list[Span], text: str) -> list[Span]:
         )
         or len(kinds) >= 2
     )
-    return [hit for hit in hits if hit.label not in address_labels or has_context]
+    filtered = [
+        hit for hit in hits if hit.label not in address_labels or has_address_context
+    ]
+
+    # Rampart occasionally labels fragments of an ordinary UI word as a name
+    # (for example two GIVEN_NAME fragments inside one surname). A bare,
+    # low-confidence name is not enough evidence to obscure an entire OCR box.
+    # Preserve complete names and explicitly person-oriented fields while
+    # rejecting isolated fragments that make normal pages unusable.
+    name_hits = [hit for hit in filtered if hit.label in NAME_LABELS]
+    name_kinds = {hit.label for hit in name_hits}
+    has_complete_name = NAME_LABELS.issubset(name_kinds)
+    has_name_context = bool(
+        re.search(
+            r"\b(?:full\s+name|name|named|contact(?:\s+person)?|recipient|applicant|"
+            r"employee|customer|patient|signed\s+in\s+as|mr\.?|mrs\.?|ms\.?|miss|"
+            r"dr\.?|prof\.?)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+    has_multiword_name = any(
+        hit.score >= MULTIWORD_NAME_MIN_SCORE
+        and re.fullmatch(r"[^\W\d_][^\n]*\s+[^\W\d_][^\n]*", hit.text.strip()) is not None
+        for hit in name_hits
+    )
+    return [
+        hit
+        for hit in filtered
+        if hit.label not in NAME_LABELS
+        or (
+            has_complete_name
+            and hit.score >= COMPLETE_NAME_MIN_SCORE
+            and len(hit.text.strip()) >= 2
+        )
+        or (
+            has_name_context
+            and hit.score >= CONTEXTUAL_NAME_MIN_SCORE
+            and len(hit.text.strip()) >= 2
+        )
+        or (
+            has_multiword_name
+            and hit.score >= MULTIWORD_NAME_MIN_SCORE
+            and len(hit.text.strip()) >= 2
+        )
+    ]
 
 
 def _detect_sensitive_cues(text: str) -> list[str]:
     rules = (
-        ("CVC", r"\b(?:cvv2?|cvc2?|security\s+c[o0]de)\b"),
-        ("PRIVATE_KEY", r"\b(?:private\s+key|begin\s+(?:rsa\s+)?private\s+key)\b"),
-        ("API_KEY", r"\b(?:api[\s_-]*key|client\s+secret|access[\s_-]*key)\b"),
-        ("AUTH_TOKEN", r"\b(?:authorization|bearer|auth[\s_-]*token|access[\s_-]*token)\b"),
-        ("PASSWORD", r"\b(?:password|passcode|passphrase)\b"),
-        ("CARD_NUMBER", r"\b(?:card\s+(?:number|no\.?|#)|credit\s+card|debit\s+card|pan)\b"),
+        ("CVC", r"\b(?:cvv2?|cvc2?|security\s+c[o0]de)\b\s*(?:[:=]|is)\s*\d{3,4}\b"),
+        ("PRIVATE_KEY", r"\bBEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY\b"),
+        (
+            "API_KEY",
+            r"\b(?:api[\s_-]*key|client\s+secret|access[\s_-]*key)\b\s*"
+            r"(?:[:=]|is)\s*[^\s,;]{6,}",
+        ),
+        (
+            "AUTH_TOKEN",
+            r"\b(?:authorization|bearer|auth[\s_-]*token|access[\s_-]*token)\b\s*"
+            r"(?:[:=]|is)?\s*[^\s,;]{8,}",
+        ),
+        (
+            "PASSWORD",
+            r"\b(?:password|passcode|passphrase)\b\s*(?:[:=]|is)\s*[^\s,;]{3,}",
+        ),
+        (
+            "CARD_NUMBER",
+            r"\b(?:card\s+(?:number|no\.?|#)|credit\s+card|debit\s+card|pan)\b"
+            r"\s*(?:[:=]|is)?\s*\d(?:[ .-]?\d){11,18}",
+        ),
         (
             "GOVERNMENT_ID",
-            r"\b(?:social\s+security|ssn|passport|driver'?s?\s+licen[cs]e|tax\s+id)\b",
+            r"\b(?:social\s+security|ssn|passport|driver'?s?\s+licen[cs]e|tax\s+id)\b"
+            r"\s*(?:[:=]|is)\s*[A-Z0-9][A-Z0-9 -]{4,}",
         ),
-        ("DOB", r"\b(?:date\s+of\s+birth|d[.\s/-]*o[.\s/-]*b[.]?)\b"),
+        (
+            "DOB",
+            r"\b(?:date\s+of\s+birth|d[.\s/-]*o[.\s/-]*b[.]?)\b\s*"
+            r"(?:[:=]|is)\s*\d{1,4}[./-]\d{1,2}[./-]\d{1,4}",
+        ),
         (
             "BANK_ACCOUNT",
-            r"\b(?:routing\s+(?:number|no\.?|#)|bank\s+account|account\s+(?:number|no\.?|#)|iban)\b",
+            r"\b(?:routing\s+(?:number|no\.?|#)|bank\s+account|"
+            r"account\s+(?:number|no\.?|#)|iban)\b\s*(?:[:=]|is)\s*[A-Z0-9 -]{5,}",
         ),
-        ("SECRET", r"\b(?:secret\s+(?:key|value)|recovery\s+(?:code|phrase)|seed\s+phrase)\b"),
+        (
+            "SECRET",
+            r"\b(?:secret\s+(?:key|value)|recovery\s+(?:code|phrase)|seed\s+phrase)\b"
+            r"\s*(?:[:=]|is)\s*[^\s,;]{4,}",
+        ),
         (
             "PHONE",
             r"\b(?:phone|mobile|telephone|tel|call|sms)\b[^\n]{0,28}\+?\d[\d\s().-]{6,}\d(?:\s*(?:ext|x|extension)\s*\d+)?",
@@ -560,10 +639,10 @@ class _Gliner2NER:
         return spans
 
 
-def _walk_entities(node: object) -> list[dict]:
+def _walk_entities(node: object) -> list[dict[str, Any]]:
     """Collect span dicts from the nested gliner2 result shape defensively."""
 
-    found: list[dict] = []
+    found: list[dict[str, Any]] = []
     if isinstance(node, dict):
         if "start" in node and "end" in node:
             found.append(node)
