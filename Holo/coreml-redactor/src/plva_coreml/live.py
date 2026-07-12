@@ -17,8 +17,10 @@ from typing import Any, Final
 
 from PIL import Image
 
-from plva_coreml.visual_ane import ANEError, VisualANESession, prepare_fixed_visual_model
-from plva_coreml.visual_redactor import THRESHOLD_PROFILES, redact_image
+from plva_coreml.hybrid import HybridANERedactor, HybridResult
+from plva_coreml.ocr import OCRFinding
+from plva_coreml.visual_ane import ANEError
+from plva_coreml.visual_redactor import THRESHOLD_PROFILES
 
 _LOGGER: Final = logging.getLogger(__name__)
 _HOST: Final = "127.0.0.1"
@@ -26,7 +28,7 @@ _DEFAULT_PORT: Final = 18083
 
 _VIEWER_HTML: Final = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>PLVA ANE visual redactor</title><style>
+<title>PLVA accelerated hybrid redactor</title><style>
 :root{color-scheme:dark;font-family:ui-sans-serif,system-ui,sans-serif;background:#090b0a;color:#e9eeeb}
 body{margin:0;padding:28px;display:grid;gap:18px;min-height:100vh;box-sizing:border-box}
 header{display:flex;gap:18px;align-items:end;justify-content:space-between;flex-wrap:wrap}
@@ -39,20 +41,22 @@ h1{font-size:24px;margin:0}.sub{color:#98a29c;margin-top:7px}.warning{color:#ffc
 .frame{background:#111512;border:1px solid #303a34;border-radius:16px;padding:10px;display:grid;place-items:center;min-height:260px}
 img{display:block;max-width:100%;max-height:70vh;border-radius:9px}.empty{color:#728078}
 @media(max-width:700px){#status{grid-template-columns:repeat(2,1fr)}body{padding:16px}}
-</style></head><body><header><div><h1>PLVA · Neural Engine visual redactor</h1>
-<div class="sub">Local-only experimental output · <span class="warning">visual detector only; not safe for upstream use</span></div>
+</style></head><body><header><div><h1>PLVA · Accelerated hybrid redactor</h1>
+<div class="sub">Visual + RapidOCR + Rampart · <span class="warning">local evaluation; parity validation pending</span></div>
 </div><div id="state">Starting…</div></header><section id="status">
 <div class="metric"><div class="label">Frames</div><div class="value" id="frames">0</div></div>
 <div class="metric"><div class="label">Total</div><div class="value" id="total">—</div></div>
-<div class="metric"><div class="label">ANE-enabled inference</div><div class="value" id="inference">—</div></div>
+<div class="metric"><div class="label">OCR</div><div class="value" id="ocr">—</div></div>
+<div class="metric"><div class="label">Rampart</div><div class="value" id="rampart">—</div></div>
 <div class="metric"><div class="label">Regions</div><div class="value" id="regions">—</div></div>
-<div class="stage" id="detail">Initializing fixed Core ML model…</div></section>
-<div class="frame"><span class="empty" id="empty">Waiting for the first frame…</span><img id="frame" alt="Latest visually redacted frame"></div>
+<div class="stage" id="detail">Initializing fixed Core ML models…</div></section>
+<div class="frame"><span class="empty" id="empty">Waiting for the first frame…</span><img id="frame" alt="Latest hybrid-redacted frame"></div>
 <script>
 let version=0;async function tick(){try{const r=await fetch('/stats',{cache:'no-store'});const s=await r.json();
 document.getElementById('state').textContent=s.status;document.getElementById('frames').textContent=s.frames;
 document.getElementById('total').textContent=s.total_ms==null?'—':s.total_ms.toFixed(1)+' ms';
-document.getElementById('inference').textContent=s.inference_ms==null?'—':s.inference_ms.toFixed(1)+' ms';
+document.getElementById('ocr').textContent=s.ocr_ms==null?'—':s.ocr_ms.toFixed(1)+' ms';
+document.getElementById('rampart').textContent=s.rampart_ms==null?'—':s.rampart_ms.toFixed(1)+' ms';
 document.getElementById('regions').textContent=s.regions==null?'—':s.regions;
 document.getElementById('detail').textContent=s.detail;
 if(s.version!==version&&s.frames>0){version=s.version;const image=document.getElementById('frame');
@@ -67,6 +71,7 @@ class ViewerState:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._png: bytes | None = None
+        self._findings: tuple[dict[str, Any], ...] = ()
         self._stats: dict[str, Any] = {
             "status": "initializing",
             "detail": "Preparing fixed Core ML model…",
@@ -74,7 +79,8 @@ class ViewerState:
             "version": 0,
             "regions": None,
             "total_ms": None,
-            "inference_ms": None,
+            "ocr_ms": None,
+            "rampart_ms": None,
         }
 
     def update_status(self, status: str, detail: str) -> None:
@@ -86,29 +92,74 @@ class ViewerState:
             self._png = png
             self._stats.update(
                 status="running",
-                detail="CPUAndNeuralEngine · GPU excluded · visual-only masks",
+                detail="CPUAndNeuralEngine · visual + RapidOCR + Rampart",
                 frames=int(self._stats["frames"]) + 1,
                 version=int(self._stats["version"]) + 1,
                 regions=regions,
                 total_ms=total_ms,
-                inference_ms=inference_ms,
+                ocr_ms=inference_ms,
+                rampart_ms=0.0,
             )
 
-    def snapshot(self) -> tuple[bytes | None, dict[str, Any]]:
+    def publish_result(self, result: HybridResult) -> None:
+        findings = tuple(_serialize_finding(finding) for finding in result.findings)
         with self._lock:
-            return self._png, dict(self._stats)
+            self._png = result.png
+            self._findings = findings
+            self._stats.update(
+                status="running",
+                detail="CPUAndNeuralEngine · visual + RapidOCR + Rampart · findings in /findings",
+                frames=int(self._stats["frames"]) + 1,
+                version=int(self._stats["version"]) + 1,
+                regions=result.counts["fused"],
+                total_ms=result.timings["total_ms"],
+                ocr_ms=result.timings["ocr_ms"],
+                rampart_ms=result.timings["rampart_ms"],
+                counts=result.counts,
+            )
+
+    def snapshot(self) -> tuple[bytes | None, dict[str, Any], tuple[dict[str, Any], ...]]:
+        with self._lock:
+            return self._png, dict(self._stats), self._findings
+
+
+def _serialize_finding(finding: OCRFinding) -> dict[str, Any]:
+    return {
+        "bounds": {"x1": finding.x1, "y1": finding.y1, "x2": finding.x2, "y2": finding.y2},
+        "text": finding.text,
+        "detector_score": finding.detector_score,
+        "ocr_confidence": finding.ocr_confidence,
+        "labels": list(finding.labels),
+        "sources": list(finding.sources),
+        "sensitive": finding.sensitive,
+        "uncertain": finding.uncertain,
+        "values": [
+            {
+                "label": value.label,
+                "value": value.value,
+                "start": value.start,
+                "end": value.end,
+                "score": value.score,
+                "source": value.source,
+            }
+            for value in finding.values
+        ],
+    }
 
 
 def _handler_for(state: ViewerState) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            png, stats = state.snapshot()
+            png, stats, findings = state.snapshot()
             if self.path == "/" or self.path.startswith("/?"):
                 self._send(HTTPStatus.OK, "text/html; charset=utf-8", _VIEWER_HTML.encode())
             elif self.path == "/health":
                 self._send(HTTPStatus.OK, "application/json", b'{"ok":true}')
             elif self.path == "/stats":
                 self._send(HTTPStatus.OK, "application/json", json.dumps(stats).encode())
+            elif self.path == "/findings":
+                body = {"version": stats["version"], "findings": findings}
+                self._send(HTTPStatus.OK, "application/json", json.dumps(body).encode())
             elif self.path == "/frame" or self.path.startswith("/frame?"):
                 if png is None:
                     self._send(HTTPStatus.NOT_FOUND, "application/json", b'{"detail":"no frame"}')
@@ -173,12 +224,9 @@ def _run_pipeline(
     interval: float,
 ) -> None:
     try:
-        model = prepare_fixed_visual_model(
-            baseline / "dist/visual/detector.onnx", cache / "visual-fixed.onnx"
-        )
-        state.update_status("initializing", "Compiling Core ML NeuralNetwork graph…")
-        session = VisualANESession(model, cache_directory=cache / "compiled")
-        session.warm()
+        state.update_status("initializing", "Compiling visual, OCR, and Rampart Core ML graphs…")
+        pipeline = HybridANERedactor(baseline, cache, profile=profile)
+        pipeline.warm()
         state.update_status("running", "Core ML ready; capturing the first frame…")
         while not stop.is_set():
             started = time.monotonic()
@@ -187,17 +235,15 @@ def _run_pipeline(
             else:
                 with Image.open(fixture) as loaded:
                     source = loaded.convert("RGB")
-            result = redact_image(session, source, profile=profile)
-            state.publish(
-                result.png,
-                regions=len(result.regions),
-                total_ms=result.total_ms,
-                inference_ms=result.inference_ms,
-            )
+            result = pipeline.process(source)
+            state.publish_result(result)
             stop.wait(max(0.0, interval - (time.monotonic() - started)))
     except Exception as exc:
         _LOGGER.exception("ANE viewer pipeline stopped")
         state.update_status("failed", f"{type(exc).__name__}: {exc}")
+    finally:
+        if "pipeline" in locals():
+            pipeline.close()
 
 
 def main() -> None:

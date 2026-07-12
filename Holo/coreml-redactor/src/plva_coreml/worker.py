@@ -1,0 +1,96 @@
+"""Persistent stdin/stdout worker for the native Vision hybrid redactor."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import binascii
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+from plva_coreml.ocr import OCRFinding
+from plva_coreml.vision_hybrid import VISION_PIPELINE_MODES, HybridVisionRedactor
+
+
+def _finding_json(finding: OCRFinding) -> dict[str, Any]:
+    return {
+        "x1": finding.x1,
+        "y1": finding.y1,
+        "x2": finding.x2,
+        "y2": finding.y2,
+        "text": finding.text,
+        "detector_score": finding.detector_score,
+        "ocr_confidence": finding.ocr_confidence,
+        "labels": list(finding.labels),
+        "sources": list(finding.sources),
+        "values": [
+            {
+                "label": value.label,
+                "value": value.value,
+                "start": value.start,
+                "end": value.end,
+                "score": value.score,
+                "source": value.source,
+            }
+            for value in finding.values
+        ],
+        "sensitive": finding.sensitive,
+        "uncertain": finding.uncertain,
+    }
+
+
+def _emit(value: dict[str, Any]) -> None:
+    print(json.dumps(value, separators=(",", ":")), flush=True)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--baseline", type=Path, required=True)
+    parser.add_argument("--cache", type=Path, required=True)
+    parser.add_argument("--profile", choices=("high-recall", "balanced"), default="high-recall")
+    parser.add_argument("--mode", choices=VISION_PIPELINE_MODES, default="cascade")
+    args = parser.parse_args()
+    pipeline = HybridVisionRedactor(
+        args.baseline.resolve(),
+        args.cache.resolve(),
+        profile=args.profile,
+        mode=args.mode,
+    )
+    try:
+        pipeline.warm()
+        _emit({"ready": True, "backend": f"vision-{args.mode}", "threaded": True})
+        for line in sys.stdin:
+            identifier = ""
+            try:
+                request = json.loads(line)
+                if not isinstance(request, dict):
+                    raise ValueError("request")
+                identifier = str(request.get("id", ""))
+                encoded = request.get("image")
+                if not identifier or not isinstance(encoded, str):
+                    raise ValueError("request")
+                png = base64.b64decode(encoded, validate=True)
+                result = pipeline.process(png)
+                timings = dict(result.timings)
+                timings["workerTotalMs"] = timings.get("total_ms", 0.0)
+                _emit(
+                    {
+                        "id": identifier,
+                        "ok": True,
+                        "image": base64.b64encode(result.png).decode("ascii"),
+                        "backend": f"vision-{args.mode}",
+                        "counts": result.counts,
+                        "timings": timings,
+                        "findings": [_finding_json(finding) for finding in result.findings],
+                    }
+                )
+            except (ValueError, TypeError, binascii.Error, RuntimeError):
+                _emit({"id": identifier, "ok": False, "error": "FrameError"})
+    finally:
+        pipeline.close()
+
+
+if __name__ == "__main__":
+    main()

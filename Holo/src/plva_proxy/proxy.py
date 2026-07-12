@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import copy
 import functools
 import hashlib
 import io
@@ -270,25 +271,43 @@ class FrameStore:
         self._total = 0
         self._latest_sha12 = ""
         self._latest_at = 0
+        self._analysis: dict[str, Any] = {}
 
-    def add(self, png: bytes) -> None:
+    def add(self, png: bytes, analysis: dict[str, Any] | None = None) -> None:
         with self._lock:
             self._frames.append(png)
             self._total += 1
             self._latest_sha12 = hashlib.sha256(png).hexdigest()[:12]
             self._latest_at = int(time.time())
+            self._analysis = copy.deepcopy(analysis) if analysis is not None else {}
 
     def latest(self) -> bytes | None:
         with self._lock:
             return self._frames[-1] if self._frames else None
 
+    def findings(self) -> dict[str, Any]:
+        with self._lock:
+            return copy.deepcopy(self._analysis)
+
     def stats(self) -> dict[str, int | str]:
         with self._lock:
+            counts = self._analysis.get("counts")
+            timings = self._analysis.get("timings")
+            findings = self._analysis.get("findings")
+            duration = (
+                timings.get("workerTotalMs", timings.get("total_ms", 0))
+                if isinstance(timings, dict)
+                else 0
+            )
             return {
                 "frames_seen": self._total,
                 "buffered": len(self._frames),
                 "latest_sha12": self._latest_sha12,
                 "latest_at": self._latest_at,
+                "backend": str(self._analysis.get("backend", "")),
+                "regions": int(counts.get("fused", 0)) if isinstance(counts, dict) else 0,
+                "ocr_findings": len(findings) if isinstance(findings, list) else 0,
+                "total_ms": round(duration) if isinstance(duration, int | float) else 0,
             }
 
 
@@ -309,7 +328,9 @@ async function tick(){
     if(st.frames_seen > 0){
       const at = st.latest_at ? new Date(st.latest_at * 1000).toLocaleTimeString() : '';
       document.getElementById('meta').textContent =
-        'frame #' + st.frames_seen + ' · sha ' + st.latest_sha12 + ' · at ' + at;
+        'frame #' + st.frames_seen + ' · ' + (st.backend || 'baseline') +
+        ' · ' + st.total_ms + ' ms · ' + st.regions + ' masks · ' +
+        st.ocr_findings + ' OCR findings · sha ' + st.latest_sha12 + ' · at ' + at;
       if(st.latest_sha12 !== lastSha){
         lastSha = st.latest_sha12;
         const r = await fetch('/viewer/frame?t=' + Date.now());
@@ -364,7 +385,8 @@ def _redact_data_url(
         # Whatever went wrong in the redactor, the raw frame must not leave.
         raise HookError("frame redaction failed") from exc
     if store is not None:
-        store.add(redacted)
+        analysis = getattr(redact, "latest_analysis", None)
+        store.add(redacted, analysis if isinstance(analysis, dict) else None)
     _LOGGER.info("frame in_bytes=%d out_bytes=%d", len(raw), len(redacted))
     return "data:image/png;base64," + base64.b64encode(redacted).decode("ascii")
 
@@ -695,6 +717,14 @@ def add_viewer_routes(app: FastAPI, store: FrameStore) -> None:
     async def viewer_stats() -> dict[str, int | str]:
         return store.stats()
 
+    @app.get("/viewer/findings")
+    async def viewer_findings() -> Response:
+        return Response(
+            content=json.dumps(store.findings(), separators=(",", ":")),
+            media_type="application/json",
+            headers={"cache-control": "no-store"},
+        )
+
 
 def _env_file_value(path: Path, key: str) -> str | None:
     """Read ``KEY=value`` from a dotenv-style file without echoing its contents."""
@@ -749,9 +779,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--redact-engine",
-        choices=("accelerated", "baseline"),
+        choices=("accelerated", "vision", "baseline"),
         default="accelerated",
-        help="accelerated reuses models and runs detector branches in parallel (default)",
+        help="accelerated browser worker, native Vision/Core ML worker, or frozen baseline",
     )
     parser.add_argument(
         "--redact-backend",
@@ -764,6 +794,18 @@ def main() -> None:
         type=Path,
         default=Path("redactor-worker"),
         help="accelerated redactor worker directory",
+    )
+    parser.add_argument(
+        "--vision-worker",
+        type=Path,
+        default=Path("coreml-redactor"),
+        help="native Vision/Core ML worker package directory",
+    )
+    parser.add_argument(
+        "--vision-mode",
+        choices=("fast", "cascade", "accurate"),
+        default="cascade",
+        help="Vision OCR strategy (default: fast full frame + accurate sensitive regions)",
     )
     parser.add_argument(
         "--redact-lifecycle",
@@ -804,31 +846,55 @@ def main() -> None:
         cli_path = args.redact / "bin" / "plva-v2.mjs" if args.redact.is_dir() else args.redact
         if not cli_path.is_file():
             parser.error(f"--redact CLI not found: {cli_path}")
-        if shutil.which("node") is None:
+        if args.redact_engine != "vision" and shutil.which("node") is None:
             parser.error("--redact requires node on PATH")
         frame_store = FrameStore()
-        if args.redact_engine == "accelerated":
-            worker_script = args.redact_worker / "bin" / "redactor-worker.mjs"
-            if not worker_script.is_file():
-                parser.error(f"accelerated redactor worker not found: {worker_script}")
-            if not (args.redact_worker / "dist" / "index.html").is_file():
-                parser.error(
-                    "accelerated redactor is not built; run npm install && npm run build "
-                    f"in {args.redact_worker}"
+        if args.redact_engine in {"accelerated", "vision"}:
+            lifecycle = {
+                "adaptive": args.redact_idle_seconds,
+                "eager": None,
+                "cold": 0.0,
+            }[args.redact_lifecycle]
+            if args.redact_engine == "vision":
+                vision_root = args.vision_worker.resolve()
+                python = vision_root / ".venv" / "bin" / "python"
+                module = vision_root / "src" / "plva_coreml" / "worker.py"
+                if not python.is_file() or not module.is_file():
+                    parser.error(
+                        "Vision worker is not installed; run `uv sync --group dev` "
+                        f"in {args.vision_worker}"
+                    )
+                accelerated = AcceleratedRedactor(
+                    AcceleratedRedactorConfig(
+                        baseline_root=cli_path.parent.parent,
+                        worker_script=module,
+                        node_path=str(python),
+                        profile=args.redact_profile,
+                        idle_timeout_s=lifecycle,
+                        worker_kind="vision",
+                        worker_root=vision_root,
+                        cache_root=vision_root / ".cache",
+                        vision_mode=args.vision_mode,
+                    )
                 )
-            accelerated = AcceleratedRedactor(
-                AcceleratedRedactorConfig(
-                    baseline_root=cli_path.parent.parent,
-                    worker_script=worker_script,
-                    backend=args.redact_backend,
-                    profile=args.redact_profile,
-                    idle_timeout_s={
-                        "adaptive": args.redact_idle_seconds,
-                        "eager": None,
-                        "cold": 0.0,
-                    }[args.redact_lifecycle],
+            else:
+                worker_script = args.redact_worker / "bin" / "redactor-worker.mjs"
+                if not worker_script.is_file():
+                    parser.error(f"accelerated redactor worker not found: {worker_script}")
+                if not (args.redact_worker / "dist" / "index.html").is_file():
+                    parser.error(
+                        "accelerated redactor is not built; run npm install && npm run build "
+                        f"in {args.redact_worker}"
+                    )
+                accelerated = AcceleratedRedactor(
+                    AcceleratedRedactorConfig(
+                        baseline_root=cli_path.parent.parent,
+                        worker_script=worker_script,
+                        backend=args.redact_backend,
+                        profile=args.redact_profile,
+                        idle_timeout_s=lifecycle,
+                    )
                 )
-            )
             redact_hook = frame_redaction_hook(accelerated, frame_store)
             if args.redact_lifecycle == "eager":
                 startup_callbacks = (accelerated.start,)

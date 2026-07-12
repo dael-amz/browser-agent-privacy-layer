@@ -8,8 +8,8 @@
 # Prereq: Holo/.env containing   API_KEY=<your Overshoot key>
 # Details and manual variant: verification/step-1-runbook.md
 #
-# NOTE: this streams UNREDACTED screenshots of the visible desktop to Overshoot
-# (redaction arrives in Step 4). Close anything sensitive first. The runtime
+# NOTE: PLVA_REDACT=0 sends unredacted screenshots; PLVA_REDACT=1 fails closed unless every frame
+# is redacted before provider egress. Close unrelated sensitive windows either way. The runtime
 # kill switch stays enabled; Esc Esc is an additional local abort.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -59,10 +59,12 @@ if [[ "$REDACTION_ENABLED" == 1 ]]; then
     --redact plva-v2-baseline
     --redact-engine "${PLVA_REDACT_ENGINE:-accelerated}"
     --redact-backend "${PLVA_REDACT_BACKEND:-auto}"
+    --vision-worker "${PLVA_VISION_WORKER:-coreml-redactor}"
+    --vision-mode "${PLVA_VISION_MODE:-cascade}"
     --redact-lifecycle "${PLVA_REDACT_LIFECYCLE:-adaptive}"
     --redact-idle-seconds "${PLVA_REDACT_IDLE_SECONDS:-60}"
   )
-  echo "--- redaction ON (${PLVA_REDACT_ENGINE:-accelerated}/${PLVA_REDACT_BACKEND:-auto}, ${PLVA_REDACT_LIFECYCLE:-adaptive}); watch the obscured frames at http://127.0.0.1:$PORT/viewer"
+  echo "--- redaction ON (${PLVA_REDACT_ENGINE:-accelerated}, ${PLVA_REDACT_LIFECYCLE:-adaptive}); watch frames at http://127.0.0.1:$PORT/viewer and OCR at /viewer/findings"
 else
   echo "--- redaction OFF"
 fi

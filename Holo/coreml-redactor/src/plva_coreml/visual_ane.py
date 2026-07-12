@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
 from pathlib import Path
 from typing import Final
 
 import numpy as np
-import onnx
-import onnxruntime as ort
-from onnxruntime.tools.onnx_model_utils import fix_output_shapes, make_input_shape_fixed
+
+from plva_coreml.coreml_session import CoreMLSessionError, create_ane_session
+from plva_coreml.model_cache import prepare_fixed_model
 
 INPUT_SHAPE: Final = (1, 3, 640, 640)
 
@@ -25,21 +24,10 @@ def prepare_fixed_visual_model(source: Path, destination: Path) -> Path:
     destination = destination.resolve()
     if not source.is_file():
         raise ANEError(f"visual model not found: {source}")
-    digest = sha256(source.read_bytes()).hexdigest()
-    digest_file = destination.with_suffix(destination.suffix + ".source-sha256")
-    if (
-        destination.is_file()
-        and digest_file.is_file()
-        and digest_file.read_text("ascii").strip() == digest
-    ):
-        return destination
-    model = onnx.load_model(source)
-    make_input_shape_fixed(model.graph, "images", list(INPUT_SHAPE))
-    fix_output_shapes(model)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    onnx.save_model(model, destination)
-    digest_file.write_text(digest + "\n", "ascii")
-    return destination
+    try:
+        return prepare_fixed_model(source, destination, {"images": INPUT_SHAPE})
+    except (OSError, ValueError) as exc:
+        raise ANEError(f"could not prepare fixed visual model: {type(exc).__name__}") from exc
 
 
 class VisualANESession:
@@ -51,26 +39,10 @@ class VisualANESession:
     """
 
     def __init__(self, model: Path, *, cache_directory: Path | None = None) -> None:
-        if "CoreMLExecutionProvider" not in ort.get_available_providers():
-            raise ANEError("this ONNX Runtime build has no Core ML execution provider")
-        options = {
-            "ModelFormat": "NeuralNetwork",
-            "MLComputeUnits": "CPUAndNeuralEngine",
-            "RequireStaticInputShapes": "1",
-            "EnableOnSubgraphs": "0",
-        }
-        if cache_directory is not None:
-            cache_directory.mkdir(parents=True, exist_ok=True)
-            options["ModelCacheDirectory"] = str(cache_directory.resolve())
         try:
-            self._session = ort.InferenceSession(
-                str(model.resolve()),
-                providers=[("CoreMLExecutionProvider", options), "CPUExecutionProvider"],
-            )
-        except Exception as exc:
-            raise ANEError(f"Core ML session initialization failed: {type(exc).__name__}") from exc
-        if self._session.get_providers()[0] != "CoreMLExecutionProvider":
-            raise ANEError("Core ML was not selected as the primary execution provider")
+            self._session = create_ane_session(model, cache_directory=cache_directory)
+        except CoreMLSessionError as exc:
+            raise ANEError(str(exc)) from exc
 
     def infer(self, tensor: np.ndarray) -> np.ndarray:
         """Run one normalized NCHW detector tensor."""

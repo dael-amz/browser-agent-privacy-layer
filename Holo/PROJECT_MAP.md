@@ -23,9 +23,18 @@ Hackathon/
     │   ├── vite.config.js               Derived build against the separate frozen baseline
     │   ├── package.json                 Browser inference/build dependencies
     │   └── package-lock.json            Reproducible Node dependency lock
-    ├── coreml-redactor/                 Separate, non-production ANE visual-inference backend
-    │   ├── src/plva_coreml/visual_ane.py Static-shape Core ML/ANE session boundary
+    ├── coreml-redactor/                 Separate accelerated Core ML hybrid redaction backend
+    │   ├── src/plva_coreml/coreml_session.py Core ML execution-provider boundary and ANE policy
+    │   ├── src/plva_coreml/model_cache.py Content-addressed fixed-shape model derivatives
+    │   ├── src/plva_coreml/visual_ane.py Static-shape visual-model session
     │   ├── src/plva_coreml/visual_redactor.py Preprocess, decode, NMS, and mask rendering
+    │   ├── src/plva_coreml/ocr.py        Core ML RapidOCR detection/recognition + findings
+    │   ├── src/plva_coreml/semantics.py Structured rules + Core ML Rampart classification
+    │   ├── src/plva_coreml/hybrid.py     Parallel visual/OCR orchestration, fusion, and render
+    │   ├── src/plva_coreml/vision.py     Persistent native Apple Vision OCR client
+    │   ├── src/plva_coreml/vision_hybrid.py Fast/accurate Vision cascade + Core ML fusion
+    │   ├── src/plva_coreml/worker.py     Proxy-compatible memory-pipe worker protocol
+    │   ├── src/plva_coreml/native/vision_ocr_worker.swift Native Vision request loop
     │   ├── src/plva_coreml/live.py       Local screen/fixture loop and localhost viewer
     │   ├── src/plva_coreml/probe.py      Synthetic-fixture latency and parity probe
     │   ├── pyproject.toml                Isolated Core ML probe dependencies
@@ -102,10 +111,11 @@ rides on the pending live run. **Step 4 is PARTIAL** (2026-07-11): real *obscuri
 a persistent accelerated worker by default. Its visual model uses WebGPU on supported hardware,
 OCR runs concurrently through a separate WASM runtime, sessions stay warm during active CUA
 bursts and release after 60 idle seconds, and exact repeated frames use a bounded
-redacted-output-only memory cache. The
-fail-closed request hook and memory-only `/viewer` remain intact. The report is still
-geometry-only, so the vault / placeholders / resolution / history-scrub half of Step 4 is not
-built. See `verification/step-4-accelerated-redaction.md`.
+redacted-output-only memory cache. An opt-in native Apple Vision/Core ML engine now runs through
+the same fail-closed CUA hook, emits OCR text and exact PII spans at memory-only
+`/viewer/findings`, and measured 113–125 ms warm on the synthetic ATS fixture. Placeholder IDs,
+the vault, resolution, and history scrubbing are not built. See
+`verification/step-4-accelerated-redaction.md`.
 Step 2 (Overshoot latency measurement) has not started.
 
 Completed evidence:
@@ -120,7 +130,8 @@ Completed evidence:
   `tools`), envelope uses plural `tool_calls`. Frame stayed local and was shredded; nothing reached
   the repo. See `verification/step-0-runtime-capture.md`.
 - **§7 decision recorded** in `docs/decisions/0001-openshell-sec7-egress-topology.md`.
-- The automated gate is 80 passing tests with ~82% total coverage; formatting, Ruff, strict mypy,
+- The main automated gate is 82 passing tests with at least 80% coverage; the Core ML package has
+  17 passing tests. Formatting, Ruff, strict mypy,
   lock validation, sdist, and wheel checks pass.
 - **Pass-through proxy built and gated** (2026-07-11 resume): loopback-only, verbatim body relay,
   credential injection, SSE streamed through, fail-closed, privacy-safe logs; live loopback smoke
@@ -143,7 +154,7 @@ Active blockers / open items:
 |---|---|
 | `plva-live` | Continuous local capture through the persistent accelerated redactor → `http://127.0.0.1:18082/viewer`; no provider or key. |
 | `plva-probe` | Run the live synthetic Overshoot contract probe when `API_KEY` is supplied. |
-| `plva-proxy` | Loopback proxy; `--redact plva-v2-baseline` uses the accelerated worker and `/viewer`; `--redact-lifecycle` selects adaptive/eager/cold lifetime, `--redact-backend` selects hardware, and `--redact-engine baseline` retains the oracle path. |
+| `plva-proxy` | Loopback proxy; `--redact-engine vision` selects native Vision/Core ML, `accelerated` selects WebGPU/WASM, and `baseline` retains the oracle; `/viewer` and `/viewer/findings` are memory-only. |
 | `plva-runtime-capture` | Start the metadata-only capture stub on `127.0.0.1`; it never contacts a provider. |
 
 `plva-proxy` is the runtime's sole endpoint and the sole provider egress (Step 1/ADR-0001 role),

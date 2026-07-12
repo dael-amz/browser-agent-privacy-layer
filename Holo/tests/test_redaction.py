@@ -233,6 +233,34 @@ async def test_viewer_endpoints_serve_html_latest_frame_and_stats() -> None:
         stats_after = await client.get("/viewer/stats")
         assert stats_after.json().items() >= {"frames_seen": 1, "buffered": 1}.items()
 
+        findings = await client.get("/viewer/findings")
+        assert findings.status_code == 200
+        assert findings.headers["cache-control"] == "no-store"
+        assert findings.json() == {}
+
+
+async def test_viewer_exposes_memory_only_worker_findings_and_timings() -> None:
+    store = FrameStore()
+    analysis = {
+        "backend": "vision-cascade",
+        "counts": {"fused": 1},
+        "timings": {"workerTotalMs": 87.4},
+        "findings": [{"text": "synthetic@example.com", "labels": ["EMAIL"]}],
+    }
+    store.add(b"redacted", analysis)
+
+    async with make_proxy_client(unused_upstream(), frame_store=store) as client:
+        stats = (await client.get("/viewer/stats")).json()
+        response = await client.get("/viewer/findings")
+
+    assert stats.items() >= {
+        "backend": "vision-cascade",
+        "regions": 1,
+        "ocr_findings": 1,
+        "total_ms": 87,
+    }.items()
+    assert response.json() == analysis
+
 
 async def test_viewer_is_absent_without_a_frame_store() -> None:
     async with make_proxy_client(unused_upstream()) as client:

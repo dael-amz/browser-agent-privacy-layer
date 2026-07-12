@@ -64,6 +64,15 @@ class RedactionResult:
     total_ms: float
 
 
+@dataclass(frozen=True, slots=True)
+class VisualDetectionResult:
+    regions: tuple[Region, ...]
+    preprocess_ms: float
+    inference_ms: float
+    postprocess_ms: float
+    total_ms: float
+
+
 def prepare_tensor(source: Image.Image) -> tuple[np.ndarray, Transform]:
     """Apply the frozen detector's 640-square letterbox and NCHW normalization."""
 
@@ -179,6 +188,25 @@ def redact_image(
 ) -> RedactionResult:
     """Run one in-memory image through the experimental visual-only path."""
 
+    detected = detect_regions(session, source, profile=profile)
+    started = time.perf_counter()
+    png = render_masks(source, detected.regions)
+    render_ms = (time.perf_counter() - started) * 1000
+    return RedactionResult(
+        png=png,
+        regions=detected.regions,
+        preprocess_ms=detected.preprocess_ms,
+        inference_ms=detected.inference_ms,
+        postprocess_ms=detected.postprocess_ms + render_ms,
+        total_ms=detected.total_ms + render_ms,
+    )
+
+
+def detect_regions(
+    session: VisualANESession, source: Image.Image, *, profile: str = "high-recall"
+) -> VisualDetectionResult:
+    """Run the visual branch without rendering so it can overlap OCR."""
+
     total_started = time.perf_counter()
     started = time.perf_counter()
     tensor, transform = prepare_tensor(source)
@@ -188,10 +216,8 @@ def redact_image(
     inference_ms = (time.perf_counter() - started) * 1000
     started = time.perf_counter()
     regions = decode_detections(output, transform, profile=profile)
-    png = render_masks(source, regions)
     postprocess_ms = (time.perf_counter() - started) * 1000
-    return RedactionResult(
-        png=png,
+    return VisualDetectionResult(
         regions=regions,
         preprocess_ms=preprocess_ms,
         inference_ms=inference_ms,
