@@ -7,6 +7,10 @@ Status: **Obscuring path BUILT and locally verified.** The operator supplied
 obscured frames. This delivers Step 4's *redaction* half through the §5 plug-in seam; the vault /
 placeholder / history-scrub half is NOT built (see "What this is not" below).
 
+> The default performance path is now the persistent parallel WebGPU/WASM worker documented in
+> `step-4-accelerated-redaction.md`. The frozen CLI below remains available through
+> `--redact-engine baseline` as the correctness oracle.
+
 ## What plva-v2-baseline is
 
 A frozen, standalone harness of the old PLVA v2 detection pipeline: a visual detector +
@@ -75,9 +79,8 @@ see") never trigger recapture. Not fixable in transit.
 
 Follow-ups shipped:
 
-- **Per-frame instrumentation**: the proxy logs `frame in=<sha12> out=<sha12>` per screenshot,
-  and `/viewer` now shows frame number, output sha, and timestamp — identical inputs are visible
-  at a glance.
+- **Per-frame instrumentation**: the proxy logs privacy-safe byte counts and `/viewer` shows the
+  frame number, redacted-output sha, and timestamp — identical outputs are visible at a glance.
 - **`plva-live`** — true continuous redaction independent of the runtime: captures the screen in
   a loop (`screencapture`), redacts each frame, and serves it at
   `http://127.0.0.1:18082/viewer`. No upstream, no key, memory-only frames. `--scale 0.5`

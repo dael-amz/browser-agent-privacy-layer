@@ -77,6 +77,22 @@ async def test_health_endpoints_answer_locally_without_upstream_traffic() -> Non
     assert seen == []
 
 
+async def test_lifespan_runs_worker_startup_and_cleanup_callbacks() -> None:
+    events: list[str] = []
+    transport = httpx.MockTransport(lambda request: httpx.Response(500))
+    app = create_app(
+        CONFIG,
+        transport=transport,
+        startup_callbacks=(lambda: events.append("started"),),
+        cleanup_callbacks=(lambda: events.append("closed"),),
+    )
+
+    async with app.router.lifespan_context(app):
+        assert events == ["started"]
+
+    assert events == ["started", "closed"]
+
+
 async def test_chat_relay_forwards_body_verbatim_and_injects_credential() -> None:
     upstream_app, seen = make_recording_upstream()
     sent = json.dumps(chat_payload(stream=False)).encode()
@@ -247,9 +263,18 @@ def test_main_runs_uvicorn_on_loopback_with_env_file_key(
         hooks: proxy.Hooks | None = None,
         frame_store: proxy.FrameStore | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        startup_callbacks: tuple[Any, ...] = (),
+        cleanup_callbacks: tuple[Any, ...] = (),
     ) -> FastAPI:
         configs.append(config)
-        return real_create_app(config, hooks=hooks, frame_store=frame_store, transport=transport)
+        return real_create_app(
+            config,
+            hooks=hooks,
+            frame_store=frame_store,
+            transport=transport,
+            startup_callbacks=startup_callbacks,
+            cleanup_callbacks=cleanup_callbacks,
+        )
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     monkeypatch.setattr(proxy, "create_app", spy_create_app)
@@ -268,6 +293,7 @@ def test_main_runs_uvicorn_on_loopback_with_env_file_key(
         ["plva-proxy", "--port", "0"],
         ["plva-proxy", "--port", "70000"],
         ["plva-proxy", "--upstream", "ftp://provider.invalid"],
+        ["plva-proxy", "--redact-idle-seconds", "-1"],
     ],
 )
 def test_main_rejects_invalid_arguments(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:

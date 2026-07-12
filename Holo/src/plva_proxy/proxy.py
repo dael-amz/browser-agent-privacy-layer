@@ -24,6 +24,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -42,7 +43,14 @@ from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
 from plva_proxy.contract_probe import API_BASE_URL
-from plva_proxy.redactor import PROFILES, RedactorConfig, redact_png
+from plva_proxy.redactor import (
+    BACKENDS,
+    PROFILES,
+    AcceleratedRedactor,
+    AcceleratedRedactorConfig,
+    RedactorConfig,
+    redact_png,
+)
 from plva_proxy.runtime_capture import LOOPBACK_HOST
 
 DEFAULT_PORT: Final = 18081
@@ -112,6 +120,97 @@ def _noop_rewrite_actions(document: dict[str, Any]) -> dict[str, Any]:
 
 
 TEST_HOOKS: Final = Hooks(on_request=_tag_request, on_response=_noop_rewrite_actions)
+
+BANANA_TEXT: Final = "banana"
+# Holo3's exact type-tool name lives only in the closed runtime's structured
+# output schema, so match text-entry verbs loosely and let the log reveal the
+# real name on first use. "answer" is excluded — that is the CUA's reply, not
+# text it types into the computer.
+_TYPING_TOOL: Final = re.compile(r"type|write|input|fill|keyboard")
+
+
+def _is_typing_tool(name: str) -> bool:
+    low = name.lower()
+    return "answer" not in low and _TYPING_TOOL.search(low) is not None
+
+
+def _bananafy_call(call: dict[str, Any]) -> list[str]:
+    """Replace every string text argument on one typing tool-call with 'banana'.
+
+    Handles both wire shapes: args inlined beside ``tool_name`` (the shape the
+    Step 0 capture showed) and args nested under an ``args`` object. Returns the
+    keys changed, for a privacy-safe log — key names only, never values.
+    """
+
+    changed: list[str] = []
+    for key, value in list(call.items()):
+        if key in {"tool_name", "id"}:
+            continue
+        if isinstance(value, str):
+            call[key] = BANANA_TEXT
+            changed.append(key)
+        elif key == "args" and isinstance(value, dict):
+            for arg_key, arg_value in list(value.items()):
+                if isinstance(arg_value, str):
+                    value[arg_key] = BANANA_TEXT
+                    changed.append(f"args.{arg_key}")
+    return changed
+
+
+def _banana_rewrite_actions(document: dict[str, Any]) -> dict[str, Any]:
+    """Test hook: replace whatever text the CUA would type with 'banana'.
+
+    Proves the response-leg action-rewrite seam on live Holo3 output — the same
+    seam real placeholder->value resolution will use. Deliberately tolerant: any
+    step that is not a JSON action, or not a text-entry tool (click, scroll,
+    answer, ...), passes through untouched so a whole task can still run. Logs
+    only tool names and rewritten arg keys, never the original (possibly
+    private) text the model tried to type.
+    """
+
+    choices = document.get("choices")
+    if not isinstance(choices, list):
+        return document
+    rewritten: dict[str, Any] = json.loads(json.dumps(document))
+    seen: list[str] = []
+    hit: list[str] = []
+    for choice in rewritten["choices"]:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        try:
+            action = json.loads(content)
+        except ValueError:
+            continue  # plain-text answer or non-JSON step — leave untouched
+        if not isinstance(action, dict):
+            continue
+        calls = action.get("tool_calls")
+        if not isinstance(calls, list):
+            continue
+        changed = False
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            name = call.get("tool_name")
+            if not isinstance(name, str):
+                continue
+            seen.append(name)
+            if _is_typing_tool(name) and _bananafy_call(call):
+                hit.append(name)
+                changed = True
+        if changed:
+            message["content"] = json.dumps(action, separators=(",", ":"))
+    if seen:
+        _LOGGER.info("banana hook: tools=%s rewrote=%s", sorted(set(seen)), sorted(set(hit)))
+    return rewritten
+
+
+BANANA_HOOKS: Final = Hooks(on_response=_banana_rewrite_actions)
 
 _IMAGE_MEDIA_TYPES: Final = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}
 
@@ -223,7 +322,7 @@ async function tick(){
       }
     }
   }catch(e){}
-  setTimeout(tick, 1000);
+  setTimeout(tick, 250);
 }
 tick();
 </script></body></html>
@@ -266,13 +365,7 @@ def _redact_data_url(
         raise HookError("frame redaction failed") from exc
     if store is not None:
         store.add(redacted)
-    _LOGGER.info(
-        "frame in=%s (%d bytes) out=%s (%d bytes)",
-        hashlib.sha256(raw).hexdigest()[:12],
-        len(raw),
-        hashlib.sha256(redacted).hexdigest()[:12],
-        len(redacted),
-    )
+    _LOGGER.info("frame in_bytes=%d out_bytes=%d", len(raw), len(redacted))
     return "data:image/png;base64," + base64.b64encode(redacted).decode("ascii")
 
 
@@ -452,6 +545,8 @@ def create_app(
     hooks: Hooks | None = None,
     frame_store: FrameStore | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
+    startup_callbacks: tuple[Callable[[], None], ...] = (),
+    cleanup_callbacks: tuple[Callable[[], None], ...] = (),
 ) -> FastAPI:
     """Create the loopback relay application around one upstream client."""
 
@@ -465,9 +560,13 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         try:
+            for callback in startup_callbacks:
+                await run_in_threadpool(callback)
             yield
         finally:
             await client.aclose()
+            for callback in cleanup_callbacks:
+                await run_in_threadpool(callback)
 
     app = FastAPI(title="PLVA interception proxy", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.upstream_client = client
@@ -623,9 +722,10 @@ def main() -> None:
     parser.add_argument("--upstream", default=API_BASE_URL, help="provider base URL")
     parser.add_argument(
         "--hook",
-        choices=("none", "test"),
+        choices=("none", "test", "banana"),
         default="none",
-        help="traffic mutation hooks: none = pass-through, test = Step 3 test hooks",
+        help="traffic mutation hooks: none = pass-through, test = Step 3 test hooks, "
+        "banana = replace every text the CUA types with 'banana'",
     )
     parser.add_argument(
         "--hook-image",
@@ -647,11 +747,44 @@ def main() -> None:
         default="high-recall",
         help="detector profile for --redact",
     )
+    parser.add_argument(
+        "--redact-engine",
+        choices=("accelerated", "baseline"),
+        default="accelerated",
+        help="accelerated reuses models and runs detector branches in parallel (default)",
+    )
+    parser.add_argument(
+        "--redact-backend",
+        choices=BACKENDS,
+        default="auto",
+        help="accelerated inference backend (default: auto prefers WebGPU)",
+    )
+    parser.add_argument(
+        "--redact-worker",
+        type=Path,
+        default=Path("redactor-worker"),
+        help="accelerated redactor worker directory",
+    )
+    parser.add_argument(
+        "--redact-lifecycle",
+        choices=("adaptive", "eager", "cold"),
+        default="adaptive",
+        help="adaptive starts on demand and releases after idle; "
+        "eager stays warm; cold exits per frame",
+    )
+    parser.add_argument(
+        "--redact-idle-seconds",
+        type=float,
+        default=60.0,
+        help="adaptive worker idle timeout (default: 60 seconds)",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
     if not args.upstream.startswith(("http://", "https://")):
         parser.error("--upstream must be an http(s) URL")
+    if args.redact_idle_seconds < 0:
+        parser.error("--redact-idle-seconds cannot be negative")
     api_key = os.environ.get("API_KEY") or _env_file_value(Path(".env"), "API_KEY")
     if not api_key:
         parser.error("API_KEY is required (export it, or fill .env next to pyproject.toml)")
@@ -665,6 +798,8 @@ def main() -> None:
 
     redact_hook: RequestHook | None = None
     frame_store: FrameStore | None = None
+    cleanup_callbacks: tuple[Callable[[], None], ...] = ()
+    startup_callbacks: tuple[Callable[[], None], ...] = ()
     if args.redact is not None:
         cli_path = args.redact / "bin" / "plva-v2.mjs" if args.redact.is_dir() else args.redact
         if not cli_path.is_file():
@@ -672,12 +807,39 @@ def main() -> None:
         if shutil.which("node") is None:
             parser.error("--redact requires node on PATH")
         frame_store = FrameStore()
-        redactor_config = RedactorConfig(cli_path=cli_path, profile=args.redact_profile)
-        redact_hook = frame_redaction_hook(
-            functools.partial(redact_png, redactor_config), frame_store
-        )
+        if args.redact_engine == "accelerated":
+            worker_script = args.redact_worker / "bin" / "redactor-worker.mjs"
+            if not worker_script.is_file():
+                parser.error(f"accelerated redactor worker not found: {worker_script}")
+            if not (args.redact_worker / "dist" / "index.html").is_file():
+                parser.error(
+                    "accelerated redactor is not built; run npm install && npm run build "
+                    f"in {args.redact_worker}"
+                )
+            accelerated = AcceleratedRedactor(
+                AcceleratedRedactorConfig(
+                    baseline_root=cli_path.parent.parent,
+                    worker_script=worker_script,
+                    backend=args.redact_backend,
+                    profile=args.redact_profile,
+                    idle_timeout_s={
+                        "adaptive": args.redact_idle_seconds,
+                        "eager": None,
+                        "cold": 0.0,
+                    }[args.redact_lifecycle],
+                )
+            )
+            redact_hook = frame_redaction_hook(accelerated, frame_store)
+            if args.redact_lifecycle == "eager":
+                startup_callbacks = (accelerated.start,)
+            cleanup_callbacks = (accelerated.close,)
+        else:
+            redactor_config = RedactorConfig(cli_path=cli_path, profile=args.redact_profile)
+            redact_hook = frame_redaction_hook(
+                functools.partial(redact_png, redactor_config), frame_store
+            )
 
-    hooks = TEST_HOOKS if args.hook == "test" else None
+    hooks = {"test": TEST_HOOKS, "banana": BANANA_HOOKS}.get(args.hook)
     for extra_hook in (image_hook, redact_hook):
         if extra_hook is not None:
             prior = hooks if hooks is not None else Hooks()
@@ -694,6 +856,8 @@ def main() -> None:
             ProxyConfig(upstream_base_url=args.upstream, api_key=api_key),
             hooks=hooks,
             frame_store=frame_store,
+            startup_callbacks=startup_callbacks,
+            cleanup_callbacks=cleanup_callbacks,
         ),
         host=LOOPBACK_HOST,
         port=args.port,

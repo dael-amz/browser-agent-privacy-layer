@@ -1,27 +1,35 @@
-"""Frame redaction through the frozen plva-v2-baseline CLI.
+"""Persistent accelerated redaction plus the frozen one-shot baseline fallback.
 
-Wraps ``node bin/plva-v2.mjs`` — the bundled headless-Chrome + local-ONNX
-pipeline that burns detected-PII masks into a PNG. Frames touch disk only
-inside a private temporary directory that is deleted before returning, and
-the CLI's geometry-only JSON report is read for a region count and discarded.
-Any failure raises RedactionError so the caller can fail closed (§8.1);
-there is no raw-frame fallback (§8.2). Logs carry region counts and exit
-codes only — never pixels, recognized text, or report contents.
+``AcceleratedRedactor`` owns one warm browser worker, concurrent visual/OCR
+branches, WebGPU selection, and a redacted-output-only memory cache. The
+legacy ``redact_png`` wrapper remains as a correctness oracle and writes only
+to a private temporary directory. Both paths raise ``RedactionError`` on any
+failure so callers fail closed; neither has a raw-frame fallback.
 """
 
 from __future__ import annotations
 
+import binascii
 import json
 import logging
+import os
+import queue
 import subprocess
 import tempfile
+import threading
+from base64 import b64decode, b64encode
+from collections import OrderedDict
+from contextlib import suppress
 from dataclasses import dataclass
+from hashlib import sha256
+from itertools import count
 from pathlib import Path
-from typing import Final
+from typing import Any, Final, TextIO
 
 _LOGGER: Final = logging.getLogger(__name__)
 
 PROFILES: Final = ("high-recall", "balanced")
+BACKENDS: Final = ("auto", "webgpu", "wasm")
 
 
 class RedactionError(RuntimeError):
@@ -36,6 +44,282 @@ class RedactorConfig:
     node_path: str = "node"
     profile: str = "high-recall"
     timeout_s: float = 180.0
+
+
+@dataclass(frozen=True, slots=True)
+class AcceleratedRedactorConfig:
+    """Persistent browser worker configuration."""
+
+    baseline_root: Path
+    worker_script: Path
+    node_path: str = "node"
+    backend: str = "auto"
+    profile: str = "high-recall"
+    startup_timeout_s: float = 180.0
+    frame_timeout_s: float = 180.0
+    cache_entries: int = 4
+    idle_timeout_s: float | None = 60.0
+
+
+class AcceleratedRedactor:
+    """Persistent, parallel, hardware-accelerated frame redactor.
+
+    One browser process owns warm ONNX sessions during an active CUA burst.
+    Calls are serialized to avoid CPU/GPU oversubscription, while the worker
+    runs its independent visual and OCR branches concurrently. By default the
+    process starts on demand and exits after an idle minute; ``None`` keeps it
+    warm indefinitely and zero selects cold-per-call operation. Only redacted
+    output bytes are cached; cache keys and values are memory-only and cleared
+    on close.
+    """
+
+    def __init__(self, config: AcceleratedRedactorConfig) -> None:
+        if config.backend not in BACKENDS:
+            raise ValueError(f"backend must be one of: {', '.join(BACKENDS)}")
+        if config.profile not in PROFILES:
+            raise ValueError(f"profile must be one of: {', '.join(PROFILES)}")
+        if config.cache_entries < 0:
+            raise ValueError("cache_entries cannot be negative")
+        if config.idle_timeout_s is not None and config.idle_timeout_s < 0:
+            raise ValueError("idle_timeout_s cannot be negative")
+        self._config = config
+        self._lock = threading.RLock()
+        self._process: subprocess.Popen[str] | None = None
+        self._responses: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        self._reader: threading.Thread | None = None
+        self._ids = count(1)
+        self._cache: OrderedDict[bytes, bytes] = OrderedDict()
+        self._backend = "not-started"
+        self._idle_timer: threading.Timer | None = None
+
+    @property
+    def backend(self) -> str:
+        """Return the active backend after startup."""
+
+        return self._backend
+
+    def start(self) -> None:
+        """Start and warm the worker before the first frame arrives."""
+
+        with self._lock:
+            self._cancel_idle_timer()
+            self._ensure_started()
+            self._arm_idle_timer()
+
+    def __call__(self, png: bytes) -> bytes:
+        """Redact one PNG, failing closed on every worker/protocol error."""
+
+        key = sha256(png).digest()
+        with self._lock:
+            try:
+                self._cancel_idle_timer()
+                cached = self._cache.get(key)
+                if cached is not None:
+                    self._cache.move_to_end(key)
+                    _LOGGER.info("redacted frame: memory cache hit")
+                    return cached
+
+                self._ensure_started()
+                process = self._process
+                if process is None or process.stdin is None:
+                    raise RedactionError("accelerated worker is unavailable")
+                request_id = str(next(self._ids))
+                request = {
+                    "id": request_id,
+                    "profile": self._config.profile,
+                    "image": b64encode(png).decode("ascii"),
+                }
+                try:
+                    process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+                    process.stdin.flush()
+                except (BrokenPipeError, OSError) as exc:
+                    self._stop_process()
+                    raise RedactionError("accelerated worker stopped") from exc
+
+                response = self._wait_response(self._config.frame_timeout_s)
+                if response.get("id") != request_id:
+                    self._stop_process()
+                    raise RedactionError("accelerated worker protocol mismatch")
+                if response.get("ok") is not True:
+                    raise RedactionError("accelerated worker rejected frame")
+                try:
+                    redacted = b64decode(str(response["image"]), validate=True)
+                except (KeyError, ValueError, binascii.Error) as exc:
+                    self._stop_process()
+                    raise RedactionError("accelerated worker returned invalid output") from exc
+                if not redacted.startswith(b"\x89PNG\r\n\x1a\n"):
+                    self._stop_process()
+                    raise RedactionError("accelerated worker returned a non-PNG output")
+
+                self._backend = _safe_backend(response.get("backend"))
+                counts = response.get("counts")
+                timings = response.get("timings")
+                regions = counts.get("fused", "?") if isinstance(counts, dict) else "?"
+                duration = timings.get("workerTotalMs", "?") if isinstance(timings, dict) else "?"
+                _LOGGER.info(
+                    "redacted frame: %s region(s) masked backend=%s duration_ms=%s",
+                    regions,
+                    self._backend,
+                    duration,
+                )
+                self._remember(key, redacted)
+                return redacted
+            finally:
+                if self._process is not None:
+                    self._arm_idle_timer()
+
+    def close(self) -> None:
+        """Stop the worker and erase its memory-only frame cache."""
+
+        with self._lock:
+            self._cache.clear()
+            self._cancel_idle_timer()
+            self._stop_process()
+            self._backend = "closed"
+
+    def _ensure_started(self) -> None:
+        process = self._process
+        if process is not None and process.poll() is None:
+            return
+        script = self._config.worker_script.resolve()
+        baseline = self._config.baseline_root.resolve()
+        if not script.is_file():
+            raise RedactionError("accelerated worker script is missing")
+        if not (script.parent.parent / "dist" / "index.html").is_file():
+            raise RedactionError(
+                "accelerated worker is not built (run npm install && npm run build)"
+            )
+        if not (baseline / "snapshot.json").is_file():
+            raise RedactionError("frozen baseline assets are missing")
+        environment = os.environ.copy()
+        environment["PLVA_BASELINE_ROOT"] = str(baseline)
+        try:
+            responses: queue.Queue[dict[str, Any] | None] = queue.Queue()
+            self._responses = responses
+            self._process = subprocess.Popen(
+                [
+                    self._config.node_path,
+                    str(script),
+                    "--backend",
+                    self._config.backend,
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                bufsize=1,
+                cwd=script.parent.parent,
+                env=environment,
+            )
+        except OSError as exc:
+            self._process = None
+            raise RedactionError("accelerated worker did not start") from exc
+        stdout = self._process.stdout
+        if stdout is None:
+            self._stop_process()
+            raise RedactionError("accelerated worker has no protocol output")
+        self._reader = threading.Thread(
+            target=self._read_responses,
+            args=(stdout, responses),
+            daemon=True,
+        )
+        self._reader.start()
+        ready = self._wait_response(self._config.startup_timeout_s)
+        if ready.get("ready") is not True:
+            self._stop_process()
+            raise RedactionError("accelerated worker initialization failed")
+        self._backend = _safe_backend(ready.get("backend"))
+        _LOGGER.info(
+            "accelerated redactor ready backend=%s threaded=%s",
+            self._backend,
+            ready.get("threaded") is True,
+        )
+
+    @staticmethod
+    def _read_responses(stdout: TextIO, responses: queue.Queue[dict[str, Any] | None]) -> None:
+        try:
+            for line in stdout:
+                try:
+                    value = json.loads(line)
+                except ValueError:
+                    responses.put(None)
+                    return
+                responses.put(value if isinstance(value, dict) else None)
+        finally:
+            responses.put(None)
+
+    def _wait_response(self, timeout: float) -> dict[str, Any]:
+        try:
+            response = self._responses.get(timeout=timeout)
+        except queue.Empty as exc:
+            self._stop_process()
+            raise RedactionError("accelerated worker timed out") from exc
+        if response is None:
+            self._stop_process()
+            raise RedactionError("accelerated worker protocol ended")
+        return response
+
+    def _remember(self, key: bytes, redacted: bytes) -> None:
+        if self._config.cache_entries == 0:
+            return
+        self._cache[key] = redacted
+        self._cache.move_to_end(key)
+        while len(self._cache) > self._config.cache_entries:
+            self._cache.popitem(last=False)
+
+    def _arm_idle_timer(self) -> None:
+        self._cancel_idle_timer()
+        timeout = self._config.idle_timeout_s
+        if timeout is None:
+            return
+        if timeout == 0:
+            self._stop_process()
+            self._backend = "idle"
+            return
+        timer = threading.Timer(timeout, self._expire_idle_worker)
+        timer.daemon = True
+        self._idle_timer = timer
+        timer.start()
+
+    def _cancel_idle_timer(self) -> None:
+        timer = self._idle_timer
+        self._idle_timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def _expire_idle_worker(self) -> None:
+        with self._lock:
+            if self._idle_timer is not threading.current_thread():
+                return
+            self._idle_timer = None
+            self._stop_process()
+            self._backend = "idle"
+            _LOGGER.info("accelerated redactor released after idle timeout")
+
+    def _stop_process(self) -> None:
+        self._cancel_idle_timer()
+        process = self._process
+        self._process = None
+        if process is None:
+            return
+        if process.stdin is not None:
+            with suppress(OSError):
+                process.stdin.close()
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()
+
+
+def _safe_backend(value: Any) -> str:
+    backend = str(value)
+    return backend if backend in {"webgpu", "wasm"} else "unknown"
 
 
 def redact_png(config: RedactorConfig, png: bytes) -> bytes:

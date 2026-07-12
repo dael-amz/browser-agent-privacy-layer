@@ -17,6 +17,12 @@ Hackathon/
     ├── PROJECT_MAP.md                   This living directory and status guide
     ├── README.md                        Active project overview and safety warning
     ├── run_step1.sh                     One-command live run (proxy + preflight + task + cleanup)
+    ├── redactor-worker/                 Persistent parallel WebGPU/WASM redaction worker source
+    │   ├── bin/redactor-worker.mjs      Private loopback browser/IPC supervisor
+    │   ├── src/worker.js                Warm parallel visual + OCR pipeline and PNG renderer
+    │   ├── vite.config.js               Derived build against the separate frozen baseline
+    │   ├── package.json                 Browser inference/build dependencies
+    │   └── package-lock.json            Reproducible Node dependency lock
     ├── plva-v2-baseline/                Frozen v2 detector harness — NOT vaulted in git; pulled from a
     │                                    separate clone and fed via `--redact <path>` (gitignored, AGPL, dev-only)
     ├── pyproject.toml                   Package metadata, dependencies, commands, and quality gates
@@ -30,10 +36,11 @@ Hackathon/
     │       ├── contract_probe.py        Privacy-safe Overshoot model/JSON/SSE contract probe
     │       ├── live.py                  Continuous local capture→redact→viewer loop (no upstream)
     │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks + viewer (fail-closed, SSE-safe)
-    │       ├── redactor.py              Subprocess wrapper around the frozen plva-v2 CLI (fail-closed)
+    │       ├── redactor.py              Persistent accelerated worker client + frozen CLI fallback
     │       └── runtime_capture.py       Loopback-only Holo screenshot-transport capture stub (+ /health)
     ├── tests/
     │   ├── test_contract_probe.py       Provider probe, failure, CLI, and safe-output tests
+    │   ├── test_accelerated_redactor.py Persistent protocol, cache, lifecycle, and failure tests
     │   ├── test_proxy.py                Relay fidelity, credential, SSE, fail-closed, and log-hygiene tests
     │   ├── test_proxy_hooks.py          Step 3 hook seam: mutation, SSE re-emit, and fail-closed tests
     │   ├── test_redaction.py            Redaction hook, FrameStore/viewer, and redactor wrapper tests
@@ -51,6 +58,7 @@ Hackathon/
         ├── step-1-status.md             §7 decision recorded; resume notes: ready to run
         ├── step-1-runbook.md            One-pass instructions to close Step 1 once the key exists
         ├── step-3-status.md             Interception hooks built; local verify PASS, live verify pending
+        ├── step-4-accelerated-redaction.md  Persistent parallel GPU worker evidence and benchmark
         └── step-4-obscuring.md          Real obscuring via frozen v2 detector + /viewer; vault not built
 ```
 
@@ -60,6 +68,7 @@ Hackathon/
 |---|---|
 | `BLUEPRINT.md` | Source of truth. Its step ordering and hard constraints override convenience. |
 | `src/plva_proxy/` | Installable production/probe code. New proxy modules belong here, not beside `pyproject.toml`. |
+| `redactor-worker/` | Derived persistent browser worker source; generated `dist/` and `node_modules/` remain ignored. |
 | `tests/` | Automated acceptance and privacy-regression tests. The configured gate requires at least 80% coverage. |
 | `docs/decisions/` | Architecture decision records (ADRs). One numbered file per resolved blueprint decision. |
 | `verification/` | Human-readable evidence and decisions from each blueprint checkpoint. It must not contain captured frames, request bodies, transcripts, credentials, or vault values. |
@@ -81,11 +90,14 @@ instruction): the proxy now exposes a request/response mutation hook seam (`--ho
 the blueprint's test hooks; default remains pass-through), with SSE responses buffered,
 reconstructed, mutated, and re-emitted under a response hook, and every hook/parse failure failing
 closed. Its live verify (the Step 1/2 task running unchanged through pass-through and hook modes)
-rides on the pending live run. **Step 4 is PARTIAL** (2026-07-11): real *obscuring* works — the
-frozen `plva-v2-baseline/` detector (pulled from a separate clone, not vaulted in git) is wired into the request-hook seam
-(`--redact`, fail-closed, threadpooled) with a memory-only loopback `/viewer` showing the
-obscured frames the model sees — but the report is geometry-only, so the vault / placeholders /
-resolution / history-scrub half of Step 4 is not built. See `verification/step-4-obscuring.md`.
+rides on the pending live run. **Step 4 is PARTIAL** (2026-07-11): real *obscuring* works through
+a persistent accelerated worker by default. Its visual model uses WebGPU on supported hardware,
+OCR runs concurrently through a separate WASM runtime, sessions stay warm during active CUA
+bursts and release after 60 idle seconds, and exact repeated frames use a bounded
+redacted-output-only memory cache. The
+fail-closed request hook and memory-only `/viewer` remain intact. The report is still
+geometry-only, so the vault / placeholders / resolution / history-scrub half of Step 4 is not
+built. See `verification/step-4-accelerated-redaction.md`.
 Step 2 (Overshoot latency measurement) has not started.
 
 Completed evidence:
@@ -100,7 +112,7 @@ Completed evidence:
   `tools`), envelope uses plural `tool_calls`. Frame stayed local and was shredded; nothing reached
   the repo. See `verification/step-0-runtime-capture.md`.
 - **§7 decision recorded** in `docs/decisions/0001-openshell-sec7-egress-topology.md`.
-- The automated gate is 40 passing tests with ~93% total coverage; formatting, Ruff, strict mypy,
+- The automated gate is 80 passing tests with ~82% total coverage; formatting, Ruff, strict mypy,
   lock validation, sdist, and wheel checks pass.
 - **Pass-through proxy built and gated** (2026-07-11 resume): loopback-only, verbatim body relay,
   credential injection, SSE streamed through, fail-closed, privacy-safe logs; live loopback smoke
@@ -121,9 +133,9 @@ Active blockers / open items:
 
 | Command | Purpose |
 |---|---|
-| `plva-live` | Continuous local screen redaction demo: capture → redact → `http://127.0.0.1:18082/viewer`; no provider, no key. |
+| `plva-live` | Continuous local capture through the persistent accelerated redactor → `http://127.0.0.1:18082/viewer`; no provider or key. |
 | `plva-probe` | Run the live synthetic Overshoot contract probe when `API_KEY` is supplied. |
-| `plva-proxy` | Loopback interception proxy to Overshoot; reads `API_KEY` from env or `./.env`; `--hook test` enables the Step 3 test hooks, `--hook-image <path>` swaps every outbound screenshot for a static image, `--redact plva-v2-baseline` obscures screenshots through the frozen v2 detector and serves them at `/viewer` (default: pass-through). |
+| `plva-proxy` | Loopback proxy; `--redact plva-v2-baseline` uses the accelerated worker and `/viewer`; `--redact-lifecycle` selects adaptive/eager/cold lifetime, `--redact-backend` selects hardware, and `--redact-engine baseline` retains the oracle path. |
 | `plva-runtime-capture` | Start the metadata-only capture stub on `127.0.0.1`; it never contacts a provider. |
 
 `plva-proxy` is the runtime's sole endpoint and the sole provider egress (Step 1/ADR-0001 role),

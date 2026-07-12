@@ -1,13 +1,13 @@
 """Continuous local screen redaction viewer — nothing leaves the machine.
 
 ``plva-live`` captures the screen in a loop with macOS ``screencapture``,
-redacts each frame through the frozen plva-v2-baseline pipeline, and serves
+redacts each frame through the persistent accelerated worker, and serves
 the obscured result at ``http://127.0.0.1:<port>/viewer``. There is no
 upstream and no key: frames exist only in a memory ring buffer and in a
 per-cycle temp file that is deleted immediately after redaction. This shows,
 live and continuously, exactly what a model behind the PLVA proxy would see.
-Cycle time is dominated by the v2 pipeline (roughly 4-10 s per frame
-depending on resolution); ``--scale`` trades detail for speed.
+The worker stays warm for the process lifetime; ``--scale`` trades detector
+detail for throughput in this viewer-only mode.
 """
 
 from __future__ import annotations
@@ -15,10 +15,12 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import shutil
 import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
@@ -27,7 +29,15 @@ from fastapi import FastAPI
 from PIL import Image
 
 from plva_proxy.proxy import FrameStore, add_viewer_routes
-from plva_proxy.redactor import PROFILES, RedactionError, RedactorConfig, redact_png
+from plva_proxy.redactor import (
+    BACKENDS,
+    PROFILES,
+    AcceleratedRedactor,
+    AcceleratedRedactorConfig,
+    RedactionError,
+    RedactorConfig,
+    redact_png,
+)
 from plva_proxy.runtime_capture import LOOPBACK_HOST
 
 DEFAULT_PORT: Final = 18082
@@ -58,20 +68,25 @@ def capture_screen_png(scale: float) -> bytes:
 
 
 def run_capture_loop(  # pragma: no cover - endless loop, exercised manually
-    store: FrameStore, config: RedactorConfig, *, scale: float, interval: float
+    store: FrameStore,
+    redact: Callable[[bytes], bytes],
+    stop: threading.Event,
+    *,
+    scale: float,
+    interval: float,
 ) -> None:
     """Capture, redact, and publish frames until the process exits."""
 
-    while True:
+    while not stop.is_set():
         started = time.monotonic()
         try:
-            store.add(redact_png(config, capture_screen_png(scale)))
+            store.add(redact(capture_screen_png(scale)))
         except RedactionError as exc:
             _LOGGER.warning("live cycle skipped: %s", exc)
-            time.sleep(2.0)
+            stop.wait(2.0)
         remaining = interval - (time.monotonic() - started)
         if remaining > 0:
-            time.sleep(remaining)
+            stop.wait(remaining)
 
 
 def main() -> None:  # pragma: no cover - thin CLI wiring, exercised manually
@@ -86,6 +101,14 @@ def main() -> None:  # pragma: no cover - thin CLI wiring, exercised manually
         help="plva-v2-baseline directory (or its bin/plva-v2.mjs)",
     )
     parser.add_argument("--redact-profile", choices=PROFILES, default="high-recall")
+    parser.add_argument(
+        "--redact-engine",
+        choices=("accelerated", "baseline"),
+        default="accelerated",
+        help="persistent parallel worker (default) or one-process-per-frame baseline",
+    )
+    parser.add_argument("--redact-backend", choices=BACKENDS, default="auto")
+    parser.add_argument("--redact-worker", type=Path, default=Path("redactor-worker"))
     parser.add_argument(
         "--scale",
         type=float,
@@ -106,21 +129,55 @@ def main() -> None:  # pragma: no cover - thin CLI wiring, exercised manually
     cli_path = args.redact / "bin" / "plva-v2.mjs" if args.redact.is_dir() else args.redact
     if not cli_path.is_file():
         parser.error(f"--redact CLI not found: {cli_path}")
+    if shutil.which("node") is None:
+        parser.error("redaction requires node on PATH")
+
+    accelerated: AcceleratedRedactor | None = None
+    if args.redact_engine == "accelerated":
+        worker_script = args.redact_worker / "bin" / "redactor-worker.mjs"
+        if not worker_script.is_file() or not (args.redact_worker / "dist/index.html").is_file():
+            parser.error(
+                f"accelerated worker is not built in {args.redact_worker}; "
+                "run npm install && npm run build there"
+            )
+        accelerated = AcceleratedRedactor(
+            AcceleratedRedactorConfig(
+                baseline_root=cli_path.parent.parent,
+                worker_script=worker_script,
+                backend=args.redact_backend,
+                profile=args.redact_profile,
+                idle_timeout_s=None,
+            )
+        )
+        accelerated.start()
+        redact: Callable[[bytes], bytes] = accelerated
+    else:
+        config = RedactorConfig(cli_path=cli_path, profile=args.redact_profile)
+
+        def redact(png: bytes) -> bytes:
+            return redact_png(config, png)
 
     store = FrameStore()
-    config = RedactorConfig(cli_path=cli_path, profile=args.redact_profile)
     app = FastAPI(title="PLVA live viewer", docs_url=None, redoc_url=None)
     add_viewer_routes(app, store)
-    threading.Thread(
+    stop = threading.Event()
+    capture_thread = threading.Thread(
         target=run_capture_loop,
-        args=(store, config),
+        args=(store, redact, stop),
         kwargs={"scale": args.scale, "interval": args.interval},
         daemon=True,
-    ).start()
+    )
+    capture_thread.start()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     _LOGGER.info("live viewer: http://127.0.0.1:%d/viewer", args.port)
-    uvicorn.run(app, host=LOOPBACK_HOST, port=args.port, access_log=False, log_level="warning")
+    try:
+        uvicorn.run(app, host=LOOPBACK_HOST, port=args.port, access_log=False, log_level="warning")
+    finally:
+        stop.set()
+        if accelerated is not None:
+            accelerated.close()
+        capture_thread.join(timeout=5)
 
 
 if __name__ == "__main__":  # pragma: no cover

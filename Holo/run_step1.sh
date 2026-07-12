@@ -46,9 +46,25 @@ if [[ -n "${PLVA_HOOK_IMAGE:-}" ]]; then
   fi
   HOOK_ARGS+=(--hook-image "$PLVA_HOOK_IMAGE")
 fi
-if [[ -n "${PLVA_REDACT:-}" ]]; then
-  HOOK_ARGS+=(--redact plva-v2-baseline)
-  echo "--- redaction ON; watch the obscured frames at http://127.0.0.1:$PORT/viewer"
+case "${PLVA_REDACT:-0}" in
+  1|true|TRUE|yes|YES|on|ON) REDACTION_ENABLED=1 ;;
+  0|false|FALSE|no|NO|off|OFF|"") REDACTION_ENABLED=0 ;;
+  *)
+    echo "ERROR: PLVA_REDACT must be an on/off value (for example 1 or 0)" >&2
+    exit 1
+    ;;
+esac
+if [[ "$REDACTION_ENABLED" == 1 ]]; then
+  HOOK_ARGS+=(
+    --redact plva-v2-baseline
+    --redact-engine "${PLVA_REDACT_ENGINE:-accelerated}"
+    --redact-backend "${PLVA_REDACT_BACKEND:-auto}"
+    --redact-lifecycle "${PLVA_REDACT_LIFECYCLE:-adaptive}"
+    --redact-idle-seconds "${PLVA_REDACT_IDLE_SECONDS:-60}"
+  )
+  echo "--- redaction ON (${PLVA_REDACT_ENGINE:-accelerated}/${PLVA_REDACT_BACKEND:-auto}, ${PLVA_REDACT_LIFECYCLE:-adaptive}); watch the obscured frames at http://127.0.0.1:$PORT/viewer"
+else
+  echo "--- redaction OFF"
 fi
 .venv/bin/plva-proxy --port "$PORT" "${HOOK_ARGS[@]}" >"$PROXY_LOG" 2>&1 &
 PROXY_PID=$!
@@ -61,7 +77,7 @@ cleanup() {
 }
 trap cleanup EXIT
 PROXY_UP=""
-for _ in $(seq 1 20); do
+for _ in $(seq 1 240); do
   if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
     PROXY_UP=1
     break

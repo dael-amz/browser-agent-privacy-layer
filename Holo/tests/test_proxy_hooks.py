@@ -324,9 +324,18 @@ def _run_main_with_spy(
         hooks: Hooks | None = None,
         frame_store: proxy.FrameStore | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        startup_callbacks: tuple[Any, ...] = (),
+        cleanup_callbacks: tuple[Any, ...] = (),
     ) -> FastAPI:
         hooks_seen.append(hooks)
-        return real_create_app(config, hooks=hooks, frame_store=frame_store, transport=transport)
+        return real_create_app(
+            config,
+            hooks=hooks,
+            frame_store=frame_store,
+            transport=transport,
+            startup_callbacks=startup_callbacks,
+            cleanup_callbacks=cleanup_callbacks,
+        )
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     monkeypatch.setattr(proxy, "create_app", spy_create_app)
