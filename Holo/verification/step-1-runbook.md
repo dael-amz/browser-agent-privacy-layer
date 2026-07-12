@@ -2,7 +2,7 @@
 
 Date: 2026-07-11
 
-Everything below is built, tested, and ready. The only missing input is the Overshoot API key.
+Everything below is built, tested, and ready. The remaining input is an inference-provider key.
 One full pass of §3 + §4 closes Step 1's "agent finishes a task end-to-end" verify.
 
 **Fastest path:** do §1, then run `./run_step1.sh` from `Holo/` — it performs §2–§4
@@ -15,19 +15,28 @@ below are the manual equivalent.
 
 ## 1. Put the key in place (operator)
 
-Create `Holo/.env` (git-ignored; never committed) with one line:
+For Overshoot, create `Holo/.env` (git-ignored; never committed) with:
 
 ```
 API_KEY=<your Overshoot key>
 ```
 
-`plva-proxy` reads `API_KEY` from the environment first, then from `./.env`.
+For H Company instead, use:
+
+```text
+HAI_API_KEY=<your H Company key>
+```
+
+and launch with `PLVA_PROVIDER=hcompany`. The presets select the matching endpoint and model.
+
+`plva-proxy` reads the selected provider's key from the environment first, then from `./.env`.
 
 ## 2. Start the proxy and preflight the key (Terminal A)
 
 ```bash
 cd ~/Hackathon/Holo
-.venv/bin/plva-proxy            # binds 127.0.0.1:18081, upstream = Overshoot /v1beta
+.venv/bin/plva-proxy            # default: Overshoot /v1
+# or: .venv/bin/plva-proxy --provider hcompany
 ```
 
 Preflight without sending any frame — lists model ids only, through the proxy:

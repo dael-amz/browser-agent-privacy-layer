@@ -287,6 +287,29 @@ def test_main_runs_uvicorn_on_loopback_with_env_file_key(
     assert configs == [ProxyConfig(upstream_base_url=API_BASE_URL, api_key="from-env-file")]
 
 
+def test_main_selects_hcompany_provider_and_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[ProxyConfig] = []
+
+    def fake_create_app(config: ProxyConfig, **kwargs: Any) -> FastAPI:
+        captured.append(config)
+        return FastAPI()
+
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.setenv("HAI_API_KEY", "hcompany-test-key")
+    monkeypatch.setattr(sys, "argv", ["plva-proxy", "--provider", "hcompany"])
+    monkeypatch.setattr(proxy, "create_app", fake_create_app)
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
+
+    proxy.main()
+
+    assert captured == [
+        ProxyConfig(
+            upstream_base_url="https://api.hcompany.ai/v1",
+            api_key="hcompany-test-key",
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     "argv",
     [

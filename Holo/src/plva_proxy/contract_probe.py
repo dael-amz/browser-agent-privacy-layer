@@ -17,7 +17,9 @@ from typing import Any, Final
 
 import httpx
 
-API_BASE_URL: Final = "https://api.overshoot.ai/v1beta"
+from plva_proxy.providers import PROVIDERS
+
+API_BASE_URL: Final = PROVIDERS["overshoot"].base_url
 MODELS_URL: Final = f"{API_BASE_URL}/models"
 COMPLETIONS_URL: Final = f"{API_BASE_URL}/chat/completions"
 MODEL_ID: Final = "Hcompany/Holo3-35B-A3B"

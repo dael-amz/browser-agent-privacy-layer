@@ -5,7 +5,7 @@
 #   ./run_step1.sh "your own task prompt"   # custom task for the agent
 #   Press Esc twice during the run to abort it.
 #
-# Prereq: Holo/.env containing   API_KEY=<your Overshoot key>
+# Prereq: Holo/.env containing API_KEY=<Overshoot key>, or HAI_API_KEY=<H Company key>
 # Details and manual variant: verification/step-1-runbook.md
 #
 # NOTE: PLVA_REDACT=0 sends unredacted screenshots; PLVA_REDACT=1 fails closed unless every frame
@@ -18,6 +18,7 @@ DEFAULT_TASK="Open the Terminal application and run the command: echo plva-step1
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "usage: $0 [\"task prompt for the agent\"]"
   echo "  default task: $DEFAULT_TASK"
+  echo "  provider: PLVA_PROVIDER=overshoot (default) or hcompany"
   echo "  during the run: press Esc twice to abort"
   exit 0
 fi
@@ -25,11 +26,28 @@ fi
 PORT="${PLVA_PORT:-18081}"
 UV="${UV:-$HOME/.local/bin/uv}"
 TASK="${1:-$DEFAULT_TASK}"
+PROVIDER="${PLVA_PROVIDER:-overshoot}"
 
-if [[ ! -f .env ]] || ! grep -Eq '^API_KEY=..*' .env; then
-  echo "ERROR: put your Overshoot key in Holo/.env as a single line: API_KEY=<key>" >&2
-  exit 1
-fi
+case "$PROVIDER" in
+  overshoot)
+    MODEL="${PLVA_MODEL:-Hcompany/Holo3-35B-A3B}"
+    if [[ -z "${OVERSHOOT_API_KEY:-}${API_KEY:-}" ]] && { [[ ! -f .env ]] || ! grep -Eq '^(OVERSHOOT_API_KEY|API_KEY)=..*' .env; }; then
+      echo "ERROR: put API_KEY=<Overshoot key> in Holo/.env" >&2
+      exit 1
+    fi
+    ;;
+  hcompany)
+    MODEL="${PLVA_MODEL:-holo3-1-35b-a3b}"
+    if [[ -z "${HAI_API_KEY:-}" ]] && { [[ ! -f .env ]] || ! grep -Eq '^HAI_API_KEY=..*' .env; }; then
+      echo "ERROR: put HAI_API_KEY=<H Company key> in Holo/.env" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "ERROR: PLVA_PROVIDER must be overshoot or hcompany" >&2
+    exit 1
+    ;;
+esac
 
 # 1) Start the loopback proxy (the sole provider egress; reads ./.env).
 #    PLVA_HOOK=test enables the Step 3 test hooks for the hook-mode verify.
@@ -38,7 +56,10 @@ fi
 #    PLVA_REDACT=1 redacts every outbound screenshot through plva-v2-baseline
 #    and serves the obscured frames at http://127.0.0.1:$PORT/viewer.
 PROXY_LOG=/tmp/plva-proxy-step1.log
-HOOK_ARGS=(--hook "${PLVA_HOOK:-none}")
+HOOK_ARGS=(--provider "$PROVIDER" --hook "${PLVA_HOOK:-none}")
+if [[ -n "${PLVA_UPSTREAM:-}" ]]; then
+  HOOK_ARGS+=(--upstream "$PLVA_UPSTREAM")
+fi
 if [[ -n "${PLVA_HOOK_IMAGE:-}" ]]; then
   if [[ ! -f "$PLVA_HOOK_IMAGE" ]]; then
     echo "ERROR: PLVA_HOOK_IMAGE file not found: $PLVA_HOOK_IMAGE (relative paths resolve against $(pwd))" >&2
@@ -94,7 +115,7 @@ if [[ -z "$PROXY_UP" ]]; then
 fi
 
 # 2) Preflight: proves key + upstream reachability without sending any frame.
-echo "--- preflight: listing models through the proxy"
+echo "--- preflight: provider=$PROVIDER model=$MODEL"
 if ! curl -sf "http://127.0.0.1:$PORT/v1/models" | python3 -c "
 import json, sys
 raw = sys.stdin.read()
@@ -103,10 +124,11 @@ try:
 except ValueError:
     print('preflight got no valid JSON from the proxy')
     raise SystemExit(1)
-ok = any('Holo3-35B-A3B' in str(i) for i in ids)
-print('Holo3-35B-A3B advertised:', ok)
+expected = sys.argv[1]
+ok = expected in ids
+print(expected + ' advertised:', ok)
 raise SystemExit(0 if ok else 1)
-"; then
+" "$MODEL"; then
   echo "ERROR: preflight failed — wrong key (401) or provider unreachable. See $PROXY_LOG" >&2
   exit 1
 fi
@@ -127,7 +149,7 @@ echo "--- press Esc twice to abort; runs dir (shredded afterward): $RUNS_DIR"
 set -m  # own process group for the holo job so an abort kills the runtime too
 "$UV" tool run --from holo-desktop-cli holo run "$TASK" \
   --base-url "http://127.0.0.1:$PORT/v1" \
-  --model Hcompany/Holo3-35B-A3B \
+  --model "$MODEL" \
   --max-steps 20 --max-time-s 300 \
   --runs-dir "$RUNS_DIR" &
 HOLO_PID=$!
