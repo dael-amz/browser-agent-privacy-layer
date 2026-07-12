@@ -11,7 +11,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from plva_proxy.proxy import HookError, Hooks, ProxyConfig, create_app, grammar_capture_hook
+from plva_proxy.proxy import (
+    CallStore,
+    HookError,
+    Hooks,
+    ProxyConfig,
+    create_app,
+    grammar_capture_hook,
+)
 from plva_proxy.tools import ToolLoop, ToolRegistry, tool_teaching_request_hook
 
 
@@ -110,6 +117,71 @@ def test_tool_loop_round_trips_and_forwards_only_final_action() -> None:
     assert seen[1]["stream"] is False
     final = json.loads(response.json()["choices"][0]["message"]["content"])
     assert final["tool_calls"][0]["tool_name"] == "write"
+
+
+def test_tool_loop_continuation_forces_json_accept_header() -> None:
+    seen: list[dict[str, Any]] = []
+    accepts_seen: list[str | None] = []
+    contents = [_tool_call_content(), _final_action_content()]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        accepts_seen.append(request.headers.get("accept"))
+        document = json.loads(request.content)
+        seen.append(document)
+        index = min(len(seen), len(contents)) - 1
+        return httpx.Response(200, json=_completion_body(contents[index]))
+
+    app = create_app(
+        ProxyConfig(upstream_base_url="https://upstream.test/v1", api_key="key"),
+        hooks=Hooks(on_request=tool_teaching_request_hook()),
+        tool_loop=ToolLoop(ToolRegistry()),
+        transport=httpx.MockTransport(handler),
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"accept": "text/event-stream"},
+            json={"model": "m", "messages": [{"role": "user", "content": "add the numbers"}]},
+        )
+    assert response.status_code == 200
+    assert len(accepts_seen) == 2
+    assert accepts_seen[1] == "application/json"
+
+
+def test_call_store_records_final_completion_after_loop() -> None:
+    seen: list[dict[str, Any]] = []
+    store = CallStore()
+    contents = [_tool_call_content(), _final_action_content()]
+
+    # Call recording requires a request hook to run (call_document is only
+    # set then), so reuse the same teaching hook as the existing round-trip
+    # helper rather than _app_with_scripted_upstream (which has no call_store
+    # parameter).
+    def handler(request: httpx.Request) -> httpx.Response:
+        document = json.loads(request.content)
+        seen.append(document)
+        index = min(len(seen), len(contents)) - 1
+        return httpx.Response(200, json=_completion_body(contents[index]))
+
+    app = create_app(
+        ProxyConfig(upstream_base_url="https://upstream.test/v1", api_key="key"),
+        hooks=Hooks(on_request=tool_teaching_request_hook()),
+        tool_loop=ToolLoop(ToolRegistry()),
+        transport=httpx.MockTransport(handler),
+        call_store=store,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "m", "messages": [{"role": "user", "content": "add the numbers"}]},
+        )
+    assert response.status_code == 200
+    entries = store.entries()
+    assert len(entries) == 1
+    full = store.full(entries[0]["id"])
+    assert full is not None
+    assert "plva_tool" not in json.dumps(full.get("response", {}))
+    assert "write" in json.dumps(full.get("response", {}))
 
 
 def test_tool_loop_exceeding_max_rounds_fails_closed() -> None:

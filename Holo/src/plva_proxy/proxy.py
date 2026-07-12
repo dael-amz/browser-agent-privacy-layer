@@ -1086,6 +1086,10 @@ def create_app(
         ) and upstream.status_code == 200
 
         async def _run_tool_loop(loop: ToolLoop, completion: dict[str, Any]) -> dict[str, Any]:
+            # The original request may have asked for text/event-stream; tool
+            # continuations are always plain JSON, so force that explicitly
+            # rather than reusing the caller's Accept header verbatim.
+            follow_headers = {**headers, "accept": "application/json"}
             request_document = json.loads(body)
             if not isinstance(request_document, dict):
                 raise HookError("request body is not a JSON object")
@@ -1099,7 +1103,7 @@ def create_app(
                 request_document = loop.continuation(request_document, completion, call, result)
                 continuation_body = json.dumps(request_document, separators=(",", ":")).encode()
                 follow_request = client.build_request(
-                    "POST", path, content=continuation_body, headers=headers
+                    "POST", path, content=continuation_body, headers=follow_headers
                 )
                 try:
                     follow = await client.send(follow_request)
@@ -1141,12 +1145,15 @@ def create_app(
                 document = _assemble_sse_completion(payload) if is_sse else json.loads(payload)
                 if not isinstance(document, dict):
                     raise HookError("completion body is not a JSON object")
-                # Pre-resolution: the model's own output still carries
-                # placeholders, never the restored local values.
-                record_call(200, document, "sent")
-                recorded = True
                 if active_tool_loop is not None:
                     document = await _run_tool_loop(active_tool_loop, document)
+                # Pre-resolution: the model's own output still carries
+                # placeholders, never the restored local values. Recorded
+                # after the tool loop so the history viewer holds the final
+                # completion actually forwarded to the runtime, not an
+                # intermediate plva_tool call.
+                record_call(200, document, "sent")
+                recorded = True
                 mutated = response_hook(document) if response_hook is not None else document
             except (HookError, PrivacyError, ToolError, ValueError) as exc:
                 if not recorded:

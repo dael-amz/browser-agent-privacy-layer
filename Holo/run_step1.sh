@@ -234,6 +234,10 @@ parse_on_off PRIVACY_SKILL "${PLVA_PRIVACY_SKILL:-$PRIVACY_ENABLED}" PLVA_PRIVAC
 # Tools do not require redaction, so this toggle lives outside the PLVA_REDACT block above.
 parse_on_off TOOLS_ENABLED "${PLVA_TOOLS:-0}" PLVA_TOOLS
 parse_on_off TOOLS_SKILL "${PLVA_TOOLS_SKILL:-$TOOLS_ENABLED}" PLVA_TOOLS_SKILL
+if [[ "$TOOLS_SKILL" == 1 && "$TOOLS_ENABLED" == 0 ]]; then
+  echo "ERROR: PLVA_TOOLS_SKILL=1 requires PLVA_TOOLS=1 (the proxy must detect tool calls the skill teaches)" >&2
+  exit 1
+fi
 [[ "$TOOLS_ENABLED" == 1 ]] && HOOK_ARGS+=(--tools)
 if [[ -n "${PLVA_CAPTURE_GRAMMAR:-}" ]]; then
   HOOK_ARGS+=(--capture-grammar "$PLVA_CAPTURE_GRAMMAR")
