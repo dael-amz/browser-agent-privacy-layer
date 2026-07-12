@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from plva_proxy.tools import ToolCall, ToolError, ToolRegistry
+from plva_proxy.tools import ToolCall, ToolError, ToolRegistry, find_tool_call
 
 
 def _call(name: str, args: dict[str, object]) -> ToolCall:
@@ -47,3 +49,66 @@ def test_registry_names_are_stable() -> None:
 def test_invalid_invocations_raise_tool_error(name: str, args: dict[str, object]) -> None:
     with pytest.raises(ToolError):
         ToolRegistry().execute(_call(name, args))
+
+
+def _completion(content: str) -> dict[str, object]:
+    return {"choices": [{"message": {"role": "assistant", "content": content}}]}
+
+
+def test_detects_structured_plva_tool_call() -> None:
+    action = {
+        "thought": "I need the sum.",
+        "tool_calls": [{"tool_name": "plva_tool", "name": "add", "args": {"a": 17, "b": 25}}],
+    }
+    call = find_tool_call(_completion(json.dumps(action)))
+    assert call is not None
+    assert (call.name, call.channel) == ("add", "structured")
+    assert call.args == {"a": 17, "b": 25}
+
+
+def test_ignores_ordinary_runtime_actions() -> None:
+    action = {"tool_calls": [{"tool_name": "click", "x": 10, "y": 20}]}
+    assert find_tool_call(_completion(json.dumps(action))) is None
+
+
+def test_ignores_plain_text_answers() -> None:
+    assert find_tool_call(_completion("The sum is 42.")) is None
+
+
+def test_detects_marker_inside_action_thought() -> None:
+    action = {
+        "thought": 'Delegating: ⟦TOOL⟧{"name": "sort", "args": {"items": ["b", "a"]}}⟦/TOOL⟧',
+        "tool_calls": [{"tool_name": "wait"}],
+    }
+    call = find_tool_call(_completion(json.dumps(action)))
+    assert call is not None
+    assert (call.name, call.channel) == ("sort", "marker")
+
+
+def test_detects_marker_in_raw_text_content() -> None:
+    call = find_tool_call(_completion('⟦TOOL⟧{"name": "echo", "args": {"text": "hi"}}⟦/TOOL⟧'))
+    assert call is not None
+    assert (call.name, call.channel) == ("echo", "marker")
+
+
+def test_structured_call_without_name_fails_closed() -> None:
+    action = {"tool_calls": [{"tool_name": "plva_tool", "args": {"a": 1}}]}
+    with pytest.raises(ToolError):
+        find_tool_call(_completion(json.dumps(action)))
+
+
+def test_marker_with_invalid_payload_fails_closed() -> None:
+    with pytest.raises(ToolError):
+        find_tool_call(_completion("⟦TOOL⟧not json⟦/TOOL⟧"))
+
+
+def test_unknown_tool_name_is_returned_for_error_folding() -> None:
+    action = {"tool_calls": [{"tool_name": "plva_tool", "name": "nope", "args": {}}]}
+    call = find_tool_call(_completion(json.dumps(action)))
+    assert call is not None and call.name == "nope"
+
+
+def test_non_dict_args_default_to_empty() -> None:
+    action = {"tool_calls": [{"tool_name": "plva_tool", "name": "echo", "args": "hi"}]}
+    call = find_tool_call(_completion(json.dumps(action)))
+    assert call is not None and call.args == {}

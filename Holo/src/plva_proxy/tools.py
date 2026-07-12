@@ -10,9 +10,10 @@ carry tool names, channels, and argument *keys* only — never values (§8.5).
 
 from __future__ import annotations
 
+import json
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -89,3 +90,80 @@ class ToolRegistry:
         if tool is None:
             raise ToolError(f"unknown tool: {call.name}")
         return tool(call.args)
+
+
+def _iter_strings(value: Any) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_strings(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_strings(item)
+
+
+def _find_structured(action: Mapping[str, Any]) -> ToolCall | None:
+    calls = action.get("tool_calls")
+    if not isinstance(calls, list):
+        return None
+    for call in calls:
+        if not isinstance(call, dict) or call.get("tool_name") != STRUCTURED_TOOL_NAME:
+            continue
+        name = call.get("name")
+        if not isinstance(name, str) or not name:
+            raise ToolError("plva_tool call has no tool name")
+        args = call.get("args", {})
+        return ToolCall(
+            name=name, args=args if isinstance(args, dict) else {}, channel="structured"
+        )
+    return None
+
+
+def _find_marker(source: Any) -> ToolCall | None:
+    for text in _iter_strings(source):
+        match = _MARKER_PATTERN.search(text)
+        if match is None:
+            continue
+        try:
+            payload = json.loads(match.group("payload"))
+        except ValueError as exc:
+            raise ToolError("tool marker payload is not JSON") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("name"), str):
+            raise ToolError("tool marker payload has no tool name")
+        args = payload.get("args", {})
+        return ToolCall(
+            name=payload["name"], args=args if isinstance(args, dict) else {}, channel="marker"
+        )
+    return None
+
+
+def find_tool_call(completion: dict[str, Any]) -> ToolCall | None:
+    """Return the first PLVA tool invocation in a completion, if any.
+
+    Structured ``plva_tool`` entries win over free-text markers. Tool-shaped
+    output that cannot be parsed raises so it never reaches the runtime's
+    executor (§8.1); ordinary actions and answers return ``None`` untouched.
+    """
+
+    choices = completion.get("choices")
+    if not isinstance(choices, list):
+        return None
+    for choice in choices:
+        message = choice.get("message") if isinstance(choice, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str):
+            continue
+        action: Any = None
+        try:
+            action = json.loads(content)
+        except ValueError:
+            action = None
+        if isinstance(action, dict):
+            structured = _find_structured(action)
+            if structured is not None:
+                return structured
+        marker = _find_marker(action if isinstance(action, dict) else content)
+        if marker is not None:
+            return marker
+    return None
