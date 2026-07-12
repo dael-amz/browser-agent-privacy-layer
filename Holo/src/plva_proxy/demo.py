@@ -1,4 +1,9 @@
-"""Memory-only PLVA consumer demo and task launcher."""
+"""PLVA consumer demo and task launcher.
+
+Live session state stays memory-only, but each run's post-boundary audit
+trail (redacted frames, scrubbed text, placeholder-form replies) is also
+recorded to a local history directory so past runs can be replayed.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,8 @@ import argparse
 import copy
 import json
 import os
+import re
+import secrets
 import signal
 import subprocess
 import threading
@@ -26,6 +33,10 @@ from plva_proxy.runtime_capture import LOOPBACK_HOST
 
 ROOT: Final = Path(__file__).resolve().parents[2]
 UI_PATH: Final = Path(__file__).with_name("demo_ui.html")
+LANDING_PATH: Final = Path(__file__).with_name("landing_ui.html")
+HISTORY_ROOT: Final = ROOT / "history"
+_RUN_ID: Final = re.compile(r"^run-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
+_IMAGE_SUFFIXES: Final = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 DEFAULT_POLICY_PATH: Final = ROOT / "config" / "privacy-policy.json"
 PROXY_BASE: Final = "http://127.0.0.1:18081"
 FEATURE_ENV: Final = {
@@ -60,10 +71,162 @@ def _load_policy() -> SafetyPolicy:
         raise RuntimeError("privacy policy contains an invalid safety level") from exc
 
 
-class DemoController:
-    """Own one local CUA run and retain only memory-resident demo artifacts."""
+class HistoryStore:
+    """Local, file-based audit history of runs and their model calls.
 
-    def __init__(self) -> None:
+    Persists only post-boundary artifacts: the redacted frames, scrubbed
+    text, and placeholder-form replies that the live viewers already show.
+    Raw values and unredacted pixels never reach this store. Layout:
+    ``<root>/<run-id>/run.json`` plus ``calls/NNNN.json`` and image files.
+    All disk failures are swallowed: history must never break a live run.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._lock = threading.Lock()
+
+    def create_run(
+        self, prompt: str, settings: dict[str, Any], policy: dict[str, str]
+    ) -> str | None:
+        run_id = time.strftime("run-%Y%m%d-%H%M%S") + f"-{secrets.token_hex(2)}"
+        record = {
+            "id": run_id,
+            "prompt": prompt,
+            "started_at": time.time(),
+            "finished_at": 0.0,
+            "status": "running",
+            "settings": settings,
+            "policy": policy,
+            "events": [],
+        }
+        with self._lock:
+            try:
+                (self._root / run_id / "calls").mkdir(parents=True, exist_ok=True)
+                self._write_run(run_id, record)
+            except OSError:
+                return None
+        return run_id
+
+    def update_run(self, run_id: str | None, **fields: Any) -> None:
+        if run_id is None:
+            return
+        with self._lock:
+            record = self._read_run(run_id)
+            if record is None:
+                return
+            record.update(fields)
+            try:
+                self._write_run(run_id, record)
+            except OSError:
+                return
+
+    def save_call(
+        self,
+        run_id: str | None,
+        record: dict[str, Any],
+        images: list[tuple[str, bytes]],
+    ) -> None:
+        if run_id is None or not isinstance(record.get("id"), int):
+            return
+        calls_dir = self._root / run_id / "calls"
+        name = f"{record['id']:04d}"
+        with self._lock:
+            try:
+                for index, (media_type, blob) in enumerate(images):
+                    suffix = _IMAGE_SUFFIXES.get(media_type, ".bin")
+                    (calls_dir / f"{name}-img-{index}{suffix}").write_bytes(blob)
+                (calls_dir / f"{name}.json").write_text(json.dumps(record, indent=1), "utf-8")
+            except OSError:
+                return
+
+    def runs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            try:
+                children = sorted(
+                    (path for path in self._root.iterdir() if path.is_dir()),
+                    key=lambda path: path.name,
+                    reverse=True,
+                )
+            except OSError:
+                return []
+            out: list[dict[str, Any]] = []
+            for child in children:
+                if _RUN_ID.match(child.name) is None:
+                    continue
+                record = self._read_run(child.name)
+                if record is None:
+                    continue
+                try:
+                    count = len(list((child / "calls").glob("*.json")))
+                except OSError:
+                    count = 0
+                summary = {
+                    key: record.get(key)
+                    for key in ("id", "prompt", "started_at", "finished_at", "status")
+                }
+                summary["calls"] = count
+                out.append(summary)
+            return out
+
+    def run(self, run_id: str) -> dict[str, Any] | None:
+        if _RUN_ID.match(run_id) is None:
+            return None
+        with self._lock:
+            record = self._read_run(run_id)
+            if record is None:
+                return None
+            calls: list[dict[str, Any]] = []
+            try:
+                paths = sorted((self._root / run_id / "calls").glob("[0-9]*.json"))
+            except OSError:
+                paths = []
+            for path in paths:
+                try:
+                    data = json.loads(path.read_text("utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(data, dict):
+                    calls.append(
+                        {k: v for k, v in data.items() if k not in {"request", "response"}}
+                    )
+            return {"run": record, "calls": calls}
+
+    def call(self, run_id: str, call_id: int) -> dict[str, Any] | None:
+        if _RUN_ID.match(run_id) is None or call_id < 1:
+            return None
+        path = self._root / run_id / "calls" / f"{call_id:04d}.json"
+        try:
+            data = json.loads(path.read_text("utf-8"))
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def image(self, run_id: str, call_id: int, index: int) -> tuple[str, bytes] | None:
+        if _RUN_ID.match(run_id) is None or call_id < 1 or index < 0:
+            return None
+        for media_type, suffix in _IMAGE_SUFFIXES.items():
+            path = self._root / run_id / "calls" / f"{call_id:04d}-img-{index}{suffix}"
+            try:
+                return media_type, path.read_bytes()
+            except OSError:
+                continue
+        return None
+
+    def _write_run(self, run_id: str, record: dict[str, Any]) -> None:
+        (self._root / run_id / "run.json").write_text(json.dumps(record, indent=1), "utf-8")
+
+    def _read_run(self, run_id: str) -> dict[str, Any] | None:
+        try:
+            data = json.loads((self._root / run_id / "run.json").read_text("utf-8"))
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
+
+class DemoController:
+    """Own one local CUA run; live state is memory-only, audits go to history."""
+
+    def __init__(self, history_root: Path | None = None) -> None:
         self._lock = threading.RLock()
         self._process: subprocess.Popen[str] | None = None
         self._status = "idle"
@@ -72,11 +235,21 @@ class DemoController:
         self._events: deque[dict[str, str]] = deque(maxlen=24)
         self._frame: bytes | None = None
         self._vault: dict[str, Any] = {"entries": [], "policy": {}}
+        self._approvals: list[dict[str, Any]] = []
         self._findings: dict[str, Any] = {}
         self._filter: dict[str, Any] = {"status": "idle"}
         self._stats: dict[str, Any] = {}
         self._calls: dict[int, dict[str, Any]] = {}
         self._call_images: dict[tuple[int, int], tuple[str, bytes]] = {}
+        env_root = os.environ.get("PLVA_HISTORY_DIR")
+        self._history = HistoryStore(
+            history_root
+            if history_root is not None
+            else Path(env_root)
+            if env_root
+            else HISTORY_ROOT
+        )
+        self._run_id: str | None = None
         self._policy = _load_policy().snapshot()
         self._settings: dict[str, Any] = {
             "plva_enabled": True,
@@ -101,6 +274,7 @@ class DemoController:
                 "stats": dict(self._stats),
                 "has_frame": self._frame is not None,
                 "vault_count": len(self._vault.get("entries", [])),
+                "approval_count": len(self._approvals),
                 "call_count": len(self._calls),
                 "filter": dict(self._filter),
             }
@@ -161,11 +335,17 @@ class DemoController:
             self._events.clear()
             self._frame = None
             self._vault = {"entries": [], "policy": dict(self._policy)}
+            self._approvals = []
             self._findings = {}
             self._filter = {"status": "idle"}
             self._stats = {}
             self._calls = {}
             self._call_images = {}
+            self._run_id = self._history.create_run(
+                prompt.strip(),
+                json.loads(json.dumps(self._settings)),
+                dict(self._policy),
+            )
             self._event("Preparing private session", "Nothing has left the device yet.")
             environment = self._run_environment()
             try:
@@ -211,6 +391,44 @@ class DemoController:
         with self._lock:
             return copy.deepcopy(self._vault)
 
+    def approvals(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return copy.deepcopy(self._approvals)
+
+    def approve_once(self, token: Any) -> dict[str, Any]:
+        if not isinstance(token, str) or not token:
+            raise ValueError("approval token is invalid")
+        with self._lock:
+            entry = next(
+                (
+                    item
+                    for item in self._vault.get("entries", [])
+                    if isinstance(item, dict) and item.get("placeholder") == token
+                ),
+                None,
+            )
+            if entry is None or entry.get("safety_level") != "approval":
+                raise ValueError("token is not approval-gated in the active session")
+        grant = _proxy_json_request(
+            "/viewer/approvals",
+            method="POST",
+            payload={
+                "token": token,
+                "tool_name": "write_desktop",
+                "argument_path": "content",
+                "ttl_seconds": 60,
+                "use_count": 1,
+            },
+        )
+        if grant is None:
+            raise RuntimeError("the local approval service is unavailable")
+        with self._lock:
+            self._approvals = [item for item in self._approvals if item.get("token") != token] + [
+                grant
+            ]
+            self._event("Local approval granted", "One exact private write is authorized.")
+        return copy.deepcopy(grant)
+
     def findings(self) -> dict[str, Any]:
         with self._lock:
             return copy.deepcopy(self._findings)
@@ -236,6 +454,26 @@ class DemoController:
     def call_image(self, call_id: int, index: int) -> tuple[str, bytes] | None:
         with self._lock:
             return self._call_images.get((call_id, index))
+
+    def history_runs(self) -> list[dict[str, Any]]:
+        runs = self._history.runs()
+        with self._lock:
+            active_run = self._run_id if self._status in {"starting", "running"} else None
+        for summary in runs:
+            # A run left in "running" by a dead process was interrupted; only
+            # the controller's live run may truthfully claim to be running.
+            if summary.get("status") == "running" and summary.get("id") != active_run:
+                summary["status"] = "interrupted"
+        return runs
+
+    def history_run(self, run_id: str) -> dict[str, Any] | None:
+        return self._history.run(run_id)
+
+    def history_call(self, run_id: str, call_id: int) -> dict[str, Any] | None:
+        return self._history.call(run_id, call_id)
+
+    def history_image(self, run_id: str, call_id: int, index: int) -> tuple[str, bytes] | None:
+        return self._history.image(run_id, call_id, index)
 
     def _require_idle(self) -> None:
         if self._process is not None and self._process.poll() is None:
@@ -270,6 +508,11 @@ class DemoController:
                         if event[0] in {"Privacy engine ready", "Provider connected"}:
                             self._status = "running"
         exit_code = process.wait()
+        # The proxy can outlive the runner by only a moment; sweep any call
+        # records from the run's final seconds before the viewer disappears.
+        for _ in range(3):
+            self._mirror_calls()
+            time.sleep(0.25)
         with self._lock:
             if self._process is process:
                 self._process = None
@@ -281,11 +524,17 @@ class DemoController:
                     self._status = "completed"
                     self._event(
                         "Task complete",
-                        "The runner closed; the demo snapshot stays in memory until the next run.",
+                        "The run is saved to your local audit history for replay.",
                     )
                 else:
                     self._status = "failed"
                     self._event("Task needs attention", "Open Advanced lab for safe diagnostics.")
+                self._history.update_run(
+                    self._run_id,
+                    status=self._status,
+                    finished_at=self._finished_at,
+                    events=list(self._events),
+                )
 
     def _monitor_proxy(self, process: subprocess.Popen[str]) -> None:
         while process.poll() is None:
@@ -293,6 +542,7 @@ class DemoController:
             stats = _fetch_json("/viewer/stats")
             findings = _fetch_json("/viewer/findings")
             vault = _fetch_json("/viewer/vault")
+            approvals = _fetch_json("/viewer/approvals")
             filter_report = _fetch_json("/viewer/filter")
             with self._lock:
                 if frame is not None:
@@ -303,6 +553,8 @@ class DemoController:
                     self._findings = findings
                 if vault is not None:
                     self._vault = vault
+                if approvals is not None and isinstance(approvals.get("approvals"), list):
+                    self._approvals = approvals["approvals"]
                 if filter_report is not None:
                     self._filter = filter_report
             self._mirror_calls()
@@ -351,9 +603,12 @@ class DemoController:
                     self._call_images = {
                         key: value for key, value in self._call_images.items() if key[0] != oldest
                     }
+                run_id = self._run_id
+            self._history.save_call(run_id, record, images)
 
     def _event(self, title: str, detail: str) -> None:
         self._events.append({"title": title, "detail": detail, "time": time.strftime("%H:%M:%S")})
+        self._history.update_run(self._run_id, events=list(self._events))
 
 
 def _safe_runner_event(line: str) -> tuple[str, str] | None:
@@ -366,7 +621,7 @@ def _safe_runner_event(line: str) -> tuple[str, str] | None:
         return "Checking provider", "Verifying the selected model without sending a frame."
     if text.endswith("advertised: True"):
         return "Provider connected", "The selected Holo model is available."
-    if text.startswith("--- runs dir shredded"):
+    if text.startswith(("--- runs dir shredded", "--- ephemeral runs dir removed")):
         return "Private artifacts cleared", "Temporary runtime files were removed."
     if text.startswith("--- holo exit: 0"):
         return "Agent finished", "The requested task completed end-to-end."
@@ -394,6 +649,23 @@ def _fetch_json(path: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _proxy_json_request(
+    path: str, *, method: str, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    request = urllib.request.Request(
+        PROXY_BASE + path,
+        data=json.dumps(payload, separators=(",", ":")).encode(),
+        method=method,
+        headers={"content-type": "application/json", "origin": PROXY_BASE},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=1.0) as response:
+            value = json.loads(response.read())
+    except (OSError, UnicodeDecodeError, ValueError, urllib.error.URLError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def create_demo_app(controller: DemoController | None = None) -> FastAPI:
     active = controller or DemoController()
 
@@ -408,6 +680,10 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
 
     @app.get("/")
     async def index() -> HTMLResponse:
+        return HTMLResponse(LANDING_PATH.read_text("utf-8"), headers={"cache-control": "no-store"})
+
+    @app.get("/app")
+    async def dashboard() -> HTMLResponse:
         return HTMLResponse(UI_PATH.read_text("utf-8"), headers={"cache-control": "no-store"})
 
     @app.get("/api/state")
@@ -457,6 +733,21 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
     async def vault() -> Response:
         return _json_response(active.vault())
 
+    @app.get("/api/approvals")
+    async def approvals() -> Response:
+        return _json_response({"approvals": active.approvals()})
+
+    @app.post("/api/approve")
+    async def approve(request: Request) -> Response:
+        body = await request.json()
+        try:
+            grant = active.approve_once(body.get("token") if isinstance(body, dict) else None)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _json_response({"approval": grant}, status=201)
+
     @app.get("/api/findings")
     async def findings() -> Response:
         return _json_response(active.findings())
@@ -481,6 +772,32 @@ def create_demo_app(controller: DemoController | None = None) -> FastAPI:
         image = active.call_image(call_id, index)
         if image is None:
             raise HTTPException(status_code=404, detail="call image not found")
+        media_type, data = image
+        return Response(data, media_type=media_type, headers={"cache-control": "no-store"})
+
+    @app.get("/api/history/runs")
+    async def history_runs() -> Response:
+        return _json_response({"runs": active.history_runs()})
+
+    @app.get("/api/history/runs/{run_id}")
+    async def history_run(run_id: str) -> Response:
+        record = active.history_run(run_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        return _json_response(record)
+
+    @app.get("/api/history/runs/{run_id}/calls/{call_id}")
+    async def history_call(run_id: str, call_id: int) -> Response:
+        record = active.history_call(run_id, call_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="call not found")
+        return _json_response(record)
+
+    @app.get("/api/history/runs/{run_id}/calls/{call_id}/image/{index}")
+    async def history_image(run_id: str, call_id: int, index: int) -> Response:
+        image = active.history_image(run_id, call_id, index)
+        if image is None:
+            raise HTTPException(status_code=404, detail="image not found")
         media_type, data = image
         return Response(data, media_type=media_type, headers={"cache-control": "no-store"})
 

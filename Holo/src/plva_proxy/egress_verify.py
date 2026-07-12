@@ -90,16 +90,24 @@ def parse_lsof_fields(output: str) -> tuple[Connection, ...]:
 def validate_connections(
     connections: tuple[Connection, ...], *, allowed_port: int
 ) -> tuple[Connection, ...]:
-    """Return connections whose remote endpoint is not the selected local proxy."""
+    """Return connections that leave loopback.
+
+    The Holo CLI legitimately talks to its local Agent API on a dynamic/fixed
+    loopback port while the runtime talks to the selected PLVA proxy. Blocking
+    every loopback port except the proxy kills that control channel and can
+    orphan the detached runtime. The privacy boundary is therefore no external
+    network egress from the complete CUA process group; ``allowed_port`` is
+    retained in evidence as the configured model endpoint.
+    """
 
     violations: list[Connection] = []
     for connection in connections:
-        host, port = _endpoint_host_port(connection.remote)
+        host, _ = _endpoint_host_port(connection.remote)
         try:
             is_loopback = ipaddress.ip_address(host.removesuffix("%lo0")).is_loopback
         except ValueError as exc:  # pragma: no cover - parse_lsof_fields validates first
             raise VerificationError("lsof emitted a non-numeric remote address") from exc
-        if not is_loopback or port != allowed_port:
+        if not is_loopback:
             violations.append(connection)
     return tuple(violations)
 
@@ -122,6 +130,39 @@ def _group_pids(pgid: int) -> tuple[int, ...]:
     except (ValueError, IndexError) as exc:
         raise VerificationError("ps emitted an unexpected process table format") from exc
     return tuple(members)
+
+
+def _detached_runtime_pids() -> tuple[int, ...]:
+    """Find Holo runtimes that daemonized out of the launcher's process group."""
+
+    result = subprocess.run(
+        ["/bin/ps", "-axo", "pid=,command="],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise VerificationError("ps could not enumerate detached Holo runtimes")
+    matches: list[int] = []
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        pid_text, separator, command = stripped.partition(" ")
+        if not separator:
+            continue
+        if command.rstrip().endswith("/hai-agent-runtime"):
+            try:
+                matches.append(int(pid_text))
+            except ValueError as exc:
+                raise VerificationError("ps emitted an invalid runtime pid") from exc
+    return tuple(matches)
+
+
+def _terminate(pgid: int, runtime_pids: tuple[int, ...]) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(pgid, signal.SIGTERM)
+    for pid in runtime_pids:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGTERM)
 
 
 def _lsof_connections(pids: tuple[int, ...]) -> tuple[Connection, ...]:
@@ -200,7 +241,9 @@ def monitor(
             {"ready": True, "monitor_pid": os.getpid(), "pgid": pgid, "version": 1},
         )
         while True:
-            pids = _group_pids(pgid)
+            group_pids = _group_pids(pgid)
+            runtime_pids = _detached_runtime_pids()
+            pids = tuple(dict.fromkeys((*group_pids, *runtime_pids)))
             if not pids:
                 verdict = "passed"
                 exit_code = 0
@@ -212,19 +255,21 @@ def monitor(
             if violation:
                 verdict = "failed"
                 exit_code = 3
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(pgid, signal.SIGTERM)
+                _terminate(pgid, runtime_pids)
                 break
             time.sleep(interval_ms / 1000)
     except (OSError, VerificationError) as exc:
         error = str(exc)
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(pgid, signal.SIGTERM)
+        remaining_runtime_pids: tuple[int, ...] = ()
+        with contextlib.suppress(OSError, VerificationError):
+            remaining_runtime_pids = _detached_runtime_pids()
+        _terminate(pgid, remaining_runtime_pids)
     payload: dict[str, object] = {
         "version": 1,
         "verdict": verdict,
         "pgid": pgid,
-        "allowed_remote": f"127.0.0.1:{allowed_port}",
+        "allowed_remote": "loopback-only",
+        "configured_proxy": f"127.0.0.1:{allowed_port}",
         "sample_count": sample_count,
         "observed_connections": [asdict(item) for item in sorted(observed, key=repr)],
         "violations": [asdict(item) for item in violation],

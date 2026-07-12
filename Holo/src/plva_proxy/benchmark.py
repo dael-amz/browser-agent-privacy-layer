@@ -250,7 +250,9 @@ def run_controlled_suite() -> list[BenchmarkResult]:
 
 
 def _fixture_html() -> bytes:
-    return f"""<!doctype html><html><head><title>PLVA CUA acceptance</title></head><body>
+    return f"""<!doctype html><html><head><title>PLVA CUA acceptance</title>
+<style>output{{display:block;margin:16px 0 56px}}a{{display:inline-block;padding:12px 18px;
+border:2px solid #222;border-radius:6px;font:600 20px system-ui}}</style></head><body>
 <main><h1>Account verification</h1><p>Account email:</p>
 <output id="account-email">{SYNTHETIC_VALUE}</output>
 <a id="continue" href="/confirm">Continue</a></main></body></html>""".encode()
@@ -266,6 +268,7 @@ def _confirm_html() -> bytes:
 
 class _Receipt:
     def __init__(self) -> None:
+        self.visited_source = threading.Event()
         self.submitted = threading.Event()
         self.visited_confirm = False
         self.matches = False
@@ -275,6 +278,7 @@ def _handler(receipt: _Receipt) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path == "/":
+                receipt.visited_source.set()
                 body = _fixture_html()
             elif self.path == "/confirm":
                 receipt.visited_confirm = True
@@ -319,8 +323,9 @@ def run_live(*, privacy_on: bool, runner: Path, timeout_s: int = 300) -> Benchma
     server_thread.start()
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     prompt = (
-        f"Open {url} in the browser. Remember the visible Account email, click Continue, enter "
-        "that email on the next page, click Submit, and stop only after Accepted is visible."
+        "The controlled Account verification page is already open in the browser. Remember the "
+        "visible Account email, click Continue, enter that email on the next page, click Submit, "
+        "and stop only after Accepted is visible."
     )
     env = dict(os.environ)
     env.update(
@@ -334,6 +339,15 @@ def run_live(*, privacy_on: bool, runner: Path, timeout_s: int = 300) -> Benchma
     return_code = -1
     started = time.perf_counter()
     try:
+        opened = subprocess.run(
+            ["/usr/bin/open", url],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if opened.returncode != 0 or not receipt.visited_source.wait(timeout=10):
+            raise RuntimeError("controlled fixture did not open in the visible browser")
         completed = subprocess.run(
             [str(runner), prompt],
             cwd=runner.parent,
@@ -344,7 +358,7 @@ def run_live(*, privacy_on: bool, runner: Path, timeout_s: int = 300) -> Benchma
             check=False,
         )
         return_code = completed.returncode
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         error = type(exc).__name__
     finally:
         server.shutdown()

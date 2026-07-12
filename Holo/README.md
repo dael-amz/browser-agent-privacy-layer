@@ -108,8 +108,11 @@ under `~/.holo/skills/` for each privacy-enabled run. Set
 
 Edit `config/privacy-policy.json` to change defaults, set `PLVA_POLICY_FILE` to select another
 file, or pass an in-memory override through `PLVA_POLICY_JSON`. The GUI updates the policy for its
-next run without writing it to disk. `blocked` findings receive no token and are never vaulted;
-`approval` tokens fail closed until the Step 7 local mediator is implemented.
+next run without writing it to disk. `blocked` findings receive no token and are never vaulted.
+`approval` tokens require a short-lived exact local capability bound to token, tool, argument path,
+optional target, TTL, and use count. The Vault view can grant one `write_desktop:content` use;
+`GET/POST/DELETE /viewer/approvals` provides the loopback API. The later mediator can automate
+policy decisions, but approval-gated local use no longer depends on it.
 
 For synthetic diagnosis, individual Step 5/5a features can be disabled without changing the
 secure all-on default:

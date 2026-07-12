@@ -429,6 +429,37 @@ class SessionVault:
                 for entry in self._by_placeholder.values()
             )
 
+    def match_observed_text(self, text: str) -> tuple[dict[str, str], ...]:
+        """Match OCR text against issued values without exposing those values.
+
+        Browser inputs often scroll horizontally after a local write, leaving a
+        long prefix or suffix of a vaulted value on screen. Semantic detection
+        can miss that fragment. Exact local substring matching provides a
+        deterministic second guard for values this session already knows.
+        """
+
+        observed = unicodedata.normalize("NFKC", text)
+        if len(re.sub(r"[^\w]", "", observed, flags=re.UNICODE)) < 4:
+            return ()
+        matches: list[dict[str, str]] = []
+        with self._lock:
+            for entry in self._by_placeholder.values():
+                if entry.pii_class in _CREDENTIAL_CLASSES:
+                    candidate = observed
+                    vaulted = entry.value
+                else:
+                    candidate = " ".join(observed.split()).casefold()
+                    vaulted = entry.canonical
+                if candidate in vaulted or vaulted in candidate:
+                    matches.append(
+                        {
+                            "token": entry.placeholder,
+                            "class": entry.pii_class,
+                            "safety_level": self._policy.level_for(entry.pii_class),
+                        }
+                    )
+        return tuple(matches)
+
     def validate_manifest_item(self, token: str, pii_class: str, safety_level: str) -> None:
         """Reject forged or stale internal manifest metadata before model egress."""
 
@@ -567,6 +598,20 @@ class VaultRedactor:
                             }
                         )
                         manifested.add(placeholder)
+            finding_text = finding.get("text")
+            vault_matches = (
+                self._vault.match_observed_text(finding_text)
+                if isinstance(finding_text, str)
+                else ()
+            )
+            for match in vault_matches:
+                placeholder = match["token"]
+                placeholders.append(placeholder)
+                if placeholder not in manifested:
+                    manifest.append(match)
+                    manifested.add(placeholder)
+            if vault_matches:
+                finding["vault_matches"] = [match["token"] for match in vault_matches]
             finding["placeholders"] = list(dict.fromkeys(placeholders))
             if placeholders:
                 try:
@@ -807,7 +852,14 @@ class HistoryScrubber:
                 raise PrivacyError("history classifier omitted span metadata") from exc
             if start < 0 or end <= start or end > len(text) or classified[start:end] != value:
                 raise PrivacyError("history classifier span did not project to source text")
-            replacements.append((start, end, self._vault.store(label, text[start:end])))
+            if self._vault.safety_level(label) == "blocked":
+                # Blocked values must be removed from provider-bound history but
+                # must never enter the resolvable vault. Use an opaque shape that
+                # cannot match the session placeholder grammar.
+                replacement = f"[PLVA_BLOCKED_{_normalize_class(label)}]"
+            else:
+                replacement = self._vault.store(label, text[start:end])
+            replacements.append((start, end, replacement))
         if sensitive and not replacements:
             raise PrivacyError("history contains sensitive text without an exact local value")
         scrubbed = text

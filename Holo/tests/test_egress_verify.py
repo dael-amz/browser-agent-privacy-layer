@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import stat
 from pathlib import Path
+from subprocess import CompletedProcess
 
 import pytest
 
+import plva_proxy.egress_verify as egress
 from plva_proxy.egress_verify import (
     Connection,
     VerificationError,
@@ -34,14 +36,14 @@ def test_parse_lsof_fields_extracts_only_connected_socket_metadata() -> None:
     )
 
 
-def test_validate_connections_rejects_remote_and_wrong_loopback_port() -> None:
+def test_validate_connections_allows_local_control_ports_and_rejects_external_remote() -> None:
     connections = (
         Connection(1, "holo", "127.0.0.1:5000", "127.0.0.1:18081"),
         Connection(1, "holo", "127.0.0.1:5001", "127.0.0.1:9000"),
         Connection(1, "holo", "192.0.2.10:5002", "203.0.113.8:443"),
     )
 
-    assert validate_connections(connections, allowed_port=18081) == connections[1:]
+    assert validate_connections(connections, allowed_port=18081) == connections[2:]
 
 
 def test_parse_lsof_fields_fails_closed_on_hostnames() -> None:
@@ -56,3 +58,22 @@ def test_write_json_is_atomic_private_and_contains_only_payload(tmp_path: Path) 
 
     assert json.loads(destination.read_text()) == {"sample_count": 3, "verdict": "passed"}
     assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+
+def test_detached_runtime_discovery_uses_exact_executable_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = "\n".join(
+        (
+            "  41 /Applications/Holo/hai-agent-runtime",
+            "  42 /tmp/hai-agent-runtime --not-the-runtime-shape",
+            "  43 python monitor.py",
+        )
+    )
+    monkeypatch.setattr(
+        egress.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(args[0], 0, output, ""),
+    )
+
+    assert egress._detached_runtime_pids() == (41,)

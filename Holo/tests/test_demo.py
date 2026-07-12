@@ -65,9 +65,7 @@ def test_controller_validates_and_updates_policy_and_settings() -> None:
         )
 
 
-def test_demo_loads_editable_policy_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_demo_loads_editable_policy_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     policy_file = tmp_path / "policy.json"
     policy_file.write_text('{"EMAIL":"blocked"}', encoding="utf-8")
     monkeypatch.setenv("PLVA_POLICY_FILE", str(policy_file))
@@ -82,6 +80,7 @@ def test_demo_loads_editable_policy_file(
 
 def test_controller_starts_with_memory_only_environment_and_can_stop(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
     process = FakeProcess()
@@ -95,7 +94,7 @@ def test_controller_starts_with_memory_only_environment_and_can_stop(
     monkeypatch.setattr(demo.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(demo.threading, "Thread", DormantThread)
     monkeypatch.setattr(demo.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
-    controller = demo.DemoController()
+    controller = demo.DemoController(history_root=tmp_path / "history")
     controller.set_policy({"EMAIL": "approval"})
 
     controller.start("Use a synthetic placeholder")
@@ -171,6 +170,7 @@ def test_proxy_monitor_keeps_only_latest_memory_artifacts(
         "/viewer/stats": {"frames_seen": 1},
         "/viewer/findings": {"findings": []},
         "/viewer/vault": {"entries": [{"placeholder": "EMAIL_1_test"}]},
+        "/viewer/approvals": {"approvals": [{"token": "EMAIL_1_test"}]},
         "/viewer/filter": {"status": "passed", "texts_scanned": 2},
     }
     monkeypatch.setattr(demo, "_fetch_json", lambda path: reports.get(path))
@@ -180,6 +180,7 @@ def test_proxy_monitor_keeps_only_latest_memory_artifacts(
 
     assert controller.frame() == b"png"
     assert controller.vault()["entries"][0]["placeholder"] == "EMAIL_1_test"
+    assert controller.approvals()[0]["token"] == "EMAIL_1_test"
     assert controller.filter_diagnostics()["status"] == "passed"
 
 
@@ -188,33 +189,90 @@ async def test_demo_api_serves_ui_controls_and_memory_viewers(
 ) -> None:
     controller = demo.DemoController()
     controller._frame = b"synthetic-png"
-    controller._vault = {"entries": [{"placeholder": "EMAIL_1_test"}], "policy": {}}
+    controller._vault = {
+        "entries": [
+            {
+                "placeholder": "EMAIL_1_test",
+                "safety_level": "approval",
+            }
+        ],
+        "policy": {},
+    }
+    controller._approvals = [{"token": "EMAIL_1_test", "remaining_uses": 1}]
     controller._findings = {"findings": [{"labels": ["EMAIL"]}]}
     controller._filter = {"status": "passed"}
     started: list[str] = []
+    approved: list[str] = []
     monkeypatch.setattr(controller, "start", lambda prompt: started.append(prompt))
+    monkeypatch.setattr(
+        controller,
+        "approve_once",
+        lambda token: approved.append(token) or {"token": token, "remaining_uses": 1},
+    )
     app = demo.create_demo_app(controller)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://demo.test"
     ) as client:
-        page = await client.get("/")
+        landing = await client.get("/")
+        page = await client.get("/app")
         state = await client.get("/api/state")
         frame = await client.get("/api/frame")
         vault = await client.get("/api/vault")
+        approvals = await client.get("/api/approvals")
+        approval = await client.post("/api/approve", json={"token": "EMAIL_1_test"})
         findings = await client.get("/api/findings")
         filter_report = await client.get("/api/filter")
         run = await client.post("/api/run", json={"prompt": "synthetic task"})
         invalid = await client.put("/api/policy", json={"EMAIL": "invalid"})
 
+    assert landing.status_code == 200 and "Launch" in landing.text
     assert page.status_code == 200 and "What can I do for you?" in page.text
     assert state.json()["settings"]["plva_enabled"] is True
     assert frame.content == b"synthetic-png"
     assert vault.json()["entries"][0]["placeholder"] == "EMAIL_1_test"
+    assert approvals.json()["approvals"][0]["token"] == "EMAIL_1_test"
+    assert approval.status_code == 201 and approved == ["EMAIL_1_test"]
     assert findings.json()["findings"][0]["labels"] == ["EMAIL"]
     assert filter_report.json()["status"] == "passed"
     assert run.status_code == 202 and started == ["synthetic task"]
     assert invalid.status_code == 409
+
+
+def test_controller_grants_exact_one_write_without_exposing_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = demo.DemoController()
+    controller._vault = {
+        "entries": [
+            {
+                "placeholder": "API_KEY_1_test",
+                "class": "API_KEY",
+                "safety_level": "approval",
+                "value": "local-secret",
+            }
+        ],
+        "policy": {},
+    }
+    requests: list[dict[str, Any]] = []
+
+    def grant(path: str, *, method: str, payload: dict[str, Any]) -> dict[str, Any]:
+        requests.append({"path": path, "method": method, "payload": payload})
+        return {"token": payload["token"], "remaining_uses": 1}
+
+    monkeypatch.setattr(demo, "_proxy_json_request", grant)
+
+    result = controller.approve_once("API_KEY_1_test")
+
+    assert result == {"token": "API_KEY_1_test", "remaining_uses": 1}
+    assert requests[0]["payload"] == {
+        "token": "API_KEY_1_test",
+        "tool_name": "write_desktop",
+        "argument_path": "content",
+        "ttl_seconds": 60,
+        "use_count": 1,
+    }
+    assert "local-secret" not in json.dumps(requests)
 
 
 def test_fetch_helpers_fail_closed_on_bad_data(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,4 +305,6 @@ def test_demo_main_validates_port_and_starts_uvicorn(monkeypatch: pytest.MonkeyP
 def test_demo_ui_file_is_packaged() -> None:
     assert demo.UI_PATH.is_file()
     assert "PLVA protection" in demo.UI_PATH.read_text("utf-8")
+    assert demo.LANDING_PATH.is_file()
+    assert 'href="/app"' in demo.LANDING_PATH.read_text("utf-8")
     assert Path(demo.ROOT / "run_demo.sh").is_file()

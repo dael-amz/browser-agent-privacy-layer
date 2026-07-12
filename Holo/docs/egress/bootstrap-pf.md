@@ -1,7 +1,8 @@
 # Packet-filter bootstrap handoff
 
-The live launcher now enforces the CUA runtime's single allowed TCP destination
-(`127.0.0.1:<proxy-port>`) without elevation. The macOS packet-filter anchor is
+The live launcher now enforces loopback-only TCP for the complete CUA process
+group without elevation. This permits Holo's local CLI↔Agent-API channel and
+the PLVA proxy while rejecting external destinations. The macOS packet-filter anchor is
 an additional host-level boundary. It cannot be inspected or installed by an
 unprivileged process, and this project never invokes `sudo` automatically.
 
