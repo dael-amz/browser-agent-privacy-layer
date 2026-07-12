@@ -6,9 +6,10 @@ Verified 2026-07-12. Future Step 7/9/10/12 features are intentionally deferred.
 
 - Typed task, run/stop controls, and a PLVA master toggle.
 - Per-class `hide_use`, `approval`, and `blocked` controls that apply on the next run.
-- Redacted model-frame, memory-only vault, OCR, and stream-guard views.
-- Vault values and OCR text blurred until an explicit local reveal.
-- Collapsed Advanced lab for provider, OCR mode, worker lifecycle, and every Step 5/5a switch.
+- Redacted model-frame, memory-only agent trace, model-call history, vault, OCR, and stream-guard
+  views.
+- Trace output, vault values, and OCR text blurred until an explicit local reveal.
+- Advanced Lab tab for provider, OCR mode, worker lifecycle, and every Step 5/5a switch.
 - Loopback-only server, `Cache-Control: no-store`, no browser storage, and safe allowlisted runner
   events rather than raw process logs.
 

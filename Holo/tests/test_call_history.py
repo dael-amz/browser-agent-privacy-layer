@@ -91,7 +91,14 @@ async def test_relay_records_call_and_viewer_serves_it() -> None:
     async def chat(request: Request) -> Response:
         await request.body()
         return JSONResponse(
-            {"choices": [{"message": {"role": "assistant", "content": "done"}, "finish_reason": "stop"}]}
+            {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "done"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
         )
 
     call_store = CallStore()
@@ -154,8 +161,8 @@ def seeded_controller() -> demo.DemoController:
         duration_ms=7,
         state="sent",
     )
-    controller._calls[call_id] = record.full(call_id)  # noqa: SLF001 - test seam
-    controller._call_images[(call_id, 0)] = ("image/png", PNG_BYTES)  # noqa: SLF001
+    controller._calls[call_id] = record.full(call_id)
+    controller._call_images[(call_id, 0)] = ("image/png", PNG_BYTES)
     return controller
 
 
@@ -208,15 +215,15 @@ def test_mirror_calls_copies_new_records_once_images_arrive(
     monkeypatch.setattr(demo, "_fetch_json", fake_json)
     monkeypatch.setattr(demo, "_fetch_bytes", fake_bytes)
 
-    controller._mirror_calls()  # noqa: SLF001 - image missing: record must wait
+    controller._mirror_calls()  # Image missing: record must wait.
     assert controller.calls() == []
 
     blob_available["ready"] = True
-    controller._mirror_calls()  # noqa: SLF001
+    controller._mirror_calls()
     (summary,) = controller.calls()
     assert summary["id"] == 1 and summary["images"] == ["image/png"]
     assert controller.call_image(1, 0) == ("image/png", PNG_BYTES)
 
     # A second pass must not duplicate or refetch the mirrored record.
-    controller._mirror_calls()  # noqa: SLF001
+    controller._mirror_calls()
     assert len(controller.calls()) == 1

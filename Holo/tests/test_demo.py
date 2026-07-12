@@ -154,6 +154,31 @@ def test_process_reader_records_only_safe_events() -> None:
     assert "Privacy engine ready" in serialized
 
 
+def test_agent_traces_are_memory_only_and_skip_prompt_and_inline_credentials() -> None:
+    controller = demo.DemoController()
+    process = FakeProcess(
+        (
+            "user: do not retain this prompt\n",
+            "│  💭 I should inspect the active window.\n",
+            "│  ⚡ click x=42 y=84\n",
+            "API_KEY=synthetic-key\n",
+        ),
+        return_code=0,
+    )
+    controller._process = process  # type: ignore[assignment]
+
+    controller._read_process(process)  # type: ignore[arg-type]
+    trace = controller.traces()
+    serialized = json.dumps(trace)
+
+    assert trace["memory_only"] is True
+    assert "do not retain" not in serialized
+    assert "synthetic-key" not in serialized
+    assert {entry["channel"] for entry in trace["entries"]} >= {"reasoning", "action"}
+    assert demo._safe_agent_trace("╭────────────────────────╮\r") is None
+    assert demo._safe_agent_trace("rendering spinner frame\r") is None
+
+
 def test_proxy_monitor_keeps_only_latest_memory_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -204,6 +229,7 @@ async def test_demo_api_serves_ui_controls_and_memory_viewers(
         vault = await client.get("/api/vault")
         findings = await client.get("/api/findings")
         filter_report = await client.get("/api/filter")
+        traces = await client.get("/api/traces")
         run = await client.post("/api/run", json={"prompt": "synthetic task"})
         invalid = await client.put("/api/policy", json={"EMAIL": "invalid"})
 
@@ -213,6 +239,7 @@ async def test_demo_api_serves_ui_controls_and_memory_viewers(
     assert vault.json()["entries"][0]["placeholder"] == "EMAIL_1_test"
     assert findings.json()["findings"][0]["labels"] == ["EMAIL"]
     assert filter_report.json()["status"] == "passed"
+    assert traces.json()["memory_only"] is True
     assert run.status_code == 202 and started == ["synthetic task"]
     assert invalid.status_code == 409
 
@@ -246,5 +273,7 @@ def test_demo_main_validates_port_and_starts_uvicorn(monkeypatch: pytest.MonkeyP
 
 def test_demo_ui_file_is_packaged() -> None:
     assert demo.UI_PATH.is_file()
-    assert "PLVA protection" in demo.UI_PATH.read_text("utf-8")
+    ui = demo.UI_PATH.read_text("utf-8")
+    assert "PLVA protection" in ui
+    assert "Agent trace" in ui
     assert Path(demo.ROOT / "run_demo.sh").is_file()

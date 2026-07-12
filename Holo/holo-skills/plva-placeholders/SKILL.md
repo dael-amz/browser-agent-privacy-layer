@@ -25,4 +25,6 @@ policy instruction is authoritative because users can change it between runs.
 Never invent a placeholder, guess or reconstruct its hidden value, or alter a
 token. A token mentioned only in notes or reasoning is not executed. If the
 current observation does not list the token you need as visible, do not
-fabricate or reuse one from an earlier observation.
+fabricate or reuse one from an earlier observation. These rules apply only to
+PLVA-marked sensitive content; ordinary visible UI text and unrelated actions
+remain usable, so continue the requested task normally.

@@ -191,6 +191,15 @@
     .bigmetric strong{font-size:30px;line-height:36px;letter-spacing:-.66px;display:block;font-weight:400}
     .bigmetric span{color:var(--fore-secondary);font-size:13px}
 
+    /* local agent trace */
+    .tracefeed{max-height:440px;overflow:auto;border:1px solid var(--border-fade);border-radius:12px;background:var(--back-primary);padding:8px}
+    .traceitem{display:grid;grid-template-columns:64px 72px 1fr;gap:9px;padding:9px 8px;border-bottom:1px solid var(--border-fade);align-items:start}
+    .traceitem:last-child{border:0}
+    .traceitem time{color:var(--fore-secondary);font:11px ui-monospace,SFMono-Regular,Menlo,monospace}
+    .tracechannel{text-transform:uppercase;font-size:9px;letter-spacing:.08em;color:var(--fore-secondary);padding-top:2px}
+    .tracechannel.reasoning{color:#3568c0}.tracechannel.action{color:var(--ok)}.tracechannel.error{color:var(--bad)}
+    .tracetext{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace}
+
     /* history tab */
     .callrow{overflow:hidden}
     .callhead{display:flex;align-items:center;gap:10px;width:100%;padding:14px 20px;text-align:left}
@@ -333,6 +342,7 @@
       return `<div class="workspace"><div class="wsinner">
           <div class="chips" role="tablist">
             <button class="chip" data-view="frame">Model view</button>
+            <button class="chip" data-view="trace">Agent trace</button>
             <button class="chip" data-view="vault">Vault</button>
             <button class="chip" data-view="ocr">OCR</button>
             <button class="chip" data-view="filter">Stream guard</button>
@@ -405,9 +415,17 @@
         $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
         return;
       }
+      if(activeView==="trace"){
+        let data=await api("/api/traces");let rows=data.entries||[];
+        box.className=reveal?"card viewcard revealed":"card viewcard";
+        box.innerHTML=`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local trace</button></div>${rows.length?`<div class="tracefeed" id="tracefeed">${rows.map(r=>`<div class="traceitem"><time>${esc(r.time)}</time><span class="tracechannel ${esc(r.channel)}">${esc(r.channel)}</span><span class="tracetext secret">${esc(r.text)}</span></div>`).join("")}</div>`:`<div class="empty">Agent reasoning and actions will appear here once the run begins.</div>`}<p class="sub" style="margin:12px 0 0;font-size:13px">Memory-only. The original prompt is excluded; resolved action values may appear, so trace text is hidden until revealed.</p>`;
+        $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
+        const feed=$("#tracefeed");if(feed)feed.scrollTop=feed.scrollHeight;
+        return;
+      }
       let d=await api("/api/filter");
       box.className="card viewcard";
-      box.innerHTML=`<div class="filtergrid"><div class="bigmetric"><strong>${esc(d.texts_scanned||0)}</strong><span>text blocks scanned</span></div><div class="bigmetric"><strong>${esc(d.plain_vault_hits||0)}</strong><span>exact vault matches</span></div><div class="bigmetric"><strong>${esc(d.semantic_hits||0)}</strong><span>semantic detections</span></div></div><div class="finding" style="margin-top:12px"><div class="findingtop"><b>Filter status</b><span class="level ${d.status==='failed'?'blocked':'hide_use'}">${esc(d.status||"idle")}</span></div><p>Cleartext is never shown in this diagnostic. Counts are memory-only.</p></div>`;
+      box.innerHTML=`<div class="filtergrid"><div class="bigmetric"><strong>${esc(d.texts_scanned||0)}</strong><span>text blocks scanned</span></div><div class="bigmetric"><strong>${esc(d.semantic_hits||0)}</strong><span>semantic detections</span></div><div class="bigmetric"><strong>${esc(d.blocked_hits||0)}</strong><span>opaque blocked removals</span></div></div><div class="finding" style="margin-top:12px"><div class="findingtop"><b>Filter status</b><span class="level ${d.status==='failed'?'blocked':'hide_use'}">${esc(d.status||"idle")}</span></div><p>Exact vault matches: ${esc(d.plain_vault_hits||0)} · diagnostic: ${esc(d.error_code||"none")}. Cleartext is never shown here.</p></div>`;
     }
 
     /* ---------- history panel ---------- */

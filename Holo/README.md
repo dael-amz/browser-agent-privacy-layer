@@ -18,10 +18,14 @@ Launch the fast-tracked Steps 1–6 app with:
 ```
 
 It opens `http://127.0.0.1:18080` with a task box, PLVA master toggle, per-class security editor,
-redacted model view, memory-only vault, OCR findings, stream-guard counters, and a collapsed
-Advanced lab containing the testing switches. Vault and OCR values are blurred until explicitly
-revealed. The app binds only to loopback and sends `Cache-Control: no-store`; it uses no browser
-storage. Spoken prompts, voice-read, and the mediator UI remain extension points for later steps.
+redacted model view, memory-only Holo reasoning/action trace, vault, OCR findings, stream-guard
+counters, a model-call History tab, and an Advanced Lab tab containing the testing switches.
+History shows the redacted requests that crossed the privacy boundary and the model's raw replies;
+the Agent trace shows runtime reasoning, actions, and errors. Trace, vault, and OCR values are
+blurred until explicitly revealed. The original task is excluded from trace retention; all viewer
+state is memory-only. The app binds only to loopback and sends `Cache-Control: no-store`; it uses no
+browser storage. Spoken prompts, voice-read, and the mediator UI remain extension points for later
+steps.
 
 ## Accelerated redaction setup
 
