@@ -314,6 +314,7 @@ class DemoController:
             "ocr_engine": "apple",
             "visual_detector": "on",
             "semantic_engine": "rampart",
+            "tools": "off",
             "features": {name: True for name in FEATURE_ENV},
         }
 
@@ -392,6 +393,9 @@ class DemoController:
         semantic_engine = raw.get("semantic_engine") or "rampart"
         if semantic_engine not in {"rampart", "gliner2", "openai-pf"}:
             raise ValueError("semantic engine is invalid")
+        tools = raw.get("tools") or "off"
+        if tools not in {"on", "off"}:
+            raise ValueError("tools setting is invalid")
         if not isinstance(plva_enabled, bool) or not isinstance(features, dict):
             raise ValueError("settings are invalid")
         selected_features: dict[str, bool] = {}
@@ -412,6 +416,7 @@ class DemoController:
                 "ocr_engine": ocr_engine,
                 "visual_detector": visual_detector,
                 "semantic_engine": semantic_engine,
+                "tools": tools,
                 "features": selected_features,
             }
             return copy.deepcopy(self._settings)
@@ -619,6 +624,7 @@ class DemoController:
                 "PLVA_OCR_ENGINE": str(self._settings["ocr_engine"]),
                 "PLVA_VISUAL_DETECTOR": "1" if self._settings["visual_detector"] == "on" else "0",
                 "PLVA_SEMANTIC_ENGINE": str(self._settings["semantic_engine"]),
+                "PLVA_TOOLS": "1" if self._settings["tools"] == "on" else "0",
                 "PLVA_PRIVACY": "1" if enabled else "0",
                 "PLVA_POLICY_JSON": json.dumps(self._policy, separators=(",", ":")),
             }

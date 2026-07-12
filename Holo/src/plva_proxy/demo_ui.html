@@ -545,7 +545,7 @@
     async function stop(){try{await api("/api/stop",{method:"POST",body:"{}"});await refresh()}catch(e){toast(e.message)}}
     async function setPolicy(cls,level){if(state.running)return toast("Stop the task before changing policy");const next={...state.policy,[cls]:level};try{const result=await api("/api/policy",{method:"PUT",body:JSON.stringify(next)});state.policy=result.policy;renderPanel();toast(`${labels[cls]} set to ${levelLabels[level]}`)}catch(e){toast(e.message)}}
     async function saveSettings(patch){if(!state)return;if(state.running){render(true);return toast("Stop the task before changing settings")}
-      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,features:{...s.features},...patch};
+      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,tools:s.tools,features:{...s.features},...patch};
       if(patch&&patch.features)settings.features={...s.features,...patch.features};
       try{const r=await api("/api/settings",{method:"PUT",body:JSON.stringify(settings)});state.settings=r.settings;render(true)}catch(e){toast(e.message);render(true)}}
 
@@ -957,6 +957,7 @@
         segRow("Visual detector","Off isolates the OCR pipeline and the text filter","visual_detector",[["on","On"],["off","Off"]])+
         segRow("Detector version","Frozen v2 baseline or the v3 safe-head export","detector_version",[["v2","v2 baseline"],["v3","v3"]])+
         segRow("Text filter","Alternatives need a local frozen model copy","semantic_engine",[["rampart","Rampart"],["gliner2","GLiNER2 PII"],["openai-pf","OpenAI PF"]])+
+        segRow("Tool calls","Local tool channel: teaching, detection, bounded loop","tools",[["on","On"],["off","Off"]])+
         segRow("Worker lifecycle","Startup versus idle memory","lifecycle",[["eager","Eager"],["adaptive","Adaptive"],["cold","Cold"]]);
       document.querySelectorAll("[data-setting]").forEach(b=>b.onclick=()=>saveSettings({[b.dataset.setting]:b.dataset.value}));
       const f=state.settings.features;
