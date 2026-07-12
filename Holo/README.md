@@ -29,6 +29,11 @@ PLVA_REDACT_LIFECYCLE=eager \
 ./run_step1.sh "your task"
 ```
 
+When `plvas-v3/` is present, this path uses its bundled visual detector while retaining the
+existing accelerated OCR and Rampart assets. Override it with
+`PLVA_VISUAL_MODEL=/path/to/detector.onnx`; the content-addressed Core ML cache recompiles only
+when the selected weights change.
+
 Choose the inference provider independently of the redaction engine. Overshoot remains the default.
 To use H Company's managed Holo API, place `HAI_API_KEY=<key>` in `.env`, then run:
 
@@ -43,6 +48,15 @@ The H Company preset uses `https://api.hcompany.ai/v1` and `holo3-1-35b-a3b`. Ov
 with `PLVA_MODEL` or either preset's URL with `PLVA_UPSTREAM` when testing another compatible
 deployment.
 
+With the Vision engine, `run_step1.sh` enables the Step 5 privacy core by default. The same OCR
+finding supplies the recognized value and bounding box to the in-memory vault and to the visible
+`«CLASS_N_nonce»` chip. Executed action fields resolve locally; reasoning remains placeholdered;
+outbound history is scrubbed first by exact vault match and then by the warm Core ML Rampart
+backstop. Each model request also receives the placeholder scheme plus an exact token/class
+manifest beside the current frame; stale manifests are removed. The matching native Holo skill is
+kept at `holo-skills/plva-placeholders/SKILL.md` and installed under `~/.holo/skills/`. Set
+`PLVA_PRIVACY=0` only for comparison testing.
+
 Watch exactly what the model receives at `http://127.0.0.1:18081/viewer`. The latest memory-only
 OCR/vault candidates are at `http://127.0.0.1:18081/viewer/findings`; that endpoint contains
 sensitive cleartext and is never persisted or logged. `PLVA_VISION_MODE=cascade` is the default:
@@ -55,7 +69,9 @@ placing the frozen detector at `plva-v2-baseline/`:
 ```bash
 cd redactor-worker
 npm install
-PLVA_BASELINE_ROOT=../plva-v2-baseline npm run build
+PLVA_BASELINE_ROOT=../plva-v2-baseline \
+PLVA_VISUAL_MODEL=../plvas-v3/harness/plva-v2-baseline/runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx \
+npm run build
 cd ..
 ```
 

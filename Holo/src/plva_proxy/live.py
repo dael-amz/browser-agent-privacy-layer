@@ -116,6 +116,12 @@ def main() -> None:  # pragma: no cover - thin CLI wiring, exercised manually
         "--vision-mode", choices=("fast", "cascade", "accurate"), default="cascade"
     )
     parser.add_argument(
+        "--visual-model",
+        type=Path,
+        default=None,
+        help="visual detector ONNX override; OCR and Rampart still come from --redact",
+    )
+    parser.add_argument(
         "--scale",
         type=float,
         default=0.5,
@@ -156,6 +162,7 @@ def main() -> None:  # pragma: no cover - thin CLI wiring, exercised manually
                 worker_root=vision_root,
                 cache_root=vision_root / ".cache",
                 vision_mode=args.vision_mode,
+                visual_model=args.visual_model,
             )
         else:
             worker_script = args.redact_worker / "bin" / "redactor-worker.mjs"

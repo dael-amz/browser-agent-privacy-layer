@@ -34,13 +34,14 @@ def _cpu_output(model: Path, tensor: np.ndarray) -> np.ndarray:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", type=Path, default=Path("../plva-v2-baseline"))
+    parser.add_argument("--visual-model", type=Path, default=None)
     parser.add_argument("--runs", type=int, default=10)
     parser.add_argument("--cache", type=Path, default=Path(".cache"))
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("--runs must be positive")
 
-    source_model = args.baseline / "dist/visual/detector.onnx"
+    source_model = args.visual_model or args.baseline / "dist/visual/detector.onnx"
     fixture = args.baseline / "fixtures/ats-smoke.png"
     fixed_model = prepare_fixed_visual_model(source_model, args.cache / "visual-fixed.onnx")
     tensor = _detector_tensor(fixture).astype(np.float32, copy=False)

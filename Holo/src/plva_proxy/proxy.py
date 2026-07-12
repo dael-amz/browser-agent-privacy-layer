@@ -43,6 +43,15 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
+from plva_proxy.privacy import (
+    PLACEHOLDER_MANIFEST_KEY,
+    HistoryScrubber,
+    PrivacyError,
+    SessionVault,
+    VaultRedactor,
+    privacy_request_hook,
+    privacy_response_hook,
+)
 from plva_proxy.providers import PROVIDERS
 from plva_proxy.redactor import (
     BACKENDS,
@@ -365,8 +374,12 @@ def _to_png(image_bytes: bytes) -> bytes:
 
 
 def _redact_data_url(
-    image_url: Any, redact: Callable[[bytes], bytes], store: FrameStore | None
-) -> str:
+    image_url: Any,
+    redact: Callable[[bytes], bytes],
+    store: FrameStore | None,
+    *,
+    capture_manifest: bool = False,
+) -> tuple[str, tuple[dict[str, str], ...]]:
     url = image_url.get("url") if isinstance(image_url, dict) else image_url
     if not isinstance(url, str):
         raise HookError("screenshot has no URL")
@@ -378,7 +391,15 @@ def _redact_data_url(
     except (binascii.Error, ValueError) as exc:
         raise HookError("screenshot base64 is invalid") from exc
     try:
-        redacted = redact(_to_png(raw))
+        source = _to_png(raw)
+        if capture_manifest:
+            redact_with_manifest = getattr(redact, "redact_with_manifest", None)
+            if not callable(redact_with_manifest):
+                raise HookError("privacy redactor has no placeholder manifest")
+            redacted, manifest = redact_with_manifest(source)
+        else:
+            redacted = redact(source)
+            manifest = ()
     except HookError:
         raise
     except Exception as exc:
@@ -388,11 +409,17 @@ def _redact_data_url(
         analysis = getattr(redact, "latest_analysis", None)
         store.add(redacted, analysis if isinstance(analysis, dict) else None)
     _LOGGER.info("frame in_bytes=%d out_bytes=%d", len(raw), len(redacted))
-    return "data:image/png;base64," + base64.b64encode(redacted).decode("ascii")
+    return (
+        "data:image/png;base64," + base64.b64encode(redacted).decode("ascii"),
+        manifest,
+    )
 
 
 def frame_redaction_hook(
-    redact: Callable[[bytes], bytes], store: FrameStore | None = None
+    redact: Callable[[bytes], bytes],
+    store: FrameStore | None = None,
+    *,
+    include_placeholder_manifest: bool = False,
 ) -> RequestHook:
     """Build a request hook that redacts every outbound screenshot (§8.2).
 
@@ -407,7 +434,8 @@ def frame_redaction_hook(
     ) -> tuple[dict[str, Any], dict[str, str]]:
         rewritten: dict[str, Any] = json.loads(json.dumps(document))
         redacted = 0
-        for message in rewritten.get("messages") or []:
+        manifests: dict[int, list[dict[str, str]]] = {}
+        for message_index, message in enumerate(rewritten.get("messages") or []):
             if not isinstance(message, dict):
                 continue
             content = message.get("content")
@@ -415,12 +443,38 @@ def frame_redaction_hook(
                 continue
             for part in content:
                 if isinstance(part, dict) and part.get("type") == "image_url":
-                    part["image_url"] = {
-                        "url": _redact_data_url(part.get("image_url"), redact, store)
-                    }
+                    redacted_url, manifest = _redact_data_url(
+                        part.get("image_url"),
+                        redact,
+                        store,
+                        capture_manifest=include_placeholder_manifest,
+                    )
+                    part["image_url"] = {"url": redacted_url}
+                    if include_placeholder_manifest:
+                        target = manifests.setdefault(message_index, [])
+                        known = {item["token"] for item in target}
+                        if not isinstance(manifest, (list, tuple)):
+                            raise HookError("privacy redactor returned an invalid manifest")
+                        for item in manifest:
+                            if (
+                                not isinstance(item, dict)
+                                or not isinstance(item.get("token"), str)
+                                or not isinstance(item.get("class"), str)
+                            ):
+                                raise HookError("privacy redactor returned an invalid manifest")
+                            token = item["token"]
+                            if token not in known:
+                                target.append({"token": token, "class": item["class"]})
+                                known.add(token)
                     redacted += 1
         if redacted:
             _LOGGER.info("redaction hook processed %d screenshot(s)", redacted)
+        if include_placeholder_manifest and manifests:
+            current_index = max(manifests)
+            rewritten[PLACEHOLDER_MANIFEST_KEY] = {
+                "message_index": current_index,
+                "items": manifests[current_index],
+            }
         return rewritten, headers
 
     return apply
@@ -443,6 +497,33 @@ def _chain_request_hooks(
         return second(document, headers)
 
     return chained
+
+
+def _chain_response_hooks(
+    first: ResponseHook | None, second: ResponseHook | None
+) -> ResponseHook | None:
+    """Compose two optional response hooks in order."""
+
+    if first is None:
+        return second
+    if second is None:
+        return first
+
+    def chained(document: dict[str, Any]) -> dict[str, Any]:
+        return second(first(document))
+
+    return chained
+
+
+def _combine_hooks(first: Hooks | None, second: Hooks | None) -> Hooks | None:
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return Hooks(
+        on_request=_chain_request_hooks(first.on_request, second.on_request),
+        on_response=_chain_response_hooks(first.on_response, second.on_response),
+    )
 
 
 def _upstream_headers(request: Request, api_key: str) -> dict[str, str]:
@@ -610,7 +691,7 @@ def create_app(
                 # (e.g. frame redaction) work on the request.
                 document, headers = await run_in_threadpool(request_hook, document, headers)
                 body = json.dumps(document, separators=(",", ":")).encode()
-            except (HookError, ValueError) as exc:
+            except (HookError, PrivacyError, ValueError) as exc:
                 _LOGGER.warning("request hook failed closed: %s", type(exc).__name__)
                 raise HTTPException(status_code=502, detail="request hook failed") from exc
 
@@ -646,7 +727,7 @@ def create_app(
                 if not isinstance(document, dict):
                     raise HookError("completion body is not a JSON object")
                 mutated = response_hook(document)
-            except (HookError, ValueError) as exc:
+            except (HookError, PrivacyError, ValueError) as exc:
                 _LOGGER.warning("response hook failed closed: %s", type(exc).__name__)
                 raise HTTPException(status_code=502, detail="response hook failed") from exc
             _LOGGER.info(
@@ -818,6 +899,12 @@ def main() -> None:
         help="Vision OCR strategy (default: fast full frame + accurate sensitive regions)",
     )
     parser.add_argument(
+        "--visual-model",
+        type=Path,
+        default=None,
+        help="visual detector ONNX override; OCR and Rampart still come from --redact",
+    )
+    parser.add_argument(
         "--redact-lifecycle",
         choices=("adaptive", "eager", "cold"),
         default="adaptive",
@@ -830,6 +917,12 @@ def main() -> None:
         default=60.0,
         help="adaptive worker idle timeout (default: 60 seconds)",
     )
+    parser.add_argument(
+        "--privacy",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="enable the Step 5 vault, placeholder chips, resolution, and history scrub",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
@@ -841,6 +934,8 @@ def main() -> None:
         parser.error("--upstream must be an http(s) URL")
     if args.redact_idle_seconds < 0:
         parser.error("--redact-idle-seconds cannot be negative")
+    if args.privacy and (args.redact is None or args.redact_engine != "vision"):
+        parser.error("--privacy requires --redact with --redact-engine vision")
     api_key = next(
         (
             value
@@ -861,6 +956,7 @@ def main() -> None:
             parser.error(f"--hook-image is unusable: {exc}")
 
     redact_hook: RequestHook | None = None
+    privacy_hooks: Hooks | None = None
     frame_store: FrameStore | None = None
     cleanup_callbacks: tuple[Callable[[], None], ...] = ()
     startup_callbacks: tuple[Callable[[], None], ...] = ()
@@ -897,6 +993,7 @@ def main() -> None:
                         worker_root=vision_root,
                         cache_root=vision_root / ".cache",
                         vision_mode=args.vision_mode,
+                        visual_model=args.visual_model,
                     )
                 )
             else:
@@ -917,10 +1014,27 @@ def main() -> None:
                         idle_timeout_s=lifecycle,
                     )
                 )
-            redact_hook = frame_redaction_hook(accelerated, frame_store)
+            active_redactor: Callable[[bytes], bytes] = accelerated
+            lifecycle_owner: AcceleratedRedactor | VaultRedactor = accelerated
+            if args.privacy:
+                vault = SessionVault()
+                vaulted = VaultRedactor(accelerated, vault)
+                active_redactor = vaulted
+                lifecycle_owner = vaulted
+                privacy_hooks = Hooks(
+                    on_request=privacy_request_hook(
+                        HistoryScrubber(vault, accelerated.classify_texts)
+                    ),
+                    on_response=privacy_response_hook(vault),
+                )
+            redact_hook = frame_redaction_hook(
+                active_redactor,
+                frame_store,
+                include_placeholder_manifest=args.privacy,
+            )
             if args.redact_lifecycle == "eager":
-                startup_callbacks = (accelerated.start,)
-            cleanup_callbacks = (accelerated.close,)
+                startup_callbacks = (lifecycle_owner.start,)
+            cleanup_callbacks = (lifecycle_owner.close,)
         else:
             redactor_config = RedactorConfig(cli_path=cli_path, profile=args.redact_profile)
             redact_hook = frame_redaction_hook(
@@ -930,11 +1044,8 @@ def main() -> None:
     hooks = {"test": TEST_HOOKS, "banana": BANANA_HOOKS}.get(args.hook)
     for extra_hook in (image_hook, redact_hook):
         if extra_hook is not None:
-            prior = hooks if hooks is not None else Hooks()
-            hooks = Hooks(
-                on_request=_chain_request_hooks(prior.on_request, extra_hook),
-                on_response=prior.on_response,
-            )
+            hooks = _combine_hooks(hooks, Hooks(on_request=extra_hook))
+    hooks = _combine_hooks(hooks, privacy_hooks)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     if frame_store is not None:

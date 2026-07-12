@@ -49,6 +49,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--cache", type=Path, required=True)
+    parser.add_argument("--visual-model", type=Path, default=None)
     parser.add_argument("--profile", choices=("high-recall", "balanced"), default="high-recall")
     parser.add_argument("--mode", choices=VISION_PIPELINE_MODES, default="cascade")
     args = parser.parse_args()
@@ -57,6 +58,7 @@ def main() -> None:
         args.cache.resolve(),
         profile=args.profile,
         mode=args.mode,
+        visual_model=args.visual_model.resolve() if args.visual_model is not None else None,
     )
     try:
         pipeline.warm()
@@ -68,6 +70,25 @@ def main() -> None:
                 if not isinstance(request, dict):
                     raise ValueError("request")
                 identifier = str(request.get("id", ""))
+                if request.get("operation") == "classify_texts":
+                    texts = request.get("texts")
+                    if (
+                        not identifier
+                        or not isinstance(texts, list)
+                        or len(texts) > 256
+                        or any(not isinstance(text, str) for text in texts)
+                        or sum(len(text) for text in texts) > 2_000_000
+                    ):
+                        raise ValueError("request")
+                    classified = pipeline.classify_texts(tuple(texts))
+                    _emit(
+                        {
+                            "id": identifier,
+                            "ok": True,
+                            "classifications": [_finding_json(finding) for finding in classified],
+                        }
+                    )
+                    continue
                 encoded = request.get("image")
                 if not identifier or not isinstance(encoded, str):
                     raise ValueError("request")

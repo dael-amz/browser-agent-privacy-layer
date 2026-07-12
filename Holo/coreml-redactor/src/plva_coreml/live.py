@@ -218,6 +218,7 @@ def _run_pipeline(
     *,
     baseline: Path,
     cache: Path,
+    visual_model: Path | None,
     fixture: Path | None,
     profile: str,
     scale: float,
@@ -225,7 +226,9 @@ def _run_pipeline(
 ) -> None:
     try:
         state.update_status("initializing", "Compiling visual, OCR, and Rampart Core ML graphs…")
-        pipeline = HybridANERedactor(baseline, cache, profile=profile)
+        pipeline = HybridANERedactor(
+            baseline, cache, profile=profile, visual_model=visual_model
+        )
         pipeline.warm()
         state.update_status("running", "Core ML ready; capturing the first frame…")
         while not stop.is_set():
@@ -251,6 +254,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=_DEFAULT_PORT)
     parser.add_argument("--baseline", type=Path, default=Path("../plva-v2-baseline"))
     parser.add_argument("--cache", type=Path, default=Path(".cache"))
+    parser.add_argument("--visual-model", type=Path, default=None)
     parser.add_argument("--fixture", type=Path, default=None)
     parser.add_argument("--profile", choices=tuple(THRESHOLD_PROFILES), default="high-recall")
     parser.add_argument("--scale", type=float, default=0.5)
@@ -274,6 +278,9 @@ def main() -> None:
         kwargs={
             "baseline": args.baseline.resolve(),
             "cache": args.cache.resolve(),
+            "visual_model": (
+                args.visual_model.resolve() if args.visual_model is not None else None
+            ),
             "fixture": args.fixture.resolve() if args.fixture is not None else None,
             "profile": args.profile,
             "scale": args.scale,

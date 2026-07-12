@@ -24,6 +24,9 @@ Run from this directory:
 $HOME/.local/bin/uv run plva-ane-probe --baseline ../plva-v2-baseline
 ```
 
+Use `--visual-model ../plvas-v3/harness/plva-v2-baseline/runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx`
+to select the v3 repository's detector without changing the OCR or Rampart inputs.
+
 Run the live screen viewer:
 
 ```bash
@@ -63,3 +66,8 @@ The endpoint is loopback-only and `no-store`, but its contents are sensitive.
 The Vision worker is selectable in the outbound proxy with `--redact-engine vision` and remains
 opt-in while a broader positive-PII fixture suite validates recall. `HybridVisionRedactor.process()`
 and `HybridANERedactor.process()` remain separate so the RapidOCR implementation stays available.
+
+The same persistent Vision worker also exposes batched history classification through its already
+warm Core ML Rampart session. A measured uncached call took about 46 ms and its bounded in-memory
+result cache returned the identical classification in under 0.1 ms. No history or values are
+written to disk.

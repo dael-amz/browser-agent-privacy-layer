@@ -51,6 +51,7 @@ Hackathon/
     │       ├── __init__.py              Python package marker
     │       ├── contract_probe.py        Privacy-safe Overshoot model/JSON/SSE contract probe
     │       ├── live.py                  Continuous local capture→redact→viewer loop (no upstream)
+    │       ├── privacy.py               Session vault, chip painter, resolver, and history scrub
     │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks + viewer (fail-closed, SSE-safe)
     │       ├── providers.py             Overshoot and H Company endpoint/model/key presets
     │       ├── redactor.py              Persistent accelerated worker client + frozen CLI fallback
@@ -60,6 +61,8 @@ Hackathon/
     │   ├── test_accelerated_redactor.py Persistent protocol, cache, lifecycle, and failure tests
     │   ├── test_proxy.py                Relay fidelity, credential, SSE, fail-closed, and log-hygiene tests
     │   ├── test_proxy_hooks.py          Step 3 hook seam: mutation, SSE re-emit, and fail-closed tests
+    │   ├── test_privacy.py              Vault, chip, scrub, resolution, and detector-stub tests
+    │   ├── test_privacy_integration.py  Full request/response privacy loop and SSE tests
     │   ├── test_redaction.py            Redaction hook, FrameStore/viewer, and redactor wrapper tests
     │   └── test_runtime_capture.py      Capture validation, JSON/SSE, health, privacy, and bind tests
     ├── docs/
@@ -76,7 +79,8 @@ Hackathon/
         ├── step-1-runbook.md            One-pass instructions to close Step 1 once the key exists
         ├── step-3-status.md             Interception hooks built; local verify PASS, live verify pending
         ├── step-4-accelerated-redaction.md  Persistent parallel GPU worker evidence and benchmark
-        └── step-4-obscuring.md          Real obscuring via frozen v2 detector + /viewer; vault not built
+        ├── step-4-obscuring.md          Real obscuring via frozen v2 detector + /viewer
+        └── step-5-privacy-core.md       PASS: vault, chips, resolution, and history scrub
 ```
 
 ## What each area is for
@@ -114,9 +118,11 @@ OCR runs concurrently through a separate WASM runtime, sessions stay warm during
 bursts and release after 60 idle seconds, and exact repeated frames use a bounded
 redacted-output-only memory cache. An opt-in native Apple Vision/Core ML engine now runs through
 the same fail-closed CUA hook, emits OCR text and exact PII spans at memory-only
-`/viewer/findings`, and measured 113–125 ms warm on the synthetic ATS fixture. Placeholder IDs,
-the vault, resolution, and history scrubbing are not built. See
-`verification/step-4-accelerated-redaction.md`.
+`/viewer/findings`, and measured 113–125 ms warm on the synthetic ATS fixture. **Step 5 is
+COMPLETE** (2026-07-12): those OCR findings now feed stable nonce-namespaced placeholder chips and
+a session-only vault; executed fields resolve locally; request history is scrubbed by plain match
+plus warm Core ML Rampart. Synthetic Holo cooperation and end-to-end resolution passed. See
+`verification/step-5-privacy-core.md`.
 Step 2 (Overshoot latency measurement) has not started.
 
 Completed evidence:
@@ -131,7 +137,7 @@ Completed evidence:
   `tools`), envelope uses plural `tool_calls`. Frame stayed local and was shredded; nothing reached
   the repo. See `verification/step-0-runtime-capture.md`.
 - **§7 decision recorded** in `docs/decisions/0001-openshell-sec7-egress-topology.md`.
-- The main automated gate is 82 passing tests with at least 80% coverage; the Core ML package has
+- The main automated gate is 103 passing tests with at least 80% coverage; the Core ML package has
   17 passing tests. Formatting, Ruff, strict mypy,
   lock validation, sdist, and wheel checks pass.
 - **Pass-through proxy built and gated** (2026-07-11 resume): loopback-only, verbatim body relay,

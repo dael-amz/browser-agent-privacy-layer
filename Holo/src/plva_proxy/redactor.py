@@ -64,6 +64,7 @@ class AcceleratedRedactorConfig:
     worker_root: Path | None = None
     cache_root: Path | None = None
     vision_mode: str = "cascade"
+    visual_model: Path | None = None
 
 
 class AcceleratedRedactor:
@@ -102,6 +103,7 @@ class AcceleratedRedactor:
         self._reader: threading.Thread | None = None
         self._ids = count(1)
         self._cache: OrderedDict[bytes, tuple[bytes, dict[str, Any]]] = OrderedDict()
+        self._text_cache: OrderedDict[bytes, list[dict[str, Any]]] = OrderedDict()
         self._backend = "not-started"
         self._analysis: dict[str, Any] = {}
         self._idle_timer: threading.Timer | None = None
@@ -197,10 +199,63 @@ class AcceleratedRedactor:
 
         with self._lock:
             self._cache.clear()
+            self._text_cache.clear()
             self._analysis = {}
             self._cancel_idle_timer()
             self._stop_process()
             self._backend = "closed"
+
+    def classify_texts(self, texts: tuple[str, ...]) -> list[dict[str, Any]]:
+        """Classify history through the warm Vision worker's Core ML Rampart session."""
+
+        if self._config.worker_kind != "vision":
+            raise RedactionError("history classification requires the Vision worker")
+        if not texts:
+            return []
+        encoded = json.dumps(texts, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        key = sha256(encoded).digest()
+        with self._lock:
+            try:
+                self._cancel_idle_timer()
+                cached = self._text_cache.get(key)
+                if cached is not None:
+                    self._text_cache.move_to_end(key)
+                    return copy.deepcopy(cached)
+                self._ensure_started()
+                process = self._process
+                if process is None or process.stdin is None:
+                    raise RedactionError("Vision worker is unavailable")
+                request_id = str(next(self._ids))
+                request = {
+                    "id": request_id,
+                    "operation": "classify_texts",
+                    "texts": list(texts),
+                }
+                try:
+                    process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+                    process.stdin.flush()
+                except (BrokenPipeError, OSError) as exc:
+                    self._stop_process()
+                    raise RedactionError("Vision worker stopped") from exc
+                response = self._wait_response(self._config.frame_timeout_s)
+                classifications = response.get("classifications")
+                if (
+                    response.get("id") != request_id
+                    or response.get("ok") is not True
+                    or not isinstance(classifications, list)
+                    or len(classifications) != len(texts)
+                    or any(not isinstance(item, dict) for item in classifications)
+                ):
+                    raise RedactionError("Vision history-classification protocol mismatch")
+                result: list[dict[str, Any]] = copy.deepcopy(classifications)
+                self._text_cache[key] = copy.deepcopy(result)
+                self._text_cache.move_to_end(key)
+                while len(self._text_cache) > max(1, self._config.cache_entries):
+                    self._text_cache.popitem(last=False)
+                return result
+            finally:
+                if self._process is not None:
+                    self._arm_idle_timer()
 
     def _ensure_started(self) -> None:
         process = self._process
@@ -250,6 +305,11 @@ class AcceleratedRedactor:
                 "--mode",
                 self._config.vision_mode,
             ]
+            if self._config.visual_model is not None:
+                visual_model = self._config.visual_model.resolve()
+                if not visual_model.is_file():
+                    raise RedactionError("configured visual detector is missing")
+                command.extend(("--visual-model", str(visual_model)))
             working_directory = root
         try:
             responses: queue.Queue[dict[str, Any] | None] = queue.Queue()

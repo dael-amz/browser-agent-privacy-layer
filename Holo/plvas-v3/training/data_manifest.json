@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "status": "configuration_only",
+  "dataset": {
+    "id": "ai4privacy/pii-masking-openpii-1.5m",
+    "revision": "a785eb528e28be2693c3718a27e066970de5dadb",
+    "license": "CC-BY-4.0",
+    "language_filter": "en and en-*",
+    "preserve_published_splits": true
+  },
+  "base_model": {
+    "id": "google/bert_uncased_L-4_H-256_A-4",
+    "revision": "387825ce42dbb39b87911cdf8e383ee3b25184f8",
+    "license": "Apache-2.0"
+  },
+  "defaults": {
+    "seed": 1311,
+    "openpii_train": 250000,
+    "openpii_validation": 50000,
+    "synthetic_train": 100000,
+    "synthetic_validation": 20000,
+    "synthetic_holdout": 20000,
+    "synthetic_noise_fraction": 0.35,
+    "tokenizer_vocab_size": 8192
+  },
+  "note": "The generated output directory contains the measured manifest with counts and file hashes."
+}

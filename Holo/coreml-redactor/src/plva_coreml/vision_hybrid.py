@@ -30,15 +30,19 @@ class HybridVisionRedactor:
         *,
         profile: str = "high-recall",
         mode: str = "cascade",
+        visual_model: Path | None = None,
     ) -> None:
         if mode not in VISION_PIPELINE_MODES:
             raise ValueError(f"mode must be one of: {', '.join(VISION_PIPELINE_MODES)}")
         self._profile = profile
         self._mode = mode
-        visual_model = prepare_fixed_visual_model(
-            baseline / "dist/visual/detector.onnx", cache / "models/visual-fixed.onnx"
+        prepared_visual_model = prepare_fixed_visual_model(
+            visual_model or baseline / "dist/visual/detector.onnx",
+            cache / "models/visual-fixed.onnx",
         )
-        self._visual = VisualANESession(visual_model, cache_directory=cache / "compiled/visual")
+        self._visual = VisualANESession(
+            prepared_visual_model, cache_directory=cache / "compiled/visual"
+        )
         self._vision = VisionOCRClient(cache)
         self._semantic = SemanticPipeline(baseline, cache)
         self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="plva-vision")
@@ -54,6 +58,15 @@ class HybridVisionRedactor:
     def close(self) -> None:
         self._vision.close()
         self._executor.shutdown(wait=True, cancel_futures=True)
+
+    def classify_texts(self, texts: tuple[str, ...]) -> tuple[OCRFinding, ...]:
+        """Run the warm Core ML Rampart/rule path over outbound history strings."""
+
+        findings = tuple(
+            OCRFinding(0, index, 1, index + 1, text, 1.0, 1.0)
+            for index, text in enumerate(texts)
+        )
+        return self._semantic.classify(findings).findings
 
     def process(self, png: bytes) -> HybridResult:
         total_started = time.perf_counter()

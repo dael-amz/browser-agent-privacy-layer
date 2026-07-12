@@ -1,10 +1,22 @@
-import { cpSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { defineConfig } from "vite";
 
 const BASELINE = path.resolve(
   process.env.PLVA_BASELINE_ROOT ?? "../plva-v2-baseline",
+);
+const V3_VISUAL_MODEL = path.resolve(
+  "../plvas-v3/harness/plva-v2-baseline/runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx",
+);
+const VISUAL_MODEL = path.resolve(
+  process.env.PLVA_VISUAL_MODEL ??
+    (existsSync(V3_VISUAL_MODEL)
+      ? V3_VISUAL_MODEL
+      : path.join(
+          BASELINE,
+          "runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx",
+        )),
 );
 
 export default defineConfig({
@@ -95,6 +107,12 @@ function copyRuntimeModels() {
       outputDirectory = path.resolve(config.root, config.build.outDir);
     },
     closeBundle() {
+      if (!existsSync(VISUAL_MODEL)) {
+        throw new Error(`visual detector not found: ${VISUAL_MODEL}`);
+      }
+      const visualDestination = path.join(outputDirectory, "visual/detector.onnx");
+      mkdirSync(path.dirname(visualDestination), { recursive: true });
+      cpSync(VISUAL_MODEL, visualDestination);
       for (const relative of ["ocr", "semantic/rampart"]) {
         const source = path.join(BASELINE, "runtime/models", relative);
         const destination = path.join(outputDirectory, relative);

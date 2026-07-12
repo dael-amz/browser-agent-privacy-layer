@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository": "WebPII/models",
+    "revision": "de27fa3ae82bfab34fa28281fc9dc9786fd01600",
+    "license": "NOASSERTION",
+    "redistribution_approved": false
+  },
+  "model": {
+    "name": "WebRedact",
+    "format": "OpenVINO IR",
+    "resolution": [640, 640],
+    "input_name": "x",
+    "input_shape": [1, 3, 640, 640],
+    "output_shape": [1, 6, 8400],
+    "classes": ["text", "image"]
+  },
+  "preprocessing": {
+    "resize": "fit_to_window_letterbox",
+    "pad_value": 114,
+    "input_color": "RGB",
+    "source_reader_color": "BGR",
+    "reverse_input_channels": true,
+    "scale": 255
+  },
+  "postprocessing": {
+    "output_layout": "cxcywh_plus_two_class_scores",
+    "nms_iou_threshold": 0.7,
+    "published_confidence_threshold": null,
+    "smoke_confidence_threshold": 0.25,
+    "maximum_detections": 300
+  },
+  "browser_conversion": {
+    "status": "blocked",
+    "reason": "The public release contains OpenVINO IR only. It has no ONNX or source checkpoint, and supported OpenVINO conversion is into IR rather than out of IR."
+  }
+}
+

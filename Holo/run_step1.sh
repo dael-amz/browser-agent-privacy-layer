@@ -27,6 +27,7 @@ PORT="${PLVA_PORT:-18081}"
 UV="${UV:-$HOME/.local/bin/uv}"
 TASK="${1:-$DEFAULT_TASK}"
 PROVIDER="${PLVA_PROVIDER:-overshoot}"
+REDACT_ENGINE="${PLVA_REDACT_ENGINE:-accelerated}"
 
 case "$PROVIDER" in
   overshoot)
@@ -76,16 +77,35 @@ case "${PLVA_REDACT:-0}" in
     ;;
 esac
 if [[ "$REDACTION_ENABLED" == 1 ]]; then
+  PRIVACY_DEFAULT=0
+  [[ "$REDACT_ENGINE" == "vision" ]] && PRIVACY_DEFAULT=1
+  case "${PLVA_PRIVACY:-$PRIVACY_DEFAULT}" in
+    1|true|TRUE|yes|YES|on|ON) PRIVACY_ENABLED=1 ;;
+    0|false|FALSE|no|NO|off|OFF|"") PRIVACY_ENABLED=0 ;;
+    *)
+      echo "ERROR: PLVA_PRIVACY must be an on/off value" >&2
+      exit 1
+      ;;
+  esac
   HOOK_ARGS+=(
     --redact plva-v2-baseline
-    --redact-engine "${PLVA_REDACT_ENGINE:-accelerated}"
+    --redact-engine "$REDACT_ENGINE"
     --redact-backend "${PLVA_REDACT_BACKEND:-auto}"
     --vision-worker "${PLVA_VISION_WORKER:-coreml-redactor}"
     --vision-mode "${PLVA_VISION_MODE:-cascade}"
     --redact-lifecycle "${PLVA_REDACT_LIFECYCLE:-adaptive}"
     --redact-idle-seconds "${PLVA_REDACT_IDLE_SECONDS:-60}"
   )
-  echo "--- redaction ON (${PLVA_REDACT_ENGINE:-accelerated}, ${PLVA_REDACT_LIFECYCLE:-adaptive}); watch frames at http://127.0.0.1:$PORT/viewer and OCR at /viewer/findings"
+  if [[ "$REDACT_ENGINE" == "vision" ]]; then
+    VISUAL_MODEL="${PLVA_VISUAL_MODEL:-plvas-v3/harness/plva-v2-baseline/runtime/training/artifacts/plva-visual-agpl-test-v2/visual/detector.onnx}"
+    if [[ ! -f "$VISUAL_MODEL" ]]; then
+      echo "ERROR: visual detector not found: $VISUAL_MODEL" >&2
+      exit 1
+    fi
+    HOOK_ARGS+=(--visual-model "$VISUAL_MODEL")
+  fi
+  [[ "$PRIVACY_ENABLED" == 1 ]] && HOOK_ARGS+=(--privacy)
+  echo "--- redaction ON ($REDACT_ENGINE, ${PLVA_REDACT_LIFECYCLE:-adaptive}); privacy=$PRIVACY_ENABLED; watch frames at http://127.0.0.1:$PORT/viewer and OCR at /viewer/findings"
 else
   echo "--- redaction OFF"
 fi

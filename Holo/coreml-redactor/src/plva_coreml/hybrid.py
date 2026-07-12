@@ -39,12 +39,22 @@ class HybridResult:
 class HybridANERedactor:
     """Own warm Core ML sessions and run independent detector branches concurrently."""
 
-    def __init__(self, baseline: Path, cache: Path, *, profile: str = "high-recall") -> None:
+    def __init__(
+        self,
+        baseline: Path,
+        cache: Path,
+        *,
+        profile: str = "high-recall",
+        visual_model: Path | None = None,
+    ) -> None:
         self._profile = profile
-        visual_model = prepare_fixed_visual_model(
-            baseline / "dist/visual/detector.onnx", cache / "models/visual-fixed.onnx"
+        prepared_visual_model = prepare_fixed_visual_model(
+            visual_model or baseline / "dist/visual/detector.onnx",
+            cache / "models/visual-fixed.onnx",
         )
-        self._visual = VisualANESession(visual_model, cache_directory=cache / "compiled/visual")
+        self._visual = VisualANESession(
+            prepared_visual_model, cache_directory=cache / "compiled/visual"
+        )
         self._ocr = OCRPipeline(baseline, cache)
         self._semantic = SemanticPipeline(baseline, cache)
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="plva-detect")

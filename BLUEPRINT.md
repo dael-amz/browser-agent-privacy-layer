@@ -82,7 +82,8 @@ detector must, however, emit recognized **values** to the vault locally — see 
   loop (screen capture, model call, action execution). **CHANGED — skills:** HoloDesktop has its
   **own** native skill mechanism (`~/.holo/skills/*/SKILL.md`, loaded into the model request by the
   runtime). Skills are **not** a NemoClaw feature. Teaching the model about placeholders can use a
-  native skill *or* proxy injection; we prefer proxy injection for guaranteed presence (§9 Step 5).
+  native skill *or* proxy injection; we prefer proxy injection for guaranteed presence, optionally
+  reinforced by a skill (§9 Steps 5 and 5a).
 - **Overshoot** — the inference provider. OpenAI-compatible HTTP API.
 - **NemoClaw / OpenShell** — NVIDIA's agent stack. **OpenShell** is its sandbox (network + file
   isolation). In this project it is used to **sandbox processes we launch** (primarily the mediator,
@@ -328,7 +329,7 @@ what Step 5 needs.
 
 ---
 
-### 🔲 Step 5 — Vault + placeholder resolution + history scrub (the privacy core) — **HIGHEST PRIORITY**
+### ✅ Step 5 — Vault + placeholder resolution + history scrub (the privacy core) — **COMPLETE**
 - **Goal:** the model works with placeholders it can reason about but never sees the real values;
   actions resolve to real values in transit; history never re-exposes a resolved value.
 - **Build:**
@@ -346,6 +347,67 @@ what Step 5 needs.
   contains it; every injected stage failure forwards nothing; no log carries a real value.
 - **VERIFY (empirical, do first):** confirm Holo3 actually honors placeholder instructions rather
   than hallucinating the hidden value. If not, rethink before building the rest.
+
+**Completed 2026-07-12:** the Vision OCR/Rampart finding supplies the value and box to one
+session-only vault assignment; the proxy paints the vault token on that same redacted box, injects
+placeholder instructions, resolves only executed action fields, and scrubs outbound history by
+plain vault match followed by the warm Core ML Rampart backstop. Deterministic fixtures, injected
+failures, JSON/SSE proxy gates, and a synthetic Holo provider pass succeeded. Holo copied the exact
+visible token into `write`; the proxy resolved it locally while leaving reasoning untouched. See
+`Holo/verification/step-5-privacy-core.md`.
+
+### ✅ Step 5a — Richer placeholder teaching (scheme + on-screen manifest + duplicate warning + skill)
+- **Goal:** strengthen how the CUA is taught about placeholders. Step 5 already ships a *basic*
+  injection and confirmed Holo3 copies a visible token verbatim into a `write`; 5a makes the
+  teaching explicit and robust so the model reasons well across many tokens and edge cases. It tells
+  the model three things and optionally reinforces them with a skill.
+- **Build — the proxy request hook injects three parts** (input only, so `structured_outputs` is
+  unaffected; every part carries tokens + class labels, **never** real values, so it is safe to sit
+  in scrubbed history). Use the real nonce-namespaced tokens (§6); examples elide the suffix:
+  1. **General scheme (static — same every request).** Draft:
+     > "Some sensitive values on screen are hidden behind placeholder tokens written «CLASS_N»
+     > (e.g. «EMAIL_1», «PHONE_2»); the real token also carries a short session suffix. Each token
+     > stands for a real value you cannot see. Treat a token exactly as the real value of that
+     > class — you may click it, type it, or otherwise act on it. To use a value, emit its token
+     > **verbatim** (exact spelling, including the suffix) in the action field. Never invent, guess,
+     > describe, or alter the underlying value. If a value you need is not shown as a token, do not
+     > fabricate it."
+  2. **On-screen manifest (dynamic — rebuilt each frame).** The proxy reads the vault's
+     active-placeholder manifest for the *current* redacted frame and lists only the tokens actually
+     present this step, with their class:
+     > "Placeholders visible now: «EMAIL_1» (email), «PHONE_1» (phone), «ADDRESS_1» (postal
+     > address)."
+     Listing only current tokens (never stale ones) keeps the model from referencing a token that
+     is not on screen; the class hints help it choose the right field.
+  3. **Duplicate warning (static).** Per §6 (duplicates tolerated this build):
+     > "Occasionally the same real value may appear under more than one token across steps
+     > (e.g. «EMAIL_1» and «EMAIL_2» may be the same email); this is rare. Treat each token
+     > independently and use whichever token labels the field you are acting on."
+- **Placement / cadence:** inject the **scheme** and **duplicate warning** as (or appended to) a
+  system-role message — **add** a message rather than overwriting the runtime's own system prompt,
+  so Holo3's action behavior is undisturbed; attach the **manifest** to the current step's
+  user/observation message so it sits next to the frame it describes. Re-inject every step (the
+  manifest is per-frame; repeating the static parts is cheap and survives context truncation).
+- **Reinforcing skill (recommended):** also ship a native HoloDesktop skill
+  (`~/.holo/skills/plva-placeholders/SKILL.md`) carrying the **general scheme only** — skills are
+  static, so they cannot hold the per-frame manifest or duplicate specifics, which stay in the proxy
+  injection. The runtime loads the skill into context as a first-class capability doc, reinforcing
+  the injection. Keep the proxy injection as the source of truth (guaranteed present, carries the
+  dynamic parts); treat the skill as belt-and-suspenders.
+- **Verify:** the manifest lists exactly the tokens in the current frame (no stale, none missing);
+  in a crafted duplicate case (one value under two tokens) the model still acts correctly using the
+  shown token; injection is input-only and never appears in model *output* fields; logs carry tokens
+  + class only, never values. (Basic token-cooperation is already confirmed by Step 5.)
+
+**Completed 2026-07-12:** every privacy-enabled request now receives a fresh system-role scheme
+and duplicate warning plus a value-free manifest immediately beside the current screenshot. The
+manifest is produced atomically by the same vault-paint operation, lists only token/class pairs,
+explicitly says `none` when the current frame has no tokens, and removes older injected manifests
+before forwarding. The action syntax clarifies that Holo must emit the exact inner token without
+the decorative guillemets. A static `plva-placeholders` HoloDesktop skill reinforces the scheme;
+the proxy remains authoritative. Unit/integration tests cover exact current-frame membership,
+stale-token removal, empty manifests, malformed-token rejection, and absence of cleartext. See
+`Holo/verification/step-5a-placeholder-teaching.md`.
 
 ### 🔲 Step 6 — Configurable per-class PII safety policy
 - **Goal:** the user chooses, per class, `hide_use` / `approval` / `blocked` (and later variants).
