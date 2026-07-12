@@ -269,6 +269,37 @@ def image_replacement_hook(image_path: Path) -> RequestHook:
     return replace
 
 
+def grammar_capture_hook(out_path: Path) -> RequestHook:
+    """Snapshot the first request's action grammar to a file — schema only, never messages.
+
+    Step 6.5 needs the runtime's ``structured_outputs`` value to judge whether a
+    novel tool action is even grammatically admissible. The snapshot records
+    request keys, model id, ``structured_outputs``, and ``chat_template_kwargs``
+    and deliberately nothing else (§8.5): the message history — the only part
+    that can carry frames or values — is never written.
+    """
+
+    captured = threading.Event()
+
+    def capture(
+        document: dict[str, Any], headers: dict[str, str]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        if not captured.is_set():
+            captured.set()
+            request_keys = sorted(document)
+            snapshot = {
+                "request_keys": request_keys,
+                "model": document.get("model"),
+                "structured_outputs": document.get("structured_outputs"),
+                "chat_template_kwargs": document.get("chat_template_kwargs"),
+            }
+            out_path.write_text(json.dumps(snapshot, indent=2) + "\n")
+            _LOGGER.info("grammar snapshot written: keys=%d", len(request_keys))
+        return document, headers
+
+    return capture
+
+
 @dataclass(slots=True)
 class FrameRecord:
     frame_id: int
@@ -1485,6 +1516,12 @@ def main() -> None:
         default=int(os.environ.get("PLVA_AUDIT_CAPACITY", "32")),
         help="maximum redacted sent-frame records kept in memory (default: 32)",
     )
+    parser.add_argument(
+        "--capture-grammar",
+        type=Path,
+        default=None,
+        help="write the first request's structured_outputs schema (never messages) to this file",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
@@ -1648,6 +1685,8 @@ def main() -> None:
         if extra_hook is not None:
             hooks = _combine_hooks(hooks, Hooks(on_request=extra_hook))
     hooks = _combine_hooks(hooks, privacy_hooks)
+    if args.capture_grammar is not None:
+        hooks = _combine_hooks(Hooks(on_request=grammar_capture_hook(args.capture_grammar)), hooks)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     if args.privacy:
