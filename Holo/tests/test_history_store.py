@@ -103,8 +103,8 @@ def test_controller_records_run_lifecycle_into_history(tmp_path: Path) -> None:
     controller = demo.DemoController(history_root=tmp_path)
     store = demo.HistoryStore(tmp_path)
     run_id = store.create_run("seed", {}, {})
-    controller._run_id = run_id  # noqa: SLF001 - lifecycle seam
-    controller._event("Provider connected", "The selected Holo model is available.")  # noqa: SLF001
+    controller._run_id = run_id
+    controller._event("Provider connected", "The selected Holo model is available.")
 
     detail = store.run(run_id)
     assert detail is not None
