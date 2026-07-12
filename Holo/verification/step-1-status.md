@@ -72,6 +72,6 @@ substitute and run the Step 1 task against Overshoot. State of the four blockers
 4. **Authorization to stream live frames** — granted by the operator's instruction to finish
    Step 1 (the runbook's privacy note restates what the run sends).
 
-**Remaining to close Step 1:** the operator places the Overshoot key in `Codex_RUn/.env` and
+**Remaining to close Step 1:** the operator places the Overshoot key in `Holo/.env` and
 executes `step-1-runbook.md` (§2 preflight → §3 task → §4 egress check → §5 record). No key was
 present on this machine at build time, so the live run could not be executed yet.

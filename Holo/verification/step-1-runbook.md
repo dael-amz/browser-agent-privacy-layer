@@ -5,7 +5,7 @@ Date: 2026-07-11
 Everything below is built, tested, and ready. The only missing input is the Overshoot API key.
 One full pass of §3 + §4 closes Step 1's "agent finishes a task end-to-end" verify.
 
-**Fastest path:** do §1, then run `./run_step1.sh` from `Codex_RUn/` — it performs §2–§4
+**Fastest path:** do §1, then run `./run_step1.sh` from `Holo/` — it performs §2–§4
 (proxy, preflight, task, egress observation, artifact shredding) in one command. The sections
 below are the manual equivalent.
 
@@ -15,7 +15,7 @@ below are the manual equivalent.
 
 ## 1. Put the key in place (operator)
 
-Create `Codex_RUn/.env` (git-ignored; never committed) with one line:
+Create `Holo/.env` (git-ignored; never committed) with one line:
 
 ```
 API_KEY=<your Overshoot key>
@@ -26,7 +26,7 @@ API_KEY=<your Overshoot key>
 ## 2. Start the proxy and preflight the key (Terminal A)
 
 ```bash
-cd ~/Hackathon/Codex_RUn
+cd ~/Hackathon/Holo
 .venv/bin/plva-proxy            # binds 127.0.0.1:18081, upstream = Overshoot /v1beta
 ```
 

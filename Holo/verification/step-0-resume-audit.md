@@ -24,7 +24,7 @@ not been authorized or run. A closed-runtime screenshot-log conflict must also b
 
 ## Repaired baseline
 
-The saved run had been flattened while moving it into `Codex_RUn`: the package no longer matched
+The saved run had been flattened while moving it into `Holo`: the package no longer matched
 the declared `src/` layout and the declared README was absent. The package layout and README are
 now restored. The premature `plva-proxy` console script was removed because Step 3 has not been
 built; the existing provider probe and the Step 0 runtime-capture probe are the only installed
@@ -87,5 +87,5 @@ satisfy the blueprint's “never logged” constraint.
 ## Repository-state caveat
 
 The outer Git repository still sees its formerly tracked root project files as deleted and
-`Codex_RUn/` as untracked. This resume pass intentionally did not discard, relocate, stage, or
+`Holo/` as untracked. This resume pass intentionally did not discard, relocate, stage, or
 commit that user-created move.

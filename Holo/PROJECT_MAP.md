@@ -13,7 +13,7 @@ Last updated: 2026-07-11
 Hackathon/
 ├── BLUEPRINT.md                         Build order, architecture, constraints, and acceptance gates
 ├── README.md                            Short description of the outer repository
-└── Codex_RUn/                           Active midway run being evaluated and continued
+└── Holo/                                Active run (renamed from Codex_RUn on 2026-07-11)
     ├── PROJECT_MAP.md                   This living directory and status guide
     ├── README.md                        Active project overview and safety warning
     ├── run_step1.sh                     One-command Step 1 run (proxy + preflight + task + cleanup)
@@ -26,11 +26,12 @@ Hackathon/
     │   └── plva_proxy/
     │       ├── __init__.py              Python package marker
     │       ├── contract_probe.py        Privacy-safe Overshoot model/JSON/SSE contract probe
-    │       ├── proxy.py                 Loopback pass-through relay to Overshoot (fail-closed, SSE-safe)
+    │       ├── proxy.py                 Loopback interception proxy: relay + mutation hooks (fail-closed, SSE-safe)
     │       └── runtime_capture.py       Loopback-only Holo screenshot-transport capture stub (+ /health)
     ├── tests/
     │   ├── test_contract_probe.py       Provider probe, failure, CLI, and safe-output tests
     │   ├── test_proxy.py                Relay fidelity, credential, SSE, fail-closed, and log-hygiene tests
+    │   ├── test_proxy_hooks.py          Step 3 hook seam: mutation, SSE re-emit, and fail-closed tests
     │   └── test_runtime_capture.py      Capture validation, JSON/SSE, health, privacy, and bind tests
     ├── docs/
     │   ├── decisions/
@@ -43,7 +44,8 @@ Hackathon/
         ├── step-0-resume-audit.md       Prior blockers, now annotated with their resolution
         ├── step-0-runtime-capture.md    PASS: real runtime screenshot traversed the base URL
         ├── step-1-status.md             §7 decision recorded; resume notes: ready to run
-        └── step-1-runbook.md            One-pass instructions to close Step 1 once the key exists
+        ├── step-1-runbook.md            One-pass instructions to close Step 1 once the key exists
+        └── step-3-status.md             Interception hooks built; local verify PASS, live verify pending
 ```
 
 ## What each area is for
@@ -58,8 +60,8 @@ Hackathon/
 | `.env.example` | Documents required variable names only. A real `.env` remains local and ignored. |
 | `PROJECT_MAP.md` | Catch-up document for humans; update it in the same change as structural work. |
 
-The old flattened `Codex_RUn/plva_proxy/` location now contains only ignored Python cache data.
-The actual source files are under `Codex_RUn/src/plva_proxy/`; IDE tabs pointing at the flattened
+The old flattened `Holo/plva_proxy/` location now contains only ignored Python cache data.
+The actual source files are under `Holo/src/plva_proxy/`; IDE tabs pointing at the flattened
 path are stale.
 
 ## Current blueprint checkpoint
@@ -68,7 +70,12 @@ path are stale.
 decision is resolved, the pass-through proxy (the ADR's sole-egress component, functionally the
 Step 3 pass-through core built early) is implemented and gated, the pf egress rule set is authored,
 and `verification/step-1-runbook.md` closes the step in one pass — it waits only on the operator's
-Overshoot key in `.env`. Steps 2–4 have not started (Step 3's hook/mutation surface is still open).
+Overshoot key in `.env`. **Step 3 is BUILT and locally verified** (2026-07-11, on operator
+instruction): the proxy now exposes a request/response mutation hook seam (`--hook test` enables
+the blueprint's test hooks; default remains pass-through), with SSE responses buffered,
+reconstructed, mutated, and re-emitted under a response hook, and every hook/parse failure failing
+closed. Its live verify (the Step 1/2 task running unchanged through pass-through and hook modes)
+rides on the pending live run. Step 2 (Overshoot latency measurement) and Step 4 have not started.
 
 Completed evidence:
 
@@ -90,12 +97,12 @@ Completed evidence:
 
 Active blockers / open items:
 
-- **Step 1 live run awaits the operator's Overshoot key** in `Codex_RUn/.env` (`API_KEY=...`),
+- **Step 1 live run awaits the operator's Overshoot key** in `Holo/.env` (`API_KEY=...`),
   then one pass of `verification/step-1-runbook.md`. Live-frame streaming for this run was
   authorized by the operator on 2026-07-11 ("finish step 1").
 - The closed runtime writes frame-bearing `events.jsonl` with no disable knob; every real run must
   relocate `--runs-dir` to an ephemeral local path and shred it. `~/.holo/runs` is off-limits.
-- The outer Git repository still represents the move into `Codex_RUn/` as deleted tracked root
+- The outer Git repository still represents the move into `Holo/` as deleted tracked root
   files plus an untracked directory. That user-created repository reorganization has not been
   staged, committed, or reversed.
 
@@ -104,16 +111,17 @@ Active blockers / open items:
 | Command | Purpose |
 |---|---|
 | `plva-probe` | Run the live synthetic Overshoot contract probe when `API_KEY` is supplied. |
-| `plva-proxy` | Loopback pass-through relay to Overshoot; reads `API_KEY` from env or `./.env`. |
+| `plva-proxy` | Loopback interception proxy to Overshoot; reads `API_KEY` from env or `./.env`; `--hook test` enables the Step 3 test hooks, `--hook-image <path>` swaps every outbound screenshot for a static image (default: pass-through). |
 | `plva-runtime-capture` | Start the metadata-only capture stub on `127.0.0.1`; it never contacts a provider. |
 
-`plva-proxy` is currently pass-through only: it is the runtime's sole endpoint and the sole
-provider egress (Step 1/ADR-0001 role). Step 3 adds its mutation/test hooks; Step 4 adds
-redaction and placeholder resolution.
+`plva-proxy` is the runtime's sole endpoint and the sole provider egress (Step 1/ADR-0001 role),
+now with the Step 3 mutation seam (`Hooks`): request hooks rewrite body + upstream headers,
+response hooks rewrite the completion (JSON and SSE). Step 4 plugs redaction and placeholder
+resolution into that seam.
 
 ## Local verification commands
 
-Run from `Codex_RUn/`:
+Run from `Holo/`:
 
 ```bash
 ~/.local/bin/uv sync --frozen

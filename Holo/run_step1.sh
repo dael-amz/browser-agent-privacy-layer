@@ -5,7 +5,7 @@
 #   ./run_step1.sh "your own task prompt"   # custom task for the agent
 #   Press Esc twice during the run to abort it.
 #
-# Prereq: Codex_RUn/.env containing   API_KEY=<your Overshoot key>
+# Prereq: Holo/.env containing   API_KEY=<your Overshoot key>
 # Details and manual variant: verification/step-1-runbook.md
 #
 # NOTE: this streams UNREDACTED screenshots of the visible desktop to Overshoot
@@ -27,13 +27,24 @@ UV="${UV:-$HOME/.local/bin/uv}"
 TASK="${1:-$DEFAULT_TASK}"
 
 if [[ ! -f .env ]] || ! grep -Eq '^API_KEY=..*' .env; then
-  echo "ERROR: put your Overshoot key in Codex_RUn/.env as a single line: API_KEY=<key>" >&2
+  echo "ERROR: put your Overshoot key in Holo/.env as a single line: API_KEY=<key>" >&2
   exit 1
 fi
 
 # 1) Start the loopback proxy (the sole provider egress; reads ./.env).
+#    PLVA_HOOK=test enables the Step 3 test hooks for the hook-mode verify.
+#    PLVA_HOOK_IMAGE=/path/to.png replaces every outbound screenshot with that
+#    static image (no real desktop pixels egress; fails closed if no frame).
 PROXY_LOG=/tmp/plva-proxy-step1.log
-.venv/bin/plva-proxy --port "$PORT" >"$PROXY_LOG" 2>&1 &
+HOOK_ARGS=(--hook "${PLVA_HOOK:-none}")
+if [[ -n "${PLVA_HOOK_IMAGE:-}" ]]; then
+  if [[ ! -f "$PLVA_HOOK_IMAGE" ]]; then
+    echo "ERROR: PLVA_HOOK_IMAGE file not found: $PLVA_HOOK_IMAGE (relative paths resolve against $(pwd))" >&2
+    exit 1
+  fi
+  HOOK_ARGS+=(--hook-image "$PLVA_HOOK_IMAGE")
+fi
+.venv/bin/plva-proxy --port "$PORT" "${HOOK_ARGS[@]}" >"$PROXY_LOG" 2>&1 &
 PROXY_PID=$!
 OBS_FILE=$(mktemp /tmp/plva-step1-egress.XXXXXX)
 RUNS_DIR=""
@@ -43,16 +54,31 @@ cleanup() {
   [[ -n "$RUNS_DIR" ]] && rm -rf "$RUNS_DIR"
 }
 trap cleanup EXIT
+PROXY_UP=""
 for _ in $(seq 1 20); do
-  curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break
+  if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+    PROXY_UP=1
+    break
+  fi
+  kill -0 "$PROXY_PID" 2>/dev/null || break
   sleep 0.25
 done
+if [[ -z "$PROXY_UP" ]]; then
+  echo "ERROR: the proxy failed to start. Its log says:" >&2
+  tail -3 "$PROXY_LOG" >&2
+  exit 1
+fi
 
 # 2) Preflight: proves key + upstream reachability without sending any frame.
 echo "--- preflight: listing models through the proxy"
 if ! curl -sf "http://127.0.0.1:$PORT/v1/models" | python3 -c "
 import json, sys
-ids = [m.get('id') for m in json.load(sys.stdin).get('data', [])]
+raw = sys.stdin.read()
+try:
+    ids = [m.get('id') for m in json.loads(raw).get('data', [])]
+except ValueError:
+    print('preflight got no valid JSON from the proxy')
+    raise SystemExit(1)
 ok = any('Holo3-35B-A3B' in str(i) for i in ids)
 print('Holo3-35B-A3B advertised:', ok)
 raise SystemExit(0 if ok else 1)
