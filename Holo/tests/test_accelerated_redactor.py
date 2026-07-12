@@ -35,6 +35,7 @@ for line in sys.stdin:
         "backend": "webgpu",
         "counts": {"fused": 2},
         "timings": {"workerTotalMs": 12},
+        "findings": [{"text": "synthetic", "labels": ["EMAIL"]}],
     }), flush=True)
 """
 
@@ -87,6 +88,24 @@ def test_accelerated_redactor_stays_warm_and_caches_exact_frames(tmp_path: Path)
     assert cached == first
     assert second == PNG_SIGNATURE + b"2"
     assert redactor.backend == "closed"
+
+
+def test_accelerated_redactor_retains_findings_for_viewer_and_cache(tmp_path: Path) -> None:
+    redactor = AcceleratedRedactor(make_config(tmp_path))
+    frame = PNG_SIGNATURE + b"raw-frame"
+
+    try:
+        redactor(frame)
+        first = redactor.latest_analysis
+        redactor(frame)
+        cached = redactor.latest_analysis
+    finally:
+        redactor.close()
+
+    assert first["backend"] == "webgpu"
+    assert first["counts"] == {"fused": 2}
+    assert first["findings"] == [{"text": "synthetic", "labels": ["EMAIL"]}]
+    assert cached == first
 
 
 def test_accelerated_redactor_fails_closed_when_worker_rejects_frame(tmp_path: Path) -> None:

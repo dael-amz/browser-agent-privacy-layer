@@ -11,6 +11,29 @@ For a human-readable directory tour, file responsibilities, and the current resu
 
 ## Accelerated redaction setup
 
+The lowest-latency macOS path uses native Apple Vision OCR, the Core ML visual detector, and Core
+ML Rampart. Install its isolated environment once:
+
+```bash
+cd coreml-redactor
+$HOME/.local/bin/uv sync --group dev
+cd ..
+```
+
+Run the complete CUA through that pipeline:
+
+```bash
+PLVA_REDACT=1 \
+PLVA_REDACT_ENGINE=vision \
+PLVA_REDACT_LIFECYCLE=eager \
+./run_step1.sh "your task"
+```
+
+Watch exactly what the model receives at `http://127.0.0.1:18081/viewer`. The latest memory-only
+OCR/vault candidates are at `http://127.0.0.1:18081/viewer/findings`; that endpoint contains
+sensitive cleartext and is never persisted or logged. `PLVA_VISION_MODE=cascade` is the default:
+it runs fast OCR over the frame and accurate OCR only over sensitive or uncertain regions.
+
 The default redaction engine is an adaptive worker that runs visual and OCR detection concurrently
 and uses WebGPU for the visual detector when available. Build its generated local assets after
 placing the frozen detector at `plva-v2-baseline/`:

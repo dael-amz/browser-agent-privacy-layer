@@ -8,11 +8,14 @@ dependencies = [
   "onnx>=1.20,<2",
   "onnxruntime>=1.27,<1.28",
   "pillow>=12.1,<13",
+  "scipy>=1.17,<2",
+  "tokenizers>=0.22,<0.23",
 ]
 
 [project.scripts]
 plva-ane-probe = "plva_coreml.probe:main"
 plva-ane-live = "plva_coreml.live:main"
+plva-vision-worker = "plva_coreml.worker:main"
 
 [build-system]
 requires = ["hatchling>=1.28"]
@@ -23,8 +26,10 @@ packages = ["src/plva_coreml"]
 
 [dependency-groups]
 dev = [
+  "mypy>=1.19,<2",
   "pytest>=9,<10",
   "ruff>=0.14,<0.15",
+  "types-pillow>=10.2",
 ]
 
 [tool.pytest.ini_options]
@@ -39,3 +44,9 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/plva_coreml/live.py" = ["E501"] # embedded viewer HTML/CSS/JS
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+disable_error_code = ["no-any-return"]

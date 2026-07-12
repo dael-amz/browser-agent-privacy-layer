@@ -10,6 +10,7 @@ failure so callers fail closed; neither has a raw-frame fallback.
 from __future__ import annotations
 
 import binascii
+import copy
 import json
 import logging
 import os
@@ -59,6 +60,10 @@ class AcceleratedRedactorConfig:
     frame_timeout_s: float = 180.0
     cache_entries: int = 4
     idle_timeout_s: float | None = 60.0
+    worker_kind: str = "browser"
+    worker_root: Path | None = None
+    cache_root: Path | None = None
+    vision_mode: str = "cascade"
 
 
 class AcceleratedRedactor:
@@ -74,8 +79,16 @@ class AcceleratedRedactor:
     """
 
     def __init__(self, config: AcceleratedRedactorConfig) -> None:
-        if config.backend not in BACKENDS:
+        if config.worker_kind not in {"browser", "vision"}:
+            raise ValueError("worker_kind must be browser or vision")
+        if config.worker_kind == "browser" and config.backend not in BACKENDS:
             raise ValueError(f"backend must be one of: {', '.join(BACKENDS)}")
+        if config.worker_kind == "vision" and config.vision_mode not in {
+            "fast",
+            "cascade",
+            "accurate",
+        }:
+            raise ValueError("vision_mode must be fast, cascade, or accurate")
         if config.profile not in PROFILES:
             raise ValueError(f"profile must be one of: {', '.join(PROFILES)}")
         if config.cache_entries < 0:
@@ -88,8 +101,9 @@ class AcceleratedRedactor:
         self._responses: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self._reader: threading.Thread | None = None
         self._ids = count(1)
-        self._cache: OrderedDict[bytes, bytes] = OrderedDict()
+        self._cache: OrderedDict[bytes, tuple[bytes, dict[str, Any]]] = OrderedDict()
         self._backend = "not-started"
+        self._analysis: dict[str, Any] = {}
         self._idle_timer: threading.Timer | None = None
 
     @property
@@ -97,6 +111,13 @@ class AcceleratedRedactor:
         """Return the active backend after startup."""
 
         return self._backend
+
+    @property
+    def latest_analysis(self) -> dict[str, Any]:
+        """Return a detached copy of the latest worker metadata and OCR findings."""
+
+        with self._lock:
+            return copy.deepcopy(self._analysis)
 
     def start(self) -> None:
         """Start and warm the worker before the first frame arrives."""
@@ -116,8 +137,10 @@ class AcceleratedRedactor:
                 cached = self._cache.get(key)
                 if cached is not None:
                     self._cache.move_to_end(key)
+                    redacted, analysis = cached
+                    self._analysis = copy.deepcopy(analysis)
                     _LOGGER.info("redacted frame: memory cache hit")
-                    return cached
+                    return redacted
 
                 self._ensure_started()
                 process = self._process
@@ -156,13 +179,14 @@ class AcceleratedRedactor:
                 timings = response.get("timings")
                 regions = counts.get("fused", "?") if isinstance(counts, dict) else "?"
                 duration = timings.get("workerTotalMs", "?") if isinstance(timings, dict) else "?"
+                self._analysis = _safe_analysis(response, self._backend)
                 _LOGGER.info(
                     "redacted frame: %s region(s) masked backend=%s duration_ms=%s",
                     regions,
                     self._backend,
                     duration,
                 )
-                self._remember(key, redacted)
+                self._remember(key, redacted, self._analysis)
                 return redacted
             finally:
                 if self._process is not None:
@@ -173,6 +197,7 @@ class AcceleratedRedactor:
 
         with self._lock:
             self._cache.clear()
+            self._analysis = {}
             self._cancel_idle_timer()
             self._stop_process()
             self._backend = "closed"
@@ -181,35 +206,63 @@ class AcceleratedRedactor:
         process = self._process
         if process is not None and process.poll() is None:
             return
-        script = self._config.worker_script.resolve()
         baseline = self._config.baseline_root.resolve()
-        if not script.is_file():
-            raise RedactionError("accelerated worker script is missing")
-        if not (script.parent.parent / "dist" / "index.html").is_file():
-            raise RedactionError(
-                "accelerated worker is not built (run npm install && npm run build)"
-            )
         if not (baseline / "snapshot.json").is_file():
             raise RedactionError("frozen baseline assets are missing")
         environment = os.environ.copy()
         environment["PLVA_BASELINE_ROOT"] = str(baseline)
+        if self._config.worker_kind == "browser":
+            script = self._config.worker_script.resolve()
+            if not script.is_file():
+                raise RedactionError("accelerated worker script is missing")
+            if not (script.parent.parent / "dist" / "index.html").is_file():
+                raise RedactionError(
+                    "accelerated worker is not built (run npm install && npm run build)"
+                )
+            command = [self._config.node_path, str(script), "--backend", self._config.backend]
+            working_directory = script.parent.parent
+        else:
+            root = self._config.worker_root
+            cache = self._config.cache_root
+            if root is None or cache is None:
+                raise RedactionError("Vision worker paths are not configured")
+            root = root.resolve()
+            module = root / "src" / "plva_coreml" / "worker.py"
+            python = Path(self._config.node_path).expanduser().absolute()
+            if not module.is_file() or not python.is_file():
+                raise RedactionError(
+                    "Vision worker is not installed (run uv sync in coreml-redactor)"
+                )
+            existing_pythonpath = environment.get("PYTHONPATH")
+            environment["PYTHONPATH"] = str(root / "src") + (
+                os.pathsep + existing_pythonpath if existing_pythonpath else ""
+            )
+            command = [
+                str(python),
+                "-m",
+                "plva_coreml.worker",
+                "--baseline",
+                str(baseline),
+                "--cache",
+                str(cache.resolve()),
+                "--profile",
+                self._config.profile,
+                "--mode",
+                self._config.vision_mode,
+            ]
+            working_directory = root
         try:
             responses: queue.Queue[dict[str, Any] | None] = queue.Queue()
             self._responses = responses
             self._process = subprocess.Popen(
-                [
-                    self._config.node_path,
-                    str(script),
-                    "--backend",
-                    self._config.backend,
-                ],
+                command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
                 encoding="utf-8",
                 bufsize=1,
-                cwd=script.parent.parent,
+                cwd=working_directory,
                 env=environment,
             )
         except OSError as exc:
@@ -260,10 +313,10 @@ class AcceleratedRedactor:
             raise RedactionError("accelerated worker protocol ended")
         return response
 
-    def _remember(self, key: bytes, redacted: bytes) -> None:
+    def _remember(self, key: bytes, redacted: bytes, analysis: dict[str, Any]) -> None:
         if self._config.cache_entries == 0:
             return
-        self._cache[key] = redacted
+        self._cache[key] = (redacted, copy.deepcopy(analysis))
         self._cache.move_to_end(key)
         while len(self._cache) > self._config.cache_entries:
             self._cache.popitem(last=False)
@@ -319,7 +372,19 @@ class AcceleratedRedactor:
 
 def _safe_backend(value: Any) -> str:
     backend = str(value)
-    return backend if backend in {"webgpu", "wasm"} else "unknown"
+    return backend if backend in {"webgpu", "wasm"} or backend.startswith("vision-") else "unknown"
+
+
+def _safe_analysis(response: dict[str, Any], backend: str) -> dict[str, Any]:
+    counts = response.get("counts")
+    timings = response.get("timings")
+    findings = response.get("findings")
+    return {
+        "backend": backend,
+        "counts": copy.deepcopy(counts) if isinstance(counts, dict) else {},
+        "timings": copy.deepcopy(timings) if isinstance(timings, dict) else {},
+        "findings": copy.deepcopy(findings) if isinstance(findings, list) else [],
+    }
 
 
 def redact_png(config: RedactorConfig, png: bytes) -> bytes:

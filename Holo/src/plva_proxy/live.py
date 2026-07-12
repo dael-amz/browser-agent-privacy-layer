@@ -80,7 +80,9 @@ def run_capture_loop(  # pragma: no cover - endless loop, exercised manually
     while not stop.is_set():
         started = time.monotonic()
         try:
-            store.add(redact(capture_screen_png(scale)))
+            redacted = redact(capture_screen_png(scale))
+            analysis = getattr(redact, "latest_analysis", None)
+            store.add(redacted, analysis if isinstance(analysis, dict) else None)
         except RedactionError as exc:
             _LOGGER.warning("live cycle skipped: %s", exc)
             stop.wait(2.0)
@@ -103,12 +105,16 @@ def main() -> None:  # pragma: no cover - thin CLI wiring, exercised manually
     parser.add_argument("--redact-profile", choices=PROFILES, default="high-recall")
     parser.add_argument(
         "--redact-engine",
-        choices=("accelerated", "baseline"),
+        choices=("accelerated", "vision", "baseline"),
         default="accelerated",
-        help="persistent parallel worker (default) or one-process-per-frame baseline",
+        help="browser worker, native Vision/Core ML worker, or one-shot baseline",
     )
     parser.add_argument("--redact-backend", choices=BACKENDS, default="auto")
     parser.add_argument("--redact-worker", type=Path, default=Path("redactor-worker"))
+    parser.add_argument("--vision-worker", type=Path, default=Path("coreml-redactor"))
+    parser.add_argument(
+        "--vision-mode", choices=("fast", "cascade", "accurate"), default="cascade"
+    )
     parser.add_argument(
         "--scale",
         type=float,
@@ -129,33 +135,52 @@ def main() -> None:  # pragma: no cover - thin CLI wiring, exercised manually
     cli_path = args.redact / "bin" / "plva-v2.mjs" if args.redact.is_dir() else args.redact
     if not cli_path.is_file():
         parser.error(f"--redact CLI not found: {cli_path}")
-    if shutil.which("node") is None:
+    if args.redact_engine != "vision" and shutil.which("node") is None:
         parser.error("redaction requires node on PATH")
 
     accelerated: AcceleratedRedactor | None = None
-    if args.redact_engine == "accelerated":
-        worker_script = args.redact_worker / "bin" / "redactor-worker.mjs"
-        if not worker_script.is_file() or not (args.redact_worker / "dist/index.html").is_file():
-            parser.error(
-                f"accelerated worker is not built in {args.redact_worker}; "
-                "run npm install && npm run build there"
+    if args.redact_engine in {"accelerated", "vision"}:
+        if args.redact_engine == "vision":
+            vision_root = args.vision_worker.resolve()
+            python = vision_root / ".venv" / "bin" / "python"
+            module = vision_root / "src" / "plva_coreml" / "worker.py"
+            if not python.is_file() or not module.is_file():
+                parser.error(f"Vision worker is not installed in {args.vision_worker}")
+            accelerated_config = AcceleratedRedactorConfig(
+                baseline_root=cli_path.parent.parent,
+                worker_script=module,
+                node_path=str(python),
+                profile=args.redact_profile,
+                idle_timeout_s=None,
+                worker_kind="vision",
+                worker_root=vision_root,
+                cache_root=vision_root / ".cache",
+                vision_mode=args.vision_mode,
             )
-        accelerated = AcceleratedRedactor(
-            AcceleratedRedactorConfig(
+        else:
+            worker_script = args.redact_worker / "bin" / "redactor-worker.mjs"
+            if not worker_script.is_file() or not (
+                args.redact_worker / "dist/index.html"
+            ).is_file():
+                parser.error(
+                    f"accelerated worker is not built in {args.redact_worker}; "
+                    "run npm install && npm run build there"
+                )
+            accelerated_config = AcceleratedRedactorConfig(
                 baseline_root=cli_path.parent.parent,
                 worker_script=worker_script,
                 backend=args.redact_backend,
                 profile=args.redact_profile,
                 idle_timeout_s=None,
             )
-        )
+        accelerated = AcceleratedRedactor(accelerated_config)
         accelerated.start()
         redact: Callable[[bytes], bytes] = accelerated
     else:
-        config = RedactorConfig(cli_path=cli_path, profile=args.redact_profile)
+        baseline_config = RedactorConfig(cli_path=cli_path, profile=args.redact_profile)
 
         def redact(png: bytes) -> bytes:
-            return redact_png(config, png)
+            return redact_png(baseline_config, png)
 
     store = FrameStore()
     app = FastAPI(title="PLVA live viewer", docs_url=None, redoc_url=None)

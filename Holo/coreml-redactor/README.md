@@ -1,13 +1,22 @@
-# PLVA Core ML / Neural Engine probe
+# PLVA accelerated Core ML hybrid redactor
 
-This is a separate, non-production backend. It does not modify or replace the stable
-`redactor-worker/` path. It now includes a local-only live viewer so ANE preprocessing, inference,
-detection decoding, and burned visual masks can be inspected end to end.
+This package contains two parallel Apple-accelerated backends and does not replace the stable
+`redactor-worker/` path. The original experimental backend uses Core ML RapidOCR. The low-latency
+backend uses native Apple Vision OCR plus the Core ML visual detector and Rampart, retaining
+structured PII rules, high-recall uncertain masking, region fusion, opaque rendering, and
+vault-ready findings.
 
-It derives a fixed `1×3×640×640` visual ONNX model, then asks ONNX Runtime's Core ML provider for
-`CPUAndNeuralEngine` compute with GPU excluded. The static `NeuralNetwork` format measured roughly
-8.5–9.4 ms warm visual inference on the development M4, versus 68–148 ms with ONNX CPU. Core ML
-accepted 312 of 318 graph nodes; unsupported nodes may fall back to CPU.
+Visual and OCR branches run concurrently. Ordinary OCR crops use a six-item 320-pixel recognizer
+batch; only uncertain wide text is retried through a 1536-pixel single-crop model. On the bundled
+960×960 ATS fixture, all 17 OCR regions are recognized, semantic and fused-region counts match the
+frozen pipeline, output pixels are identical, and the latest warm side-by-side run measured roughly
+665 ms instead of about 3.2 seconds for the frozen browser pipeline. Core ML may retain CPU fallback
+for unsupported graph nodes.
+
+The native Vision `cascade` path runs fast full-frame recognition, classifies it, and retries only
+sensitive or uncertain regions using accurate recognition. On the same fixture it retains the same
+one sensitive/fused region and label while measuring about 113–125 ms warm, versus roughly 665 ms
+for the Core ML RapidOCR path in the latest side-by-side run.
 
 Run from this directory:
 
@@ -22,6 +31,14 @@ $HOME/.local/bin/uv run plva-ane-live --baseline ../plva-v2-baseline
 open http://127.0.0.1:18083/
 ```
 
+Run the native Vision pipeline through the shared proxy viewer without contacting a provider:
+
+```bash
+cd ..
+$HOME/.local/bin/uv run plva-live --redact-engine vision --vision-mode cascade
+open http://127.0.0.1:18082/viewer
+```
+
 macOS may require Screen Recording permission. For a privacy-safe static smoke test:
 
 ```bash
@@ -30,13 +47,19 @@ $HOME/.local/bin/uv run plva-ane-live \
   --fixture ../plva-v2-baseline/fixtures/ats-smoke.png
 ```
 
-The generated fixed model and compiled cache stay under `.cache/` and contain no frames. The probe
+The generated fixed models and compiled cache stay under `.cache/` and contain no frames. The probe
 uses only the synthetic baseline fixture and emits timing/numerical metadata.
 
-This is intentionally not wired into outbound redaction yet. The viewer is **visual-detector only**;
-it does not run RapidOCR or Rampart and must not be used to send frames upstream. Core ML output is
-numerically different from the CPU/WebGPU output, and the current fixture has no visual detections,
-so positive-detection geometry parity must be tested before this backend can fail closed in
-production. The
-`VisualANESession.infer()` tensor boundary is also the intended seam for a later parallel native
-worker.
+OCR findings are retained in memory for the latest frame and emitted at:
+
+```text
+http://127.0.0.1:18083/findings
+```
+
+Each finding includes recognized text, bounds, OCR confidence, semantic labels, sources, and exact
+heuristic/NER value spans suitable for a future local vault. Findings are never logged or persisted.
+The endpoint is loopback-only and `no-store`, but its contents are sensitive.
+
+The Vision worker is selectable in the outbound proxy with `--redact-engine vision` and remains
+opt-in while a broader positive-PII fixture suite validates recall. `HybridVisionRedactor.process()`
+and `HybridANERedactor.process()` remain separate so the RapidOCR implementation stays available.
