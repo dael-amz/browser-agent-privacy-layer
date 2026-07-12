@@ -85,6 +85,7 @@ class ProxyConfig:
 
     upstream_base_url: str
     api_key: str
+    instance_token: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +114,7 @@ def _noop_rewrite_actions(document: dict[str, Any]) -> dict[str, Any]:
     choices = document.get("choices")
     if not isinstance(choices, list) or not choices:
         raise HookError("completion has no choices to rewrite")
-    rewritten: dict[str, Any] = json.loads(json.dumps(document))
+    rewritten: dict[str, Any] = copy.deepcopy(document)
     for choice in rewritten["choices"]:
         if not isinstance(choice, dict):
             continue
@@ -183,7 +184,7 @@ def _banana_rewrite_actions(document: dict[str, Any]) -> dict[str, Any]:
     choices = document.get("choices")
     if not isinstance(choices, list):
         return document
-    rewritten: dict[str, Any] = json.loads(json.dumps(document))
+    rewritten: dict[str, Any] = copy.deepcopy(document)
     seen: list[str] = []
     hit: list[str] = []
     for choice in rewritten["choices"]:
@@ -248,7 +249,7 @@ def image_replacement_hook(image_path: Path) -> RequestHook:
     def replace(
         document: dict[str, Any], headers: dict[str, str]
     ) -> tuple[dict[str, Any], dict[str, str]]:
-        rewritten: dict[str, Any] = json.loads(json.dumps(document))
+        rewritten: dict[str, Any] = copy.deepcopy(document)
         replaced = 0
         for message in rewritten.get("messages") or []:
             if not isinstance(message, dict):
@@ -395,11 +396,13 @@ def _preview_text(document: dict[str, Any]) -> str:
         if isinstance(content, str):
             preview = content
         elif isinstance(content, list):
-            texts = [
-                part.get("text")
-                for part in content
-                if isinstance(part, dict) and isinstance(part.get("text"), str)
-            ]
+            texts: list[str] = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                text = part.get("text")
+                if isinstance(text, str):
+                    texts.append(text)
             if texts:
                 preview = " ".join(texts)
     return " ".join(preview.split())[:160]
@@ -460,7 +463,7 @@ class CallStore:
         duration_ms: int,
         state: str,
     ) -> int:
-        request: dict[str, Any] = json.loads(json.dumps(document))
+        request: dict[str, Any] = copy.deepcopy(document)
         images: list[tuple[str, bytes]] = []
         for message in request.get("messages") or []:
             if not isinstance(message, dict):
@@ -710,7 +713,7 @@ def frame_redaction_hook(
     def apply(
         document: dict[str, Any], headers: dict[str, str]
     ) -> tuple[dict[str, Any], dict[str, str]]:
-        rewritten: dict[str, Any] = json.loads(json.dumps(document))
+        rewritten: dict[str, Any] = copy.deepcopy(document)
         if rewritten.pop(FRAME_AUDIT_IDS_KEY, None) is not None:
             raise HookError("request forged internal frame audit metadata")
         redacted = 0
@@ -1106,7 +1109,10 @@ def create_app(
     async def health() -> dict[str, str]:
         # The closed runtime health-checks <base-host>/health before POSTing;
         # answer locally so a slow provider cannot block the loop.
-        return {"status": "ok"}
+        payload = {"status": "ok"}
+        if config.instance_token is not None:
+            payload["instance"] = config.instance_token
+        return payload
 
     @app.get("/v1/models")
     async def models(request: Request) -> Response:
@@ -1183,6 +1189,75 @@ def add_viewer_routes(
             headers={"cache-control": "no-store"},
         )
 
+    def require_local_approval_origin(request: Request) -> None:
+        origin = request.headers.get("origin")
+        if origin is not None and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+            raise HTTPException(status_code=403, detail="approval origin is not this proxy")
+
+    async def approval_payload(request: Request) -> dict[str, Any]:
+        require_local_approval_origin(request)
+        try:
+            payload = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise HTTPException(status_code=400, detail="approval body is not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="approval body must be an object")
+        return payload
+
+    @app.get("/viewer/approvals")
+    async def viewer_approvals() -> Response:
+        payload = {"approvals": list(vault.approvals()) if vault is not None else []}
+        return Response(
+            content=json.dumps(payload, separators=(",", ":")),
+            media_type="application/json",
+            headers={"cache-control": "no-store"},
+        )
+
+    @app.post("/viewer/approvals", status_code=201)
+    async def create_viewer_approval(request: Request) -> Response:
+        if vault is None:
+            raise HTTPException(status_code=404, detail="privacy vault is disabled")
+        payload = await approval_payload(request)
+        try:
+            grant = vault.grant_approval(
+                payload["token"],
+                tool_name=payload["tool_name"],
+                argument_path=payload["argument_path"],
+                target=payload.get("target"),
+                ttl_seconds=payload.get("ttl_seconds"),
+                use_count=payload.get("use_count"),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail="approval context is incomplete") from exc
+        except (PrivacyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(
+            content=json.dumps(grant, separators=(",", ":")),
+            status_code=201,
+            media_type="application/json",
+            headers={"cache-control": "no-store"},
+        )
+
+    @app.delete("/viewer/approvals")
+    async def delete_viewer_approval(request: Request) -> Response:
+        if vault is None:
+            raise HTTPException(status_code=404, detail="privacy vault is disabled")
+        payload = await approval_payload(request)
+        try:
+            revoked = vault.revoke_approval(
+                payload["token"],
+                tool_name=payload["tool_name"],
+                argument_path=payload["argument_path"],
+                target=payload.get("target"),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail="approval context is incomplete") from exc
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not revoked:
+            raise HTTPException(status_code=404, detail="approval grant was not found")
+        return Response(status_code=204, headers={"cache-control": "no-store"})
+
     @app.get("/viewer/filter")
     async def viewer_filter() -> Response:
         payload = scrubber.diagnostics() if scrubber is not None else {"status": "disabled"}
@@ -1244,6 +1319,11 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument(
+        "--instance-token",
+        default=None,
+        help="opaque launcher token echoed only by /health to prevent stale-proxy attachment",
+    )
     parser.add_argument(
         "--provider",
         choices=tuple(PROVIDERS),
@@ -1385,6 +1465,18 @@ def main() -> None:
         help="JSON object mapping PII classes to hide_use, approval, or blocked",
     )
     parser.add_argument(
+        "--privacy-approval-ttl-seconds",
+        type=float,
+        default=float(os.environ.get("PLVA_APPROVAL_TTL_SECONDS", "60")),
+        help="default lifetime of a local approval grant (default: 60 seconds)",
+    )
+    parser.add_argument(
+        "--privacy-approval-use-count",
+        type=int,
+        default=int(os.environ.get("PLVA_APPROVAL_USE_COUNT", "1")),
+        help="default number of exact action uses per local approval (default: 1)",
+    )
+    parser.add_argument(
         "--audit-capacity",
         type=int,
         default=int(os.environ.get("PLVA_AUDIT_CAPACITY", "32")),
@@ -1403,6 +1495,10 @@ def main() -> None:
         parser.error("--redact-idle-seconds cannot be negative")
     if args.audit_capacity < 1:
         parser.error("--audit-capacity must be positive")
+    if not 0 < args.privacy_approval_ttl_seconds <= 3600:
+        parser.error("--privacy-approval-ttl-seconds must be between 0 and 3600")
+    if not 1 <= args.privacy_approval_use_count <= 100:
+        parser.error("--privacy-approval-use-count must be between 1 and 100")
     if args.privacy and (args.redact is None or args.redact_engine != "vision"):
         parser.error("--privacy requires --redact with --redact-engine vision")
     try:
@@ -1501,7 +1597,11 @@ def main() -> None:
             lifecycle_owner: AcceleratedRedactor | VaultRedactor = accelerated
             detached_vault_cleanup: Callable[[], None] | None = None
             if args.privacy:
-                vault = SessionVault(policy=privacy_policy)
+                vault = SessionVault(
+                    policy=privacy_policy,
+                    approval_ttl_seconds=args.privacy_approval_ttl_seconds,
+                    approval_use_count=args.privacy_approval_use_count,
+                )
                 vault_store = vault
                 if args.privacy_chips:
                     vaulted = VaultRedactor(accelerated, vault)
@@ -1574,7 +1674,11 @@ def main() -> None:
         app_options["scrubber"] = history_scrubber
     uvicorn.run(
         create_app(
-            ProxyConfig(upstream_base_url=upstream, api_key=api_key),
+            ProxyConfig(
+                upstream_base_url=upstream,
+                api_key=api_key,
+                instance_token=args.instance_token,
+            ),
             **app_options,
         ),
         host=LOOPBACK_HOST,

@@ -114,8 +114,9 @@ jobs; release validation; model cards; and license controls.
 
 Start with [training/README.md](training/README.md). The current bootstrap and
 known blockers are recorded in
-[ADR 0001](docs/decisions/0001-model-and-runtime-contracts.md). No custom model
-is marked release eligible yet.
+[ADR 0001](docs/decisions/0001-model-and-runtime-contracts.md). The current detector is release
+eligible. Older bootstrap and frozen-baseline notes are historical and should not be used as the
+current release-status source.
 
 ```bash
 npm run models:fetch
