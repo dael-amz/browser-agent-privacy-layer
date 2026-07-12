@@ -383,9 +383,10 @@ visible token into `write`; the proxy resolved it locally while leaving reasonin
      > "Occasionally the same real value may appear under more than one token across steps
      > (e.g. «EMAIL_1» and «EMAIL_2» may be the same email); this is rare. Treat each token
      > independently and use whichever token labels the field you are acting on."
-- **Placement / cadence:** inject the **scheme** and **duplicate warning** as (or appended to) a
-  system-role message — **add** a message rather than overwriting the runtime's own system prompt,
-  so Holo3's action behavior is undisturbed; attach the **manifest** to the current step's
+- **Placement / cadence:** append the **scheme** and **duplicate warning** to the runtime's existing
+  system-role message without overwriting its content. H Company's Holo chat template rejects two
+  consecutive system messages, so never add a second one; if no system message exists, attach the
+  static teaching to the current user observation. Attach the **manifest** to the current step's
   user/observation message so it sits next to the frame it describes. Re-inject every step (the
   manifest is per-frame; repeating the static parts is cheap and survives context truncation).
 - **Reinforcing skill (recommended):** also ship a native HoloDesktop skill
@@ -399,8 +400,9 @@ visible token into `write`; the proxy resolved it locally while leaving reasonin
   shown token; injection is input-only and never appears in model *output* fields; logs carry tokens
   + class only, never values. (Basic token-cooperation is already confirmed by Step 5.)
 
-**Completed 2026-07-12:** every privacy-enabled request now receives a fresh system-role scheme
-and duplicate warning plus a value-free manifest immediately beside the current screenshot. The
+**Completed 2026-07-12:** every privacy-enabled request now receives a scheme and duplicate warning
+merged into Holo's existing system message plus a value-free manifest immediately beside the
+current screenshot. The
 manifest is produced atomically by the same vault-paint operation, lists only token/class pairs,
 explicitly says `none` when the current frame has no tokens, and removes older injected manifests
 before forwarding. The action syntax clarifies that Holo must emit the exact inner token without
@@ -409,12 +411,19 @@ the proxy remains authoritative. Unit/integration tests cover exact current-fram
 stale-token removal, empty manifests, malformed-token rejection, and absence of cleartext. See
 `Holo/verification/step-5a-placeholder-teaching.md`.
 
-### 🔲 Step 6 — Configurable per-class PII safety policy
+### ✅ Step 6 — Configurable per-class PII safety policy
 - **Goal:** the user chooses, per class, `hide_use` / `approval` / `blocked` (and later variants).
 - **Build:** a policy config (file + app UI, §9 Step 11) with sensible defaults (§6); the vault's
   resolve gate enforces the level; `blocked` never stores; `approval` defers to Step 7.
 - **Verify:** flipping a class between levels changes behavior as specified; `blocked` values are
   never resolvable and never stored; defaults protect secrets out of the box.
+
+**Completed 2026-07-12:** `SafetyPolicy` validates editable JSON defaults and unknown classes fail
+closed. The same policy instance drives token assignment, vault resolution, the current-frame
+manifest, and a `[PLVA_SECURITY_POLICY]` model instruction. `blocked` findings keep the detector's
+opaque mask but receive no token or vault entry; `approval` tokens are stored but resolution is
+denied until Step 7 supplies a local approver. The consumer app exposes all 15 classes and three
+levels. See `Holo/verification/step-6-policy.md`.
 
 ### 🔲 Step 7 — LLM mediator (OpenShell) for approvals + steering
 - **Goal:** `approval`-class resolutions and configurable risk flags are decided by a mediator
@@ -478,13 +487,22 @@ stale-token removal, empty manifests, malformed-token rejection, and absence of 
 - **Verify:** a spoken prompt runs the task identically to the typed prompt; spoken PII is
   placeholdered before the model sees it; "approve"-type utterances reach the mediator, not Overshoot.
 
-### 🔲 Step 11 — The app (user-facing wrapper)
-- **Goal:** one app to enter a typed prompt (or spoken, Step 10), configure per-class safety levels
-  (Step 6), toggle voice-read (Step 9), and watch the `/viewer`.
-- **Build:** thin UI over the proxy + runtime; safety-policy editor; run controls; the obscured-frame
-  viewer; audio toggles. No secret, real value, transcript, or frame is persisted or logged.
-- **Verify:** a non-technical run works end-to-end from the app; safety-level changes take effect;
-  the viewer shows exactly what the model sees; nothing sensitive is written to disk.
+### 🟨 Step 11 — The app (fast-track UI complete; later-step controls deferred)
+- **Goal for this pass:** one polished app for the capabilities already built: typed tasks,
+  per-class safety levels (Step 6), PLVA on/off, testing knobs, and live inspection views.
+- **Build:** loopback-only UI/controller over the proxy + runtime; safety-policy editor; run/stop
+  controls; redacted model-frame, local vault, OCR, and stream-filter views; collapsed Advanced lab.
+  No prompt, real value, transcript, or frame is persisted or logged by the app.
+- **Deferred extension points:** spoken prompts (Step 10), voice-read (Step 9), mediator approvals
+  (Step 7), and audio context (Step 12) will be added after those steps exist.
+- **Verify:** a non-technical typed run works end-to-end; safety changes take effect on the next
+  run; the model viewer shows the proxy's redacted frame; browser storage is unused.
+
+**Fast-track completed 2026-07-12:** `Holo/run_demo.sh` launches the consumer GUI. A live H Company
+run completed through it while the app displayed the final redacted frame, three protected
+regions, memory-only OCR/vault data, and stream-guard status. Vault and OCR cleartext are blurred
+until local reveal. See `Holo/verification/step-11-demo.md`. Step 11 remains partially open only
+for the explicitly deferred Step 7/9/10/12 controls.
 
 ### 🔲 Step 12 — Audio-in context: Gradium STT (loopback) → scrub → inject — **LOWER PRIORITY**
 - **Goal:** live computer audio becomes redacted text context the CUA can reason with.
