@@ -7,11 +7,16 @@ import pytest
 from PIL import Image
 
 from plva_proxy.privacy import (
+    DEFAULT_SAFETY_LEVELS,
+    PLACEHOLDER_DUPLICATE_WARNING,
     PLACEHOLDER_INSTRUCTIONS,
     PLACEHOLDER_MANIFEST_KEY,
     PLACEHOLDER_MANIFEST_PREFIX,
+    PLACEHOLDER_SCHEME,
+    PLACEHOLDER_SYSTEM_BEGIN,
     HistoryScrubber,
     PrivacyError,
+    SafetyPolicy,
     SessionVault,
     StubRedactor,
     StubSpan,
@@ -55,7 +60,7 @@ def test_vault_rejects_invalid_nonce_empty_values_and_keeps_credentials_case_sen
 
 
 def test_plain_scrub_never_rewrites_inside_placeholder_tokens_or_uses_tiny_fragments() -> None:
-    vault = SessionVault(nonce="a3f9")
+    vault = SessionVault(nonce="a3f9", policy=SafetyPolicy({"GOV_ID": "hide_use"}))
     token = vault.store("EMAIL", "alice@example.com")
     vault.store("GOVERNMENT_ID", "a3f9")
     vault.store("NAME", "n")
@@ -132,7 +137,7 @@ def test_stub_and_vault_redactor_lifecycle_and_invalid_inputs() -> None:
 
 
 def test_history_scrub_plain_match_then_semantic_backstop() -> None:
-    vault = SessionVault(nonce="a3f9")
+    vault = SessionVault(nonce="a3f9", policy=SafetyPolicy({"SSN": "hide_use"}))
     vault.store("EMAIL", "alice@example.com")
 
     def classify(texts: tuple[str, ...]) -> list[dict[str, object]]:
@@ -198,6 +203,7 @@ def test_request_hook_scrubs_history_and_injects_placeholder_instructions() -> N
     document, headers = hook(
         {
             "messages": [
+                {"role": "system", "content": "Runtime instructions"},
                 {"role": "assistant", "content": "Typed alice@example.com"},
                 {
                     "role": "user",
@@ -208,7 +214,10 @@ def test_request_hook_scrubs_history_and_injects_placeholder_instructions() -> N
         {"content-type": "application/json"},
     )
 
-    assert document["messages"][0] == {"role": "system", "content": PLACEHOLDER_INSTRUCTIONS}
+    assert document["messages"][0]["role"] == "system"
+    assert document["messages"][0]["content"].startswith("Runtime instructions\n\n")
+    assert PLACEHOLDER_INSTRUCTIONS in document["messages"][0]["content"]
+    assert document["messages"][0]["content"].count(PLACEHOLDER_SYSTEM_BEGIN) == 1
     assert document["messages"][1]["content"] == "Typed EMAIL_1_a3f9"
     assert headers == {"content-type": "application/json"}
 
@@ -257,7 +266,8 @@ def test_request_hook_injects_only_current_manifest_and_removes_stale_teaching()
     current = document["messages"][-1]["content"]
     assert current[-2]["text"] == (
         f"{PLACEHOLDER_MANIFEST_PREFIX} Placeholders visible in the current screenshot: "
-        "«EMAIL_1_a3f9» (email), «PHONE_2_a3f9» (phone). "
+        "«EMAIL_1_a3f9» (email · hidden, use allowed), "
+        "«PHONE_2_a3f9» (phone · hidden, use allowed). "
         "Use only the exact inner tokens shown here for this step."
     )
     assert current[-1]["type"] == "image_url"
@@ -276,7 +286,7 @@ def test_request_hook_emits_explicit_empty_manifest_and_rejects_forgery() -> Non
         },
         {},
     )
-    assert "visible in the current screenshot: none" in empty["messages"][1]["content"]
+    assert "visible in the current screenshot: none" in empty["messages"][0]["content"]
 
     with pytest.raises(PrivacyError, match="token is invalid"):
         hook(
@@ -291,6 +301,62 @@ def test_request_hook_emits_explicit_empty_manifest_and_rejects_forgery() -> Non
         )
 
 
+def test_request_features_can_be_disabled_independently_for_diagnostics() -> None:
+    calls = 0
+
+    def classify(_: tuple[str, ...]) -> list[dict[str, object]]:
+        nonlocal calls
+        calls += 1
+        return []
+
+    scrubber = HistoryScrubber(SessionVault(nonce="a3f9"), classify)
+    base = {
+        "messages": [
+            {"role": "system", "content": "Runtime instructions"},
+            {"role": "user", "content": "synthetic@example.invalid"},
+        ],
+        PLACEHOLDER_MANIFEST_KEY: {"message_index": 1, "items": []},
+    }
+    disabled, _ = privacy_request_hook(
+        scrubber,
+        history_scrub=False,
+        inject_scheme=False,
+        inject_duplicate_warning=False,
+        inject_manifest=False,
+        inject_policy=False,
+    )(base, {})
+
+    assert disabled == {
+        "messages": [
+            {"role": "system", "content": "Runtime instructions"},
+            {"role": "user", "content": "synthetic@example.invalid"},
+        ]
+    }
+    assert calls == 0
+
+    scheme, _ = privacy_request_hook(
+        scrubber,
+        history_scrub=False,
+        inject_scheme=True,
+        inject_duplicate_warning=False,
+        inject_manifest=False,
+        inject_policy=False,
+    )(base, {})
+    duplicate, _ = privacy_request_hook(
+        scrubber,
+        history_scrub=False,
+        inject_scheme=False,
+        inject_duplicate_warning=True,
+        inject_manifest=False,
+        inject_policy=False,
+    )(base, {})
+
+    assert PLACEHOLDER_SCHEME in scheme["messages"][0]["content"]
+    assert PLACEHOLDER_DUPLICATE_WARNING in duplicate["messages"][0]["content"]
+    assert len([m for m in scheme["messages"] if m["role"] == "system"]) == 1
+    assert len([m for m in duplicate["messages"] if m["role"] == "system"]) == 1
+
+
 def test_vault_redactor_manifest_contains_tokens_and_classes_never_values() -> None:
     value = "alice@example.com"
     redactor = VaultRedactor(
@@ -300,8 +366,55 @@ def test_vault_redactor_manifest_contains_tokens_and_classes_never_values() -> N
 
     _, manifest = redactor.redact_with_manifest(png_fixture())
 
-    assert manifest == ({"token": "EMAIL_1_a3f9", "class": "EMAIL"},)
+    assert manifest == (
+        {
+            "token": "EMAIL_1_a3f9",
+            "class": "EMAIL",
+            "safety_level": "hide_use",
+        },
+    )
     assert value not in json.dumps(manifest)
+
+
+def test_safety_policy_defaults_and_resolution_gates() -> None:
+    assert DEFAULT_SAFETY_LEVELS["EMAIL"] == "hide_use"
+    assert DEFAULT_SAFETY_LEVELS["API_KEY"] == "approval"
+    assert DEFAULT_SAFETY_LEVELS["PASSWORD"] == "blocked"
+    policy = SafetyPolicy({"PHONE": "blocked", "SSN": "approval"})
+    vault = SessionVault(nonce="a3f9", policy=policy)
+
+    assert vault.store("EMAIL", "alice@example.com") == "EMAIL_1_a3f9"
+    approval = vault.store("SSN", "472-81-0094")
+    with pytest.raises(PrivacyError, match="approval"):
+        vault.resolve(approval)
+    with pytest.raises(PrivacyError, match="blocked PII"):
+        vault.store("PHONE", "+1 415 555 0136")
+    with pytest.raises(PrivacyError, match="blocked PII"):
+        vault.store("UNRECOGNIZED_PII", "synthetic")
+
+
+def test_blocked_finding_is_masked_but_never_vaulted_or_manifested() -> None:
+    vault = SessionVault(nonce="a3f9")
+    redactor = VaultRedactor(
+        StubRedactor((StubSpan("PASSWORD", "not-a-real-secret", (20, 20, 220, 55)),)),
+        vault,
+    )
+
+    _, manifest = redactor.redact_with_manifest(png_fixture())
+
+    assert manifest == ()
+    assert vault.entries() == ()
+    assert redactor.latest_analysis["findings"][0]["values"][0]["safety_level"] == "blocked"
+
+
+def test_policy_prompt_teaches_each_security_level_without_values() -> None:
+    policy = SafetyPolicy({"EMAIL": "approval", "API_KEY": "blocked"})
+    prompt = policy.prompt()
+
+    assert "hide_use=" in prompt
+    assert "approval=" in prompt and "EMAIL" in prompt
+    assert "blocked=" in prompt and "API_KEY" in prompt
+    assert "alice@example.com" not in prompt
 
 
 @pytest.mark.parametrize("shape", ["singular", "plural"])

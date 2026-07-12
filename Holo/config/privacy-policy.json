@@ -1,0 +1,17 @@
+{
+  "NAME": "hide_use",
+  "EMAIL": "hide_use",
+  "PHONE": "hide_use",
+  "ADDRESS": "hide_use",
+  "DOB": "hide_use",
+  "GOV_ID": "blocked",
+  "SSN": "blocked",
+  "BANK_ACCOUNT": "blocked",
+  "CARD_NUMBER": "blocked",
+  "CVC": "blocked",
+  "PASSWORD": "blocked",
+  "API_KEY": "approval",
+  "AUTH_TOKEN": "approval",
+  "PRIVATE_KEY": "blocked",
+  "SECRET": "blocked"
+}

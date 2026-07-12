@@ -9,6 +9,20 @@ data; no API keys, screenshots, transcripts, or vault contents belong in this re
 For a human-readable directory tour, file responsibilities, and the current resume point, see
 [`PROJECT_MAP.md`](PROJECT_MAP.md).
 
+## Consumer demo
+
+Launch the fast-tracked Steps 1–6 app with:
+
+```bash
+./run_demo.sh
+```
+
+It opens `http://127.0.0.1:18080` with a task box, PLVA master toggle, per-class security editor,
+redacted model view, memory-only vault, OCR findings, stream-guard counters, and a collapsed
+Advanced lab containing the testing switches. Vault and OCR values are blurred until explicitly
+revealed. The app binds only to loopback and sends `Cache-Control: no-store`; it uses no browser
+storage. Spoken prompts, voice-read, and the mediator UI remain extension points for later steps.
+
 ## Accelerated redaction setup
 
 The lowest-latency macOS path uses native Apple Vision OCR, the Core ML visual detector, and Core
@@ -53,13 +67,39 @@ finding supplies the recognized value and bounding box to the in-memory vault an
 `«CLASS_N_nonce»` chip. Executed action fields resolve locally; reasoning remains placeholdered;
 outbound history is scrubbed first by exact vault match and then by the warm Core ML Rampart
 backstop. Each model request also receives the placeholder scheme plus an exact token/class
-manifest beside the current frame; stale manifests are removed. The matching native Holo skill is
-kept at `holo-skills/plva-placeholders/SKILL.md` and installed under `~/.holo/skills/`. Set
+manifest beside the current frame; stale manifests are removed. A per-class policy additionally
+teaches Holo which tokens are usable, approval-gated, or blocked. The matching native Holo skill
+is kept at `holo-skills/plva-placeholders/SKILL.md` and installed under `~/.holo/skills/`. Set
 `PLVA_PRIVACY=0` only for comparison testing.
 
+Edit `config/privacy-policy.json` to change defaults, set `PLVA_POLICY_FILE` to select another
+file, or pass an in-memory override through `PLVA_POLICY_JSON`. The GUI updates the policy for its
+next run without writing it to disk. `blocked` findings receive no token and are never vaulted;
+`approval` tokens fail closed until the Step 7 local mediator is implemented.
+
+For synthetic diagnosis, individual Step 5/5a features can be disabled without changing the
+secure all-on default:
+
+| Environment variable | Feature | Default with privacy on |
+|---|---|---|
+| `PLVA_PRIVACY_CHIPS` | Vault current-frame OCR findings and paint placeholder chips | `1` |
+| `PLVA_PRIVACY_HISTORY_SCRUB` | Vault + Rampart outbound-history scrub | `1` |
+| `PLVA_PRIVACY_SCHEME` | Static placeholder system instruction | `1` |
+| `PLVA_PRIVACY_DUPLICATE_WARNING` | Static duplicate-token warning | `1` |
+| `PLVA_PRIVACY_MANIFEST` | Current-frame token/class observation | `1` |
+| `PLVA_PRIVACY_RESOLUTION` | Resolve tokens in executed response fields | `1` |
+| `PLVA_PRIVACY_POLICY_TEACHING` | Explain active per-class security levels to Holo | `1` |
+| `PLVA_PRIVACY_SKILL` | Installed native Holo placeholder skill | follows `PLVA_PRIVACY` |
+
+`PLVA_PRIVACY=0` disables the vault/chip wrapper and, unless explicitly overridden, the native
+skill. Disabling history scrub or resolution is unsafe with real data; use these switches only on
+synthetic screens. A manifest requires current-frame chips, so `PLVA_PRIVACY_CHIPS=0` also makes
+the manifest absent even when its own switch remains enabled.
+
 Watch exactly what the model receives at `http://127.0.0.1:18081/viewer`. The latest memory-only
-OCR/vault candidates are at `http://127.0.0.1:18081/viewer/findings`; that endpoint contains
-sensitive cleartext and is never persisted or logged. `PLVA_VISION_MODE=cascade` is the default:
+OCR candidates are at `/viewer/findings`, the local vault is at `/viewer/vault`, and privacy-safe
+history-filter counters are at `/viewer/filter`. The findings and vault endpoints contain
+sensitive cleartext and are never persisted or logged. `PLVA_VISION_MODE=cascade` is the default:
 it runs fast OCR over the frame and accurate OCR only over sensitive or uncertain regions.
 
 The default redaction engine is an adaptive worker that runs visual and OCR detection concurrently

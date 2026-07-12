@@ -16,6 +16,12 @@ action. To use it, copy only the inner token, such as `EMAIL_1_ab12`, exactly
 into the executed action field. Preserve its spelling, capitalization, number,
 and session suffix. Do not include the decorative `« »` marks.
 
+Each request may contain a `[PLVA_SECURITY_POLICY]` instruction describing the
+active level for every class. Obey it exactly: `hide_use` tokens may be used in
+executed actions, `approval` tokens must not be used until the local privacy
+layer grants approval, and `blocked` classes have no usable token. The live
+policy instruction is authoritative because users can change it between runs.
+
 Never invent a placeholder, guess or reconstruct its hidden value, or alter a
 token. A token mentioned only in notes or reasoning is not executed. If the
 current observation does not list the token you need as visible, do not

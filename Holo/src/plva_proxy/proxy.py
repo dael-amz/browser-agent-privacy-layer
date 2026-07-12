@@ -47,6 +47,7 @@ from plva_proxy.privacy import (
     PLACEHOLDER_MANIFEST_KEY,
     HistoryScrubber,
     PrivacyError,
+    SafetyPolicy,
     SessionVault,
     VaultRedactor,
     privacy_request_hook,
@@ -460,11 +461,18 @@ def frame_redaction_hook(
                                 not isinstance(item, dict)
                                 or not isinstance(item.get("token"), str)
                                 or not isinstance(item.get("class"), str)
+                                or not isinstance(item.get("safety_level", "hide_use"), str)
                             ):
                                 raise HookError("privacy redactor returned an invalid manifest")
                             token = item["token"]
                             if token not in known:
-                                target.append({"token": token, "class": item["class"]})
+                                target.append(
+                                    {
+                                        "token": token,
+                                        "class": item["class"],
+                                        "safety_level": item.get("safety_level", "hide_use"),
+                                    }
+                                )
                                 known.add(token)
                     redacted += 1
         if redacted:
@@ -647,6 +655,8 @@ def create_app(
     *,
     hooks: Hooks | None = None,
     frame_store: FrameStore | None = None,
+    vault: SessionVault | None = None,
+    scrubber: HistoryScrubber | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     startup_callbacks: tuple[Callable[[], None], ...] = (),
     cleanup_callbacks: tuple[Callable[[], None], ...] = (),
@@ -775,12 +785,18 @@ def create_app(
         return await _relay(request, "POST", "/chat/completions", use_hooks=True)
 
     if frame_store is not None:
-        add_viewer_routes(app, frame_store)
+        add_viewer_routes(app, frame_store, vault=vault, scrubber=scrubber)
 
     return app
 
 
-def add_viewer_routes(app: FastAPI, store: FrameStore) -> None:
+def add_viewer_routes(
+    app: FastAPI,
+    store: FrameStore,
+    *,
+    vault: SessionVault | None = None,
+    scrubber: HistoryScrubber | None = None,
+) -> None:
     """Attach the loopback-only obscured-frame viewer to an application."""
 
     @app.get("/viewer")
@@ -802,6 +818,28 @@ def add_viewer_routes(app: FastAPI, store: FrameStore) -> None:
     async def viewer_findings() -> Response:
         return Response(
             content=json.dumps(store.findings(), separators=(",", ":")),
+            media_type="application/json",
+            headers={"cache-control": "no-store"},
+        )
+
+    @app.get("/viewer/vault")
+    async def viewer_vault() -> Response:
+        payload = (
+            {"entries": list(vault.entries()), "policy": vault.policy_snapshot()}
+            if vault is not None
+            else {"entries": [], "policy": {}}
+        )
+        return Response(
+            content=json.dumps(payload, separators=(",", ":")),
+            media_type="application/json",
+            headers={"cache-control": "no-store"},
+        )
+
+    @app.get("/viewer/filter")
+    async def viewer_filter() -> Response:
+        payload = scrubber.diagnostics() if scrubber is not None else {"status": "disabled"}
+        return Response(
+            content=json.dumps(payload, separators=(",", ":")),
             media_type="application/json",
             headers={"cache-control": "no-store"},
         )
@@ -923,6 +961,53 @@ def main() -> None:
         default=False,
         help="enable the Step 5 vault, placeholder chips, resolution, and history scrub",
     )
+    parser.add_argument(
+        "--privacy-history-scrub",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="scrub outbound text history through the vault and Rampart",
+    )
+    parser.add_argument(
+        "--privacy-chips",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="vault current-frame findings and paint their placeholder chips",
+    )
+    parser.add_argument(
+        "--privacy-scheme",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="inject the static placeholder scheme system message",
+    )
+    parser.add_argument(
+        "--privacy-duplicate-warning",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="inject the static duplicate-placeholder warning",
+    )
+    parser.add_argument(
+        "--privacy-manifest",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="attach the current frame's token/class manifest",
+    )
+    parser.add_argument(
+        "--privacy-resolution",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="resolve issued placeholders in executed response action fields",
+    )
+    parser.add_argument(
+        "--privacy-policy-teaching",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="teach the model the active per-class security policy",
+    )
+    parser.add_argument(
+        "--privacy-policy-json",
+        default=os.environ.get("PLVA_POLICY_JSON", ""),
+        help="JSON object mapping PII classes to hide_use, approval, or blocked",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
@@ -936,6 +1021,16 @@ def main() -> None:
         parser.error("--redact-idle-seconds cannot be negative")
     if args.privacy and (args.redact is None or args.redact_engine != "vision"):
         parser.error("--privacy requires --redact with --redact-engine vision")
+    try:
+        raw_policy = json.loads(args.privacy_policy_json) if args.privacy_policy_json else {}
+        if not isinstance(raw_policy, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in raw_policy.items()
+        ):
+            raise ValueError("policy must be an object of string values")
+        privacy_policy = SafetyPolicy(raw_policy)
+    except (ValueError, TypeError) as exc:
+        parser.error(f"--privacy-policy-json is invalid: {exc}")
     api_key = next(
         (
             value
@@ -957,6 +1052,8 @@ def main() -> None:
 
     redact_hook: RequestHook | None = None
     privacy_hooks: Hooks | None = None
+    vault_store: SessionVault | None = None
+    history_scrubber: HistoryScrubber | None = None
     frame_store: FrameStore | None = None
     cleanup_callbacks: tuple[Callable[[], None], ...] = ()
     startup_callbacks: tuple[Callable[[], None], ...] = ()
@@ -1016,25 +1113,41 @@ def main() -> None:
                 )
             active_redactor: Callable[[bytes], bytes] = accelerated
             lifecycle_owner: AcceleratedRedactor | VaultRedactor = accelerated
+            detached_vault_cleanup: Callable[[], None] | None = None
             if args.privacy:
-                vault = SessionVault()
-                vaulted = VaultRedactor(accelerated, vault)
-                active_redactor = vaulted
-                lifecycle_owner = vaulted
+                vault = SessionVault(policy=privacy_policy)
+                vault_store = vault
+                if args.privacy_chips:
+                    vaulted = VaultRedactor(accelerated, vault)
+                    active_redactor = vaulted
+                    lifecycle_owner = vaulted
+                else:
+                    detached_vault_cleanup = vault.dispose
+                history_scrubber = HistoryScrubber(vault, accelerated.classify_texts)
                 privacy_hooks = Hooks(
                     on_request=privacy_request_hook(
-                        HistoryScrubber(vault, accelerated.classify_texts)
+                        history_scrubber,
+                        policy=privacy_policy,
+                        history_scrub=args.privacy_history_scrub,
+                        inject_scheme=args.privacy_scheme,
+                        inject_duplicate_warning=args.privacy_duplicate_warning,
+                        inject_manifest=args.privacy_manifest,
+                        inject_policy=args.privacy_policy_teaching,
                     ),
-                    on_response=privacy_response_hook(vault),
+                    on_response=(privacy_response_hook(vault) if args.privacy_resolution else None),
                 )
             redact_hook = frame_redaction_hook(
                 active_redactor,
                 frame_store,
-                include_placeholder_manifest=args.privacy,
+                include_placeholder_manifest=(
+                    args.privacy and args.privacy_chips and args.privacy_manifest
+                ),
             )
             if args.redact_lifecycle == "eager":
                 startup_callbacks = (lifecycle_owner.start,)
             cleanup_callbacks = (lifecycle_owner.close,)
+            if detached_vault_cleanup is not None:
+                cleanup_callbacks += (detached_vault_cleanup,)
         else:
             redactor_config = RedactorConfig(cli_path=cli_path, profile=args.redact_profile)
             redact_hook = frame_redaction_hook(
@@ -1048,15 +1161,34 @@ def main() -> None:
     hooks = _combine_hooks(hooks, privacy_hooks)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    if args.privacy:
+        _LOGGER.info(
+            "privacy features chips=%s history_scrub=%s scheme=%s duplicate_warning=%s "
+            "manifest=%s resolution=%s policy_teaching=%s",
+            args.privacy_chips,
+            args.privacy_history_scrub,
+            args.privacy_scheme,
+            args.privacy_duplicate_warning,
+            args.privacy_manifest,
+            args.privacy_resolution,
+            args.privacy_policy_teaching,
+        )
     if frame_store is not None:
         _LOGGER.info("viewer: http://127.0.0.1:%d/viewer", args.port)
+    app_options: dict[str, Any] = {
+        "hooks": hooks,
+        "frame_store": frame_store,
+        "startup_callbacks": startup_callbacks,
+        "cleanup_callbacks": cleanup_callbacks,
+    }
+    if vault_store is not None:
+        app_options["vault"] = vault_store
+    if history_scrubber is not None:
+        app_options["scrubber"] = history_scrubber
     uvicorn.run(
         create_app(
             ProxyConfig(upstream_base_url=upstream, api_key=api_key),
-            hooks=hooks,
-            frame_store=frame_store,
-            startup_callbacks=startup_callbacks,
-            cleanup_callbacks=cleanup_callbacks,
+            **app_options,
         ),
         host=LOOPBACK_HOST,
         port=args.port,
