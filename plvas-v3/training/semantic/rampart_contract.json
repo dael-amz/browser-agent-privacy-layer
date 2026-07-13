@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "model": {
+    "id": "nationaldesignstudio/rampart",
+    "revision": "b1993e4e68b082835b80ffc65acc03325ea2e501",
+    "onnx_sha256": "9f27d24949b0581701071ea5ef522d77ccd3f50c525cc91eac4d265b0fc2afe5",
+    "label_count": 35,
+    "vocab_size": 19730,
+    "max_sequence_length": 512,
+    "minimum_anchor_score": 0.4,
+    "repair_extension_floor": 0.15,
+    "window_content_budget": 500,
+    "window_token_overlap": 64
+  },
+  "runtime": {
+    "package": "@nationaldesignstudio/rampart",
+    "version": "0.1.3",
+    "npm_integrity": "sha512-N3AMnPO1nGxUfMhTm+zJTuhXRIcdR/ETMIMyVr741pgxQcaRNMJVhKgN2nfEmwnXwGsViWpxFQOO0YYs8zZR2w==",
+    "source_revision": "763845bf273a876c20db508c9b7414c99ee0b30e",
+    "transformers_js_version": "3.7.5"
+  },
+  "normalization": {
+    "inference_copy": [
+      "replace-hyphen-with-space",
+      "lowercase",
+      "unicode-NFKD",
+      "strip-combining-marks"
+    ],
+    "offset_rule": "Every normalized/token offset must project to the original OCR string.",
+    "span_repair": "Use the pinned Rampart runtime implementation; model-only Python goldens do not replace its repair contract."
+  },
+  "label_mapping": {
+    "GIVEN_NAME": {
+      "disposition": "map",
+      "plva_class": "NAME"
+    },
+    "SURNAME": {
+      "disposition": "map",
+      "plva_class": "NAME"
+    },
+    "EMAIL": {
+      "disposition": "map",
+      "plva_class": "EMAIL"
+    },
+    "PHONE": {
+      "disposition": "map",
+      "plva_class": "PHONE"
+    },
+    "TAX_ID": {
+      "disposition": "map",
+      "plva_class": "GOV_ID"
+    },
+    "GOVERNMENT_ID": {
+      "disposition": "map",
+      "plva_class": "GOV_ID"
+    },
+    "PASSPORT": {
+      "disposition": "map",
+      "plva_class": "GOV_ID"
+    },
+    "DRIVERS_LICENSE": {
+      "disposition": "map",
+      "plva_class": "GOV_ID"
+    },
+    "BANK_ACCOUNT": {
+      "disposition": "map",
+      "plva_class": "BANK_ACCOUNT"
+    },
+    "ROUTING_NUMBER": {
+      "disposition": "map",
+      "plva_class": "BANK_ACCOUNT"
+    },
+    "BUILDING_NUMBER": {
+      "disposition": "map",
+      "plva_class": "ADDRESS"
+    },
+    "STREET_NAME": {
+      "disposition": "map",
+      "plva_class": "ADDRESS"
+    },
+    "SECONDARY_ADDRESS": {
+      "disposition": "map",
+      "plva_class": "ADDRESS"
+    },
+    "CITY": {
+      "disposition": "keep-context",
+      "reason": "A standalone city is out of scope; it may extend an already confirmed address."
+    },
+    "STATE": {
+      "disposition": "keep-context",
+      "reason": "A standalone state is out of scope; it may extend an already confirmed address."
+    },
+    "ZIP_CODE": {
+      "disposition": "keep-context",
+      "reason": "A standalone postal code is out of scope; it may extend an already confirmed address."
+    },
+    "URL": {
+      "disposition": "unsupported",
+      "reason": "URL is not a PLVA entity class. Credential-bearing URLs are handled by deterministic rules."
+    }
+  },
+  "deterministic_requirements": {
+    "classes_not_owned_by_rampart": [
+      "DOB",
+      "CARD_NUMBER",
+      "CVC",
+      "PASSWORD",
+      "API_KEY",
+      "AUTH_TOKEN",
+      "PRIVATE_KEY"
+    ],
+    "structured_redundancy": [
+      "EMAIL",
+      "PHONE",
+      "GOV_ID",
+      "BANK_ACCOUNT"
+    ],
+    "required_recognizers": [
+      "email",
+      "international-phone-with-context",
+      "luhn-payment-card",
+      "cue-gated-cvc",
+      "us-ssn",
+      "configurable-national-id",
+      "iban-and-bank-cues",
+      "api-key-prefix",
+      "bearer-token",
+      "jwt",
+      "pem-private-key",
+      "cue-gated-password",
+      "birth-context-date"
+    ]
+  }
+}
+

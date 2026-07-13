@@ -1,0 +1,9 @@
+# Python 3.12 reference-only OCR environment. These packages are not runtime dependencies.
+numpy==2.4.6
+omegaconf==2.3.1
+onnxruntime==1.27.0
+opencv-python==5.0.0.93
+pillow==12.3.0
+pyclipper==1.4.0
+rapidocr==3.9.1
+shapely==2.1.2

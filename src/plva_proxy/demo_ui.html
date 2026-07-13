@@ -1,0 +1,1211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Holo: Private computer use</title>
+  <style>
+    /* Design tokens matched to lightcone.ai/chat (2026-07). ABC Diatype is a
+       licensed Dinamo typeface: it is referenced by name and used when installed
+       locally; otherwise the stack falls back to close system grotesques. */
+    :root{
+      color-scheme:light;
+      --back-primary:#ffffff;
+      --back-secondary:#f3f3f3;
+      --back-inverse:#181818;
+      --fore-primary:#0c0c0c;
+      --fore-secondary:#868686;
+      --fore-inverse:#ffffff;
+      --border-fade:rgba(12,12,12,.05);
+      --border-soft:rgba(12,12,12,.1);
+      --radius-full:999px;
+      --radius-card:16px;
+      --ok:#0a8a4f;--warn:#b97e0f;--bad:#d13438;
+      --font:"ABC Diatype","ABC Diatype Variable",Diatype,Inter,-apple-system,"SF Pro Text","Helvetica Neue","Segoe UI",Arial,sans-serif;
+
+      /* transitions-dev motion tokens (.agents/skills/transitions-dev/_root.css) */
+      --duration-stagger:40ms;--duration-micro:80ms;--duration-quick:150ms;--duration-fast:250ms;
+      --duration-medium:350ms;--duration-slow:400ms;--duration-very-slow:500ms;
+      --ease-smooth-out:cubic-bezier(0.22, 1, 0.36, 1);--ease-in-out:ease-in-out;--ease-out:ease-out;
+      --ease-linear:linear;--ease-bounce:cubic-bezier(0.34, 1.36, 0.64, 1);--ease-bounce-strong:cubic-bezier(0.34, 3.85, 0.64, 1);
+      --distance-micro:4px;--distance-small:6px;--distance-base:8px;--distance-medium:12px;--distance-large:30px;
+      --scale-large:0.96;--scale-medium:0.97;--scale-small:0.98;--scale-tiny:0.99;
+      --blur-small:2px;--blur-medium:3px;--blur-large:8px;
+      /* Text states swap */
+      --text-swap-dur:150ms;--text-swap-translate-y:4px;--text-swap-blur:2px;--text-swap-ease:ease-in-out;
+      /* Menu dropdown */
+      --dropdown-open-dur:250ms;--dropdown-close-dur:150ms;--dropdown-pre-scale:0.97;
+      --dropdown-closing-scale:0.99;--dropdown-ease:cubic-bezier(0.22, 1, 0.36, 1);
+      /* Tabs sliding (color tokens mapped to this design system) */
+      --tabs-dur:250ms;--tabs-ease:cubic-bezier(0.22, 1, 0.36, 1);--tabs-text-muted:var(--fore-secondary);
+      --tabs-text-active:var(--fore-primary);--tabs-bar-bg:var(--back-primary);--tabs-pill-bg:var(--back-secondary);
+      /* Accordion expand */
+      --acc-expand:250ms;--acc-collapse:250ms;--acc-chevron:250ms;--acc-ease:cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--back-primary);color:var(--fore-primary);
+      font:400 16px/24px var(--font);-webkit-font-smoothing:antialiased;overflow:hidden}
+    button,textarea,input{font:inherit;color:inherit}
+    button{cursor:pointer;border:0;background:none;padding:0}
+    .app{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+
+    /* ---------- top bar ---------- */
+    .topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;
+      padding:14px 24px;border-bottom:1px solid var(--border-fade);flex-shrink:0;background:var(--back-primary)}
+    .brand{display:flex;align-items:center;gap:10px}
+    .wordmark{font-size:18px;line-height:24px;font-weight:500;letter-spacing:-.2px}
+    .betachip{font-size:12px;line-height:16px;padding:2px 9px;border:1px solid var(--border-soft);
+      border-radius:var(--radius-full);color:var(--fore-secondary)}
+    .mainnav{justify-self:center;--tabs-bar-bg:var(--back-secondary);--tabs-pill-bg:var(--back-primary)}
+    .navbtn{display:flex;align-items:center;justify-content:center;gap:2px;min-height:32px;padding:6px 12px;
+      border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;color:var(--fore-secondary);flex-shrink:0}
+    .navbtn:hover{color:var(--fore-primary)}
+    .topright{justify-self:end;display:flex;align-items:center;gap:8px}
+    .statuspill{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:6px 12px;border-radius:var(--radius-full);
+      font-size:15px;line-height:20px;letter-spacing:.05px;color:var(--fore-secondary)}
+    .statuspill .dot{width:7px;height:7px;border-radius:50%;background:var(--fore-secondary);transition:background .2s}
+    .statuspill[data-state=running] .dot,.statuspill[data-state=starting] .dot{background:var(--ok)}
+    .statuspill[data-state=running],.statuspill[data-state=starting]{color:var(--fore-primary)}
+    .statuspill[data-state=failed] .dot{background:var(--bad)}
+    .statuspill[data-state=failed]{color:var(--bad)}
+    .protect{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:6px 12px;border-radius:var(--radius-full);
+      font-size:15px;line-height:20px;letter-spacing:.05px;background:var(--back-inverse);color:var(--fore-inverse);transition:opacity .15s}
+    .protect[data-on=false]{background:var(--back-secondary);color:var(--fore-primary)}
+    .protect:disabled{opacity:.5;cursor:not-allowed}
+
+    /* ---------- main ---------- */
+    main{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+
+    /* hero (empty chat) */
+    .hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:20px}
+    .hero h1{margin:0;font-weight:400;font-size:32px;line-height:40px;letter-spacing:-.8px}
+    .composer{width:100%;max-width:680px;background:var(--back-primary);border:1px solid var(--border-fade);
+      border-radius:24px;box-shadow:0 16px 48px rgba(12,12,12,.06);padding:18px 18px 14px;
+      display:flex;flex-direction:column;gap:10px}
+    .composer textarea{width:100%;min-height:76px;max-height:220px;resize:none;border:0;outline:none;background:transparent;
+      padding:0;font-size:17px;line-height:26px;letter-spacing:-.2px;color:var(--fore-primary);caret-color:var(--fore-primary)}
+    .composer textarea::placeholder{color:var(--fore-secondary)}
+    .composerrow{display:flex;align-items:center;gap:10px}
+    .composerrow .hint{flex:1;text-align:right;font-size:13px;line-height:18px;color:var(--fore-secondary)}
+    .composerrow .modelmenu{left:0;margin-left:0}
+    .suggestions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:680px}
+    .suggest{padding:8px 14px;border:1px solid var(--border-soft);border-radius:var(--radius-full);
+      font-size:14px;line-height:20px;color:var(--fore-secondary);
+      transition:background var(--duration-quick) var(--ease-smooth-out),color var(--duration-quick) var(--ease-smooth-out)}
+    .suggest:hover{background:var(--back-secondary);color:var(--fore-primary)}
+    .modelwrap{position:relative}
+    .modelpill{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px 6px 12px;
+      border:1px solid var(--border-soft);border-radius:var(--radius-full);font-size:15px;line-height:20px;letter-spacing:.05px;background:var(--back-primary)}
+    .modelpill svg{color:var(--fore-secondary)}
+    .modelmenu{position:absolute;top:calc(100% + 6px);left:50%;width:240px;margin-left:-120px;
+      background:var(--back-primary);border:1px solid var(--border-fade);border-radius:var(--radius-card);
+      box-shadow:0 12px 32px rgba(12,12,12,.1);padding:6px;z-index:5;
+      max-height:min(56vh,420px);overflow-y:auto;overscroll-behavior:contain}
+    .labselect{min-height:32px;max-width:340px;padding:6px 10px;border:1px solid var(--border-soft);
+      border-radius:10px;background:var(--back-primary);color:var(--fore-primary);font-size:14px;line-height:20px}
+    /* transitions-dev: 05-menu-dropdown */
+    .t-dropdown {
+      transform-origin: top left;
+      transform: scale(var(--dropdown-pre-scale));
+      opacity: 0;
+      pointer-events: none;
+      transition:
+        transform var(--dropdown-open-dur) var(--dropdown-ease),
+        opacity   var(--dropdown-open-dur) var(--dropdown-ease);
+      will-change: transform, opacity;
+    }
+    .t-dropdown[data-origin="top-right"]     { transform-origin: top right; }
+    .t-dropdown[data-origin="top-center"]    { transform-origin: top center; }
+    .t-dropdown[data-origin="bottom-left"]   { transform-origin: bottom left; }
+    .t-dropdown[data-origin="bottom-center"] { transform-origin: bottom center; }
+    .t-dropdown[data-origin="bottom-right"]  { transform-origin: bottom right; }
+    .t-dropdown.is-open {
+      transform: scale(1);
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .t-dropdown.is-closing {
+      transform: scale(var(--dropdown-closing-scale));
+      opacity: 0;
+      pointer-events: none;
+      transition:
+        transform var(--dropdown-close-dur) var(--dropdown-ease),
+        opacity   var(--dropdown-close-dur) var(--dropdown-ease);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .t-dropdown { transition: none !important; }
+    }
+    .modelmenu .menuhead{padding:6px 12px 2px;font-size:11px;line-height:16px;letter-spacing:.4px;text-transform:uppercase;color:var(--fore-secondary)}
+    .modelmenu button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;
+      border-radius:10px;font-size:15px;line-height:20px}
+    .modelmenu button:hover{background:var(--back-secondary)}
+    .modelmenu button small{color:var(--fore-secondary);font-size:12px}
+    .send{display:grid;place-items:center;width:48px;height:48px;border-radius:var(--radius-full);
+      background:var(--back-secondary);border:1px solid var(--border-fade);color:var(--fore-primary);transition:background .15s,color .15s}
+    .send:hover{background:var(--back-inverse);color:var(--fore-inverse)}
+    .send:disabled{opacity:.45;cursor:not-allowed}
+    .herohint{font-size:13px;line-height:18px;color:var(--fore-secondary)}
+
+    /* workspace (active / finished session) */
+    .workspace{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:14px;overflow-y:auto;padding:4px 20px 0}
+    .wsinner{width:100%;max-width:860px;display:flex;flex-direction:column;gap:14px;padding-bottom:160px}
+    .chips{display:flex;gap:2px;padding:4px;align-self:center;
+      --tabs-bar-bg:var(--back-secondary);--tabs-pill-bg:var(--back-primary)}
+    .chip{min-height:32px;padding:6px 12px;border-radius:var(--radius-full);font-size:15px;line-height:20px;
+      letter-spacing:.05px;color:var(--fore-secondary)}
+    .chip:hover{color:var(--fore-primary)}
+    .card{background:var(--back-primary);border:1px solid var(--border-fade);border-radius:var(--radius-card);
+      box-shadow:0 1px 2px rgba(12,12,12,.03)}
+    .viewcard{padding:16px;min-height:340px}
+    .framewrap{background:var(--back-secondary);border-radius:12px;min-height:320px;display:grid;place-items:center;overflow:hidden}
+    .framewrap img{max-width:100%;max-height:480px;display:none;border-radius:12px}
+    .empty{color:var(--fore-secondary);text-align:center;padding:48px 24px;font-size:15px;line-height:22px}
+    .metrics{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+    .metric{background:var(--back-secondary);border-radius:var(--radius-full);padding:6px 12px;
+      color:var(--fore-secondary);font-size:13px;line-height:18px}
+    .metric b{color:var(--fore-primary);font-weight:500}
+    .timelinecard{padding:16px 20px}
+    .cardhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+    .cardhead h2{margin:0;font-size:15px;line-height:20px;font-weight:500}
+    .cardhead small{color:var(--fore-secondary);font-size:13px}
+    .event{display:grid;grid-template-columns:60px 10px 1fr;gap:10px;padding:8px 0;border-top:1px solid var(--border-fade)}
+    .event:first-child{border-top:0}
+    .event time{color:var(--fore-secondary);font-size:12px;line-height:20px}
+    .event i{width:6px;height:6px;border-radius:50%;background:var(--fore-primary);margin-top:7px}
+    .event b{display:block;font-weight:500;font-size:15px;line-height:20px}
+    .event small{color:var(--fore-secondary);font-size:13px;line-height:18px}
+
+    /* docked composer */
+    .dock{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;padding:0 20px 24px;pointer-events:none;
+      background:linear-gradient(180deg,rgba(255,255,255,0),var(--back-primary) 60%)}
+    .dockbar{pointer-events:auto;display:flex;align-items:flex-end;gap:8px;width:100%;max-width:720px;
+      background:var(--back-primary);border:1px solid var(--border-fade);border-radius:24px;
+      box-shadow:0 12px 40px rgba(12,12,12,.08);padding:12px 12px 12px 20px}
+    .dockbar textarea{flex:1;resize:none;border:0;background:transparent;outline:none;padding:8px 0;
+      font-size:16px;line-height:24px;color:var(--fore-primary);caret-color:var(--fore-primary);height:40px;max-height:120px}
+    .dockbar textarea::placeholder{color:var(--fore-secondary)}
+    .dockbar .send{width:40px;height:40px;flex-shrink:0}
+    .stoppill{min-height:40px;padding:8px 16px;border-radius:var(--radius-full);background:var(--back-secondary);
+      color:var(--bad);font-size:15px;line-height:20px;flex-shrink:0}
+
+    /* privacy + lab panels */
+    /* align-items:flex-start keeps .panelinner content-sized: stretched items
+       would compress their scroll-container children (min-size 0) when the
+       content grows taller than the viewport. */
+    .panel{flex:1;min-height:0;overflow-y:auto;display:flex;justify-content:center;align-items:flex-start;padding:6px 20px 0}
+    .panelinner{width:100%;max-width:640px;display:flex;flex-direction:column;gap:14px;padding-bottom:72px}
+    .panelinner>h1{margin:12px 0 0;font-size:24px;line-height:30px;letter-spacing:-.66px;font-weight:400;text-align:center}
+    .panelinner>.sub{margin:0 0 6px;text-align:center;color:var(--fore-secondary);font-size:15px;line-height:22px}
+    .legend{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .legend div{padding:12px;border-radius:var(--radius-card);background:var(--back-secondary);font-size:13px;line-height:18px;color:var(--fore-secondary)}
+    .legend b{display:flex;align-items:center;gap:6px;margin-bottom:2px;color:var(--fore-primary);font-weight:500;font-size:14px}
+    .ldot{width:7px;height:7px;border-radius:50%}
+    .policycard{padding:8px 20px 16px}
+    .policygroup h3{color:var(--fore-secondary);font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:500;margin:18px 0 4px}
+    .policyrow{display:grid;grid-template-columns:1fr 186px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-fade)}
+    .policygroup:last-child .policyrow:last-child{border-bottom:0}
+    .pname{font-size:15px;line-height:20px}
+    .pname small{display:block;color:var(--fore-secondary);font-size:12px}
+    .seg{display:grid;grid-template-columns:repeat(3,1fr);background:var(--back-secondary);border-radius:var(--radius-full);padding:3px}
+    .animatedseg{position:relative;--seg-x:0;--seg-y:0}
+    .animatedseg .segindicator{position:absolute;left:3px;top:3px;bottom:3px;width:calc((100% - 6px)/3);
+      border-radius:var(--radius-full);background:var(--back-primary);box-shadow:0 1px 3px rgba(12,12,12,.08);
+      transform:translate(calc(var(--seg-x) * 100%),calc(var(--seg-y) * 100%));
+      transition:transform var(--duration-medium) var(--ease-smooth-out);pointer-events:none}
+    .animatedseg.seg-2 .segindicator{width:calc((100% - 6px)/2)}
+    .animatedseg.seg-4{border-radius:14px}
+    .animatedseg.seg-4 .segindicator{bottom:auto;width:calc((100% - 6px)/2);height:calc((100% - 6px)/2);border-radius:11px}
+    .seg button{display:flex;align-items:center;justify-content:center;gap:5px;border-radius:var(--radius-full);
+      min-width:0;padding:6px 4px;overflow:hidden;font-size:13px;line-height:18px;color:var(--fore-secondary);
+      text-overflow:ellipsis;white-space:nowrap}
+    .seg button.active{background:var(--back-primary);color:var(--fore-primary);box-shadow:0 1px 3px rgba(12,12,12,.08)}
+    .animatedseg button{position:relative;z-index:1}
+    .animatedseg button.active{background:transparent;box-shadow:none}
+    .seg .sdot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.35}
+    .seg button.active[data-level=hide_use] .sdot{background:var(--ok);opacity:1}
+    .seg button.active[data-level=approval] .sdot{background:var(--warn);opacity:1}
+    .seg button.active[data-level=blocked] .sdot{background:var(--bad);opacity:1}
+    .seg-4{grid-template-columns:repeat(2,1fr)}
+    .seg-4 button{border-radius:11px}
+    .seg-2{grid-template-columns:repeat(2,1fr)}
+    .setting{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border-fade)}
+    .setting:last-child{border-bottom:0}
+    .setting .about{font-size:15px;line-height:20px}
+    .setting .about small{display:block;color:var(--fore-secondary);font-size:13px;line-height:18px}
+    .labcard{padding:8px 20px}
+    .warning{border-radius:var(--radius-card);background:var(--back-secondary);color:var(--fore-secondary);
+      padding:12px 16px;font-size:13px;line-height:18px}
+    .switch{position:relative;width:44px;height:26px;flex-shrink:0}
+    .switch input{opacity:0;width:0;height:0}
+    .slider{position:absolute;inset:0;border-radius:var(--radius-full);background:var(--back-secondary);transition:.2s;border:1px solid var(--border-fade)}
+    .slider:before{content:"";position:absolute;width:20px;height:20px;left:2px;top:2px;border-radius:50%;
+      background:var(--back-primary);box-shadow:0 1px 3px rgba(12,12,12,.2);transition:.2s}
+    .switch input:checked+.slider{background:var(--back-inverse)}
+    .switch input:checked+.slider:before{transform:translateX(18px)}
+
+    /* tables + findings */
+    table{width:100%;border-collapse:collapse}
+    th{text-align:left;color:var(--fore-secondary);font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;padding:8px 10px}
+    td{padding:12px 10px;border-top:1px solid var(--border-fade);vertical-align:top;font-size:15px;line-height:20px}
+    .token{font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fore-primary);background:var(--back-secondary);
+      border-radius:6px;padding:2px 6px}
+    .level{font-size:12px;padding:3px 9px;border-radius:var(--radius-full);border:1px solid var(--border-soft);color:var(--fore-secondary)}
+    .level.hide_use{color:var(--ok);border-color:currentColor}
+    .level.approval{color:var(--warn);border-color:currentColor}
+    .level.blocked{color:var(--bad);border-color:currentColor}
+    .cred{font-size:12px;padding:3px 9px;border-radius:var(--radius-full);border:1px solid var(--border-soft);white-space:nowrap}
+    .cred.cred-ok{color:var(--ok);border-color:currentColor}
+    .cred.cred-missing{color:var(--warn);border-color:currentColor}
+    .connrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(210px,300px);align-items:center;gap:12px;
+      padding:12px 0;border-bottom:1px solid var(--border-fade)}
+    .connrow:last-child{border-bottom:0}
+    .connname{font-size:15px;line-height:20px}
+    .connname small{display:block;color:var(--fore-secondary);font-size:13px;line-height:18px;margin-top:2px}
+    .connrow .seg{width:100%;min-width:0}
+    .connrow>.cred{justify-self:end}
+    .credentialrow>.setupcmd{grid-column:1/-1;width:100%;margin-top:0}
+    .credentialrow>.connectbtn{grid-column:1/-1;justify-self:start}
+    .connectbtn{min-height:34px;padding:6px 14px;border-radius:var(--radius-full);background:var(--back-inverse);color:var(--fore-inverse);
+      font-size:14px;line-height:18px;white-space:nowrap}
+    .connectbtn:disabled{opacity:.45}
+    .setupcmd{display:flex;align-items:center;gap:8px;margin-top:8px}
+    .setupcmd code{flex:1;padding:8px 10px;border-radius:var(--radius-card);background:var(--back-secondary);font:13px/18px ui-monospace,SFMono-Regular,Menlo,monospace}
+    .copybtn{min-height:34px;padding:6px 12px;border-radius:var(--radius-full);background:var(--back-secondary);font-size:13px}
+    .secret{font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace;filter:blur(5px);user-select:none}
+    .revealed .secret{filter:none;user-select:text}
+    .toolbar{display:flex;justify-content:flex-end;margin-bottom:10px}
+    .linkbtn{border:1px solid var(--border-soft);border-radius:var(--radius-full);padding:5px 12px;font-size:13px;line-height:18px;color:var(--fore-primary)}
+    .linkbtn:hover{background:var(--back-secondary)}
+    .linkbtn:disabled{opacity:.45;cursor:not-allowed}
+    .finding{padding:12px 14px;border:1px solid var(--border-fade);border-radius:12px;margin:8px 0;background:var(--back-primary)}
+    .findingtop{display:flex;justify-content:space-between;gap:8px;font-size:14px}
+    .findingtop b{font-weight:500}
+    .findingtop span{color:var(--fore-secondary);font-size:13px}
+    .finding p{color:var(--fore-secondary);margin:6px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .filtergrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .bigmetric{background:var(--back-secondary);border-radius:var(--radius-card);padding:18px}
+    .bigmetric strong{font-size:30px;line-height:36px;letter-spacing:-.66px;display:block;font-weight:400}
+    .bigmetric span{color:var(--fore-secondary);font-size:13px}
+
+    /* local agent trace */
+    .tracefeed{max-height:440px;overflow:auto;border:1px solid var(--border-fade);border-radius:12px;background:var(--back-primary);padding:8px}
+    .traceitem{display:grid;grid-template-columns:64px 72px 1fr;gap:9px;padding:9px 8px;border-bottom:1px solid var(--border-fade);align-items:start}
+    .traceitem:last-child{border:0}
+    .traceitem time{color:var(--fore-secondary);font:11px ui-monospace,SFMono-Regular,Menlo,monospace}
+    .tracechannel{text-transform:uppercase;font-size:9px;letter-spacing:.08em;color:var(--fore-secondary);padding-top:2px}
+    .tracechannel.reasoning{color:#3568c0}.tracechannel.action{color:var(--ok)}.tracechannel.error{color:var(--bad)}
+    .tracetext{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace}
+
+    /* history tab: run rail + replay player */
+    .runsrail{display:flex;gap:8px;overflow-x:auto;padding:2px}
+    .runcard{flex-shrink:0;max-width:300px;text-align:left;background:var(--back-primary);border:1px solid var(--border-soft);
+      border-radius:var(--radius-card);padding:10px 14px;display:flex;flex-direction:column;gap:2px;
+      transition:background var(--duration-quick) var(--ease-smooth-out),border-color var(--duration-quick) var(--ease-smooth-out)}
+    .runcard b{font-weight:500;font-size:14px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .runcard small{color:var(--fore-secondary);font-size:12px;line-height:16px;white-space:nowrap}
+    .runcard:hover{background:var(--back-secondary)}
+    .runcard.active{background:var(--back-inverse);border-color:var(--back-inverse)}
+    .runcard.active b{color:var(--fore-inverse)}
+    .runcard.active small{color:rgba(255,255,255,.6)}
+    .workspace.withrail{display:grid;grid-template-columns:240px minmax(0,1fr) minmax(0,860px) minmax(0,1fr) 240px;
+      align-items:start;justify-content:center;width:100%;padding-inline:0;
+      transition:grid-template-columns var(--duration-medium) var(--ease-smooth-out)}
+    .workspace.withrail.rail-collapsed{grid-template-columns:48px minmax(0,1fr) minmax(0,860px) minmax(0,1fr) 48px}
+    .sessionrail{position:sticky;top:0;width:100%;min-width:0;min-height:calc(100dvh - 66px);flex-shrink:0;
+      display:flex;flex-direction:column;gap:8px;overflow:hidden;padding:2px 12px 160px 0;
+      border-right:1px solid var(--border-soft);transition:padding var(--duration-medium) var(--ease-smooth-out)}
+    .withrail .wsinner{grid-column:3}
+    .sessionrailhead{display:flex;align-items:center;gap:8px;margin-right:-12px;padding:0 4px 0 8px}
+    .sessionrail h3{flex:1;margin:2px 0 0;font-size:13px;font-weight:500;color:var(--fore-secondary);
+      white-space:nowrap;transition:opacity var(--duration-quick) var(--ease-smooth-out),transform var(--duration-fast) var(--ease-smooth-out)}
+    .sessiontoggle{display:grid;place-items:center;width:32px;height:32px;flex-shrink:0;border-radius:10px;
+      color:var(--fore-secondary);transition:background var(--duration-quick) var(--ease-smooth-out),color var(--duration-quick) var(--ease-smooth-out)}
+    .sessiontoggle:hover{background:var(--back-secondary);color:var(--fore-primary)}
+    .sessionrail #session-list{transition:opacity var(--duration-quick) var(--ease-smooth-out),transform var(--duration-fast) var(--ease-smooth-out)}
+    .sessionrail.collapsed{padding-right:4px}
+    .sessionrail.collapsed .sessionrailhead{justify-content:flex-end;margin-right:-4px;padding-left:4px}
+    .sessionrail.collapsed h3,.sessionrail.collapsed #session-list{opacity:0;transform:translateX(-8px);visibility:hidden;
+      pointer-events:none;transition:opacity var(--duration-quick) var(--ease-smooth-out),transform var(--duration-fast) var(--ease-smooth-out),visibility 0s linear var(--duration-fast)}
+    .sessionrail .runcard{max-width:none;width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+    .sessionrail .runcard b{max-width:100%}
+    .sessionrail .runcard small{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+    .sessionrail .replaylink{cursor:pointer;margin-top:6px;border:1px solid var(--border-soft);border-radius:var(--radius-full);padding:3px 10px;font-size:12px;line-height:16px}
+    .sessionrail .runcard.active .replaylink{border-color:rgba(255,255,255,.4);color:var(--fore-inverse)}
+    .cstate{font-size:12px;padding:3px 9px;border-radius:var(--radius-full);border:1px solid var(--border-soft);color:var(--fore-secondary)}
+    .cstate.sent{color:var(--ok);border-color:currentColor}
+    .cstate.streamed{color:var(--fore-secondary)}
+    .cstate.failed,.cstate.hook_failed{color:var(--bad);border-color:currentColor}
+    .player{padding:14px}
+    .stage{position:relative;background:var(--back-secondary);border-radius:12px;min-height:360px;max-height:56vh;
+      display:grid;place-items:center;overflow:hidden}
+    .stage img{max-width:100%;max-height:56vh;display:none}
+    .scrubrow{display:flex;align-items:center;gap:14px;padding:14px 4px 2px}
+    .playbtn{display:grid;place-items:center;width:40px;height:40px;border-radius:var(--radius-full);
+      background:var(--back-inverse);color:var(--fore-inverse);flex-shrink:0;
+      transition:transform var(--duration-quick) var(--ease-smooth-out),opacity var(--duration-quick) var(--ease-smooth-out)}
+    .playbtn:hover{opacity:.85}
+    .playbtn:active{transform:scale(var(--scale-large))}
+    .track{position:relative;flex:1;height:28px;cursor:pointer;touch-action:none}
+    .track::before{content:"";position:absolute;left:0;right:0;top:50%;height:4px;margin-top:-2px;
+      background:var(--back-secondary);border-radius:var(--radius-full)}
+    .marker{position:absolute;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--border-soft);
+      transition:background var(--duration-quick) var(--ease-smooth-out),transform var(--duration-quick) var(--ease-smooth-out)}
+    .marker.done{background:var(--fore-secondary)}
+    .marker.active{background:var(--fore-primary);transform:scale(1.5)}
+    .playhead{position:absolute;top:50%;width:2px;height:18px;margin:-9px 0 0 -1px;background:var(--fore-primary);
+      border-radius:2px;transition:left var(--duration-fast) var(--ease-smooth-out)}
+    .timecode{font:12px/16px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fore-secondary);white-space:nowrap;flex-shrink:0}
+    .inspect{padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+    .callsection h4{margin:0 0 6px;font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--fore-secondary)}
+    .msg{border:1px solid var(--border-fade);border-radius:12px;padding:10px 12px;margin:8px 0;display:flex;flex-direction:column;gap:8px}
+    .rolechip{align-self:flex-start;font-size:12px;line-height:16px;padding:3px 10px;border-radius:var(--radius-full);
+      background:var(--back-secondary);color:var(--fore-primary)}
+    .rolechip.system{background:var(--back-inverse);color:var(--fore-inverse)}
+    .rolechip.assistant{background:transparent;border:1px solid var(--border-soft)}
+    .block{margin:0;background:var(--back-secondary);border-radius:10px;padding:10px 12px;
+      font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fore-primary);
+      white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto}
+    .callimg{max-width:100%;border-radius:10px;border:1px solid var(--border-fade)}
+    .toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,90px);opacity:0;background:var(--back-inverse);
+      color:var(--fore-inverse);padding:10px 18px;border-radius:var(--radius-full);font-size:15px;line-height:20px;
+      transition:.25s;z-index:20;pointer-events:none}
+    .toast.show{transform:translate(-50%,0);opacity:1}
+
+    /* motion: entrances referenced to the transitions-dev motion tokens */
+    @keyframes view-in{from{opacity:0;transform:translateY(var(--distance-base))}to{opacity:1;transform:none}}
+    /* Entrances animate structural containers only. Rows that live-update
+       during a run (events, findings, call list) render statically so the
+       poll never causes replayed-animation flicker. */
+    .hero,.workspace,.panel,.dockbar{animation:view-in var(--duration-slow) var(--ease-smooth-out)}
+    .navbtn,.chip,.callhead,.linkbtn,.seg button,.modelpill,.stoppill{transition:background var(--duration-quick) var(--ease-smooth-out),color var(--duration-quick) var(--ease-smooth-out)}
+    .send,.protect{transition:background var(--duration-quick) var(--ease-smooth-out),color var(--duration-quick) var(--ease-smooth-out),transform var(--duration-quick) var(--ease-smooth-out),opacity var(--duration-quick) var(--ease-smooth-out)}
+    .send:active:not(:disabled),.protect:active:not(:disabled){transform:scale(var(--scale-large))}
+    .framewrap img{animation:view-in var(--duration-medium) var(--ease-smooth-out)}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+    .dockbar .modelpill{margin-bottom:4px;flex-shrink:0}
+    .dockbar .modelmenu{top:auto;bottom:calc(100% + 8px);left:0;margin-left:0}
+
+    /* transitions-dev: 04-text-states-swap */
+    .t-text-swap {
+      display: inline-block;
+      transform: translateY(0);
+      filter: blur(0);
+      opacity: 1;
+      transition:
+        transform var(--text-swap-dur) var(--text-swap-ease),
+        filter    var(--text-swap-dur) var(--text-swap-ease),
+        opacity   var(--text-swap-dur) var(--text-swap-ease);
+      will-change: transform, filter, opacity;
+    }
+    .t-text-swap.is-exit {
+      transform: translateY(calc(var(--text-swap-translate-y) * -1));
+      filter: blur(var(--text-swap-blur));
+      opacity: 0;
+    }
+    .t-text-swap.is-enter-start {
+      transform: translateY(var(--text-swap-translate-y));
+      filter: blur(var(--text-swap-blur));
+      opacity: 0;
+      transition: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .t-text-swap { transition: none !important; }
+    }
+
+    /* transitions-dev: 16-tabs-sliding */
+    .t-tabs {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border-radius: 48px;
+      background: var(--tabs-bar-bg);
+    }
+    .t-tab {
+      position: relative;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      height: 30px;
+      padding: 4px 12px;
+      color: var(--tabs-text-muted);
+      cursor: pointer;
+      border-radius: 48px;
+      z-index: 1;
+      transition: color var(--tabs-dur) var(--tabs-ease);
+    }
+    .t-tab:not([aria-selected="true"]):hover,
+    .t-tab[aria-selected="true"] {
+      color: var(--tabs-text-active);
+    }
+    .t-tabs-pill {
+      position: absolute;
+      top: 3px;
+      left: 0;
+      height: 30px;
+      width: 0;
+      background: var(--tabs-pill-bg);
+      border-radius: 48px;
+      transform: translateX(0);
+      transition:
+        transform var(--tabs-dur) var(--tabs-ease),
+        width     var(--tabs-dur) var(--tabs-ease);
+      will-change: transform, width;
+      z-index: 0;
+      pointer-events: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .t-tabs-pill, .t-tab { transition: none !important; }
+    }
+    /* local metrics for this design's two tab bars */
+    .mainnav.t-tabs,.chips.t-tabs{gap:2px;padding:4px;border-radius:var(--radius-full)}
+    .mainnav .t-tab,.chips .t-tab{height:auto;min-height:32px;padding:6px 14px;font:inherit;font-size:15px;line-height:20px;letter-spacing:.05px;border-radius:var(--radius-full)}
+    .mainnav .t-tabs-pill,.chips .t-tabs-pill{top:4px;height:32px;border-radius:var(--radius-full);box-shadow:0 1px 3px rgba(12,12,12,.08)}
+
+
+    @media(max-width:860px){
+      .topbar{grid-template-columns:1fr;justify-items:center;gap:10px;padding:12px 16px}
+      .topright{justify-self:center}
+      .hero h1{font-size:26px;line-height:32px;letter-spacing:-.5px}
+      .composerrow .hint{display:none}
+      .policyrow{grid-template-columns:1fr}
+      .filtergrid,.legend{grid-template-columns:1fr}
+      .workspace.withrail{display:flex;align-items:center}
+      .sessionrail{position:static;width:100%;min-height:calc(100dvh - 66px);padding-bottom:0}
+      .sessionrail.collapsed{width:48px;align-self:flex-start}
+    }
+    @media(max-width:600px){
+      .connrow{grid-template-columns:1fr}
+      .connrow>.cred{grid-row:1;grid-column:1;align-self:start;margin-top:2px}
+      .credentialrow>.connname{padding-right:72px}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="wordmark">Holo</span><span class="betachip">Beta</span></div>
+      <nav class="mainnav t-tabs" aria-label="Primary" role="tablist">
+        <span class="t-tabs-pill" aria-hidden="true"></span>
+        <button class="navbtn t-tab" data-nav="chat" role="tab" aria-selected="true"><span>Chat</span></button>
+        <button class="navbtn t-tab" data-nav="history" role="tab" aria-selected="false"><span>History</span></button>
+        <button class="navbtn t-tab" data-nav="privacy" role="tab" aria-selected="false"><span>Privacy</span></button>
+        <button class="navbtn t-tab" data-nav="lab" role="tab" aria-selected="false"><span>Settings</span></button>
+      </nav>
+      <div class="topright">
+        <div class="statuspill" id="status" data-state="idle"><span class="dot"></span><span id="status-label" class="t-text-swap">Ready</span></div>
+        <button class="protect" id="plva-toggle" data-on="true" aria-label="PLVA protection" title="PLVA protection: redaction, policy, and vault"><span id="protect-label" class="t-text-swap">Protected</span></button>
+      </div>
+    </header>
+    <main id="main"></main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    const groups={"Identity":["NAME","DOB","GOV_ID","SSN"],"Contact":["EMAIL","PHONE","ADDRESS"],"Financial":["BANK_ACCOUNT","CARD_NUMBER","CVC"],"Credentials":["PASSWORD","API_KEY","AUTH_TOKEN","PRIVATE_KEY","SECRET"]};
+    const labels={NAME:"Name",DOB:"Date of birth",GOV_ID:"Government ID",SSN:"Social Security number",EMAIL:"Email",PHONE:"Phone",ADDRESS:"Postal address",BANK_ACCOUNT:"Bank account",CARD_NUMBER:"Card number",CVC:"Card security code",PASSWORD:"Password",API_KEY:"API key",AUTH_TOKEN:"Authentication token",PRIVATE_KEY:"Private key",SECRET:"Other secret"};
+    const levelLabels={hide_use:"Use",approval:"Ask",blocked:"Block"};
+    const providerLabels={hcompany:"H Company",overshoot:"Overshoot"};
+    /* Static fallback; replaced by the provider's live /models list on load. */
+    let modelCatalog={
+      hcompany:[["holo3-1-35b-a3b","Holo3-1 35B"],["holo3-122b-a10b","Holo3 122B"]],
+      overshoot:[["Hcompany/Holo3-35B-A3B","Holo3 35B"]]
+    };
+    async function loadModelCatalog(){
+      let d;try{d=await api("/api/models")}catch{return}
+      const next={};
+      for(const [p,info] of Object.entries(d.providers||{})){
+        if(info&&Array.isArray(info.models)&&info.models.length)next[p]=info.models.map(m=>[m.id,m.label||m.id]);
+      }
+      if(!Object.keys(next).length)return;
+      const changed=JSON.stringify(next)!==JSON.stringify(modelCatalog);
+      modelCatalog=next;
+      if(changed&&state)render(true);
+    }
+    function modelLabel(id){for(const models of Object.values(modelCatalog)){const hit=models.find(([v])=>v===id);if(hit)return hit[1]}return id}
+    const credentialSourceLabels={auto:"Auto",holo_cli:"Holo Desktop CLI",project:"Project .env",environment:"Shell only"};
+    const credentialResolvedLabels={environment:"shell environment",holo_cli:"Holo Desktop CLI",project:"project .env"};
+    function credentialSummary(){
+      const c=state.credentials||{};
+      if(c.configured){
+        const bits=[`Connected via ${credentialResolvedLabels[c.source]||c.source||"configured source"}`];
+        if(c.key_label)bits.push(c.key_label);
+        else if(c.account_email)bits.push(c.account_email);
+        return bits.join(" · ");
+      }
+      const hints=[];
+      if(c.holo_cli_available)hints.push("Holo Desktop CLI key found");
+      if(c.project_env_available)hints.push("project .env key found");
+      if(c.environment_available)hints.push("shell key found");
+      if(hints.length){
+        if(c.holo_cli_available)return "Holo Desktop CLI key found on this Mac — connect below to use it";
+        return `${hints.join(" · ")} (not used with current source preference)`;
+      }
+      return "No API key found yet. Run holo login in Terminal, or add Holo/.env.";
+    }
+    function credentialActions(){
+      const c=state.credentials||{};
+      if(c.configured)return "";
+      if(c.holo_cli_available){
+        const label=c.key_label?`Use ${c.key_label}`:"Use Holo Desktop CLI";
+        return `<button class="connectbtn" id="connect-holo-cli">${esc(label)}</button>`;
+      }
+      return `<div class="setupcmd"><code>holo login</code><button class="copybtn" id="copy-holo-login" type="button">Copy</button></div>`;
+    }
+    function credentialStatusClass(){return (state.credentials&&state.credentials.configured)?"cred-ok":"cred-missing"}
+    function credentialStatusLabel(){return (state.credentials&&state.credentials.configured)?"Ready":"Missing"}
+    function pillLabel(){const s=state.settings;return esc(s.model?modelLabel(s.model):(providerLabels[s.provider]||s.provider))}
+    function modelMenuItems(){
+      const s=state.settings;
+      return Object.entries(modelCatalog).map(([p,models])=>
+        `<div class="menuhead">${esc(providerLabels[p]||p)}</div>`+
+        models.map(([id,label])=>`<button data-provider="${esc(p)}" data-model="${esc(id)}">${esc(label)}<small>${id===s.model?"Selected":""}</small></button>`).join("")
+      ).join("");
+    }
+    const featureLabels={chips:["Placeholder chips","Paint and vault current findings"],history_scrub:["History scrub","Remove values before the next model call"],scheme:["Scheme prompt","Teach Holo how placeholders work"],duplicate_warning:["Duplicate warning","Explain rare duplicate tokens"],manifest:["Frame manifest","List tokens visible right now"],resolution:["Action resolution","Restore values only in executed actions"],policy_teaching:["Policy prompt","Teach Holo each class security level"],skill:["Native skill","Reinforce the static scheme"]};
+    const statusNames={idle:"Ready",starting:"Starting privately",running:"Holo is working",stopping:"Stopping",stopped:"Stopped",completed:"Complete",failed:"Needs attention"};
+
+    const navTabs=new Set(["chat","history","privacy","lab"]);
+    function storedTab(){try{const saved=localStorage.getItem("holo.activeTab");return navTabs.has(saved)?saved:"chat"}catch{return "chat"}}
+    function setTab(next){tab=navTabs.has(next)?next:"chat";try{localStorage.setItem("holo.activeTab",tab)}catch{}}
+    let state=null,tab=storedTab(),mode="",activeView="frame",reveal=false,draft="",sessionRailOpen=true;
+    const $=s=>document.querySelector(s), esc=v=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+
+    async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})},cache:"no-store"});if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.detail||`Request failed (${r.status})`)}return r.json()}
+    function toast(message){const t=$("#toast");t.textContent=message;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2400)}
+
+    /* transitions-dev orchestration: timings read from the :root tokens */
+    const rootStyle=getComputedStyle(document.documentElement);
+    const TEXT_SWAP_MS=parseFloat(rootStyle.getPropertyValue("--text-swap-dur"))||150;
+    const DROPDOWN_CLOSE_MS=parseFloat(rootStyle.getPropertyValue("--dropdown-close-dur"))||150;
+    function swapText(el,next){
+      if(!el||el.textContent===next)return;
+      if(el._swapping){el._next=next;return}
+      el._swapping=true;el._next=next;
+      el.classList.add("is-exit");
+      setTimeout(()=>{
+        el.textContent=el._next;delete el._next;
+        el.classList.remove("is-exit");
+        el.classList.add("is-enter-start");
+        void el.offsetHeight; // force reflow so the enter transition replays
+        el.classList.remove("is-enter-start");
+        el._swapping=false;
+      },TEXT_SWAP_MS);
+    }
+    function openDropdown(menu){if(!menu)return;menu.classList.remove("is-closing");menu.classList.add("is-open")}
+    function closeDropdown(menu){
+      if(!menu||!menu.classList.contains("is-open"))return;
+      menu.classList.remove("is-open");
+      menu.classList.add("is-closing");
+      setTimeout(()=>menu.classList.remove("is-closing"),DROPDOWN_CLOSE_MS);
+    }
+    function initTabsPill(bar){
+      if(!bar)return;
+      const pill=bar.querySelector(".t-tabs-pill");
+      const tabs=[...bar.querySelectorAll(".t-tab")];
+      if(!pill||!tabs.length)return;
+      const moveTo=(tab,animate)=>{
+        if(!tab)return;
+        if(!animate){
+          const prev=pill.style.transition;
+          pill.style.transition="none";
+          pill.style.transform=`translateX(${tab.offsetLeft}px)`;
+          pill.style.width=`${tab.offsetWidth}px`;
+          void pill.offsetWidth;
+          pill.style.transition=prev;
+        }else{
+          pill.style.transform=`translateX(${tab.offsetLeft}px)`;
+          pill.style.width=`${tab.offsetWidth}px`;
+        }
+      };
+      bar._movePill=animate=>moveTo(tabs.find(t=>t.getAttribute("aria-selected")==="true")||tabs[0],animate);
+      requestAnimationFrame(()=>bar._movePill(false));
+    }
+    window.addEventListener("resize",()=>document.querySelectorAll(".t-tabs").forEach(bar=>bar._movePill&&bar._movePill(false)));
+    function selectTab(clicked,group){
+      document.querySelectorAll(group).forEach(b=>b.setAttribute("aria-selected",String(b===clicked)));
+      const bar=clicked.closest(".t-tabs");
+      if(bar&&bar._movePill)bar._movePill(true);
+    }
+
+    const chevron=`<svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const arrowUp=`<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 14V4m0 0L4.5 8.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const sessionsIcon=`<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><rect x="2.5" y="3" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M6.5 3v12" stroke="currentColor" stroke-width="1.3"/></svg>`;
+
+    /* ---------- actions ---------- */
+    async function run(){const box=$("#prompt");const prompt=(box?box.value:"").trim();if(!prompt)return toast("Enter a task first");try{await api("/api/run",{method:"POST",body:JSON.stringify({prompt})});draft="";if(box)box.value="";await refresh()}catch(e){toast(e.message)}}
+    async function stop(){try{await api("/api/stop",{method:"POST",body:"{}"});await refresh()}catch(e){toast(e.message)}}
+    function applySegmentSelection(selected){
+      if(!selected)return;
+      const seg=selected.closest(".animatedseg");if(!seg)return;
+      const buttons=[...seg.querySelectorAll("button")];
+      seg.querySelectorAll("button").forEach(button=>{
+        const active=button===selected;
+        button.classList.toggle("active",active);
+        button.setAttribute("aria-pressed",String(active));
+      });
+      const index=buttons.indexOf(selected);
+      seg.style.setProperty("--seg-x",String(seg.classList.contains("seg-4")?index%2:index));
+      seg.style.setProperty("--seg-y",String(seg.classList.contains("seg-4")?Math.floor(index/2):0));
+    }
+    function applyPolicySelection(cls,level){
+      applySegmentSelection(document.querySelector(`.policyseg [data-class="${cls}"][data-level="${level}"]`));
+    }
+    function applySettingSelection(key,value){
+      applySegmentSelection(document.querySelector(`.settingsseg [data-setting="${key}"][data-value="${value}"]`));
+    }
+    async function setPolicy(cls,level){
+      if(state.running)return toast("Stop the task before changing policy");
+      const previous=state.policy[cls];if(previous===level)return;
+      applyPolicySelection(cls,level);
+      const next={...state.policy,[cls]:level};
+      try{
+        const result=await api("/api/policy",{method:"PUT",body:JSON.stringify(next)});
+        state.policy=result.policy;applyPolicySelection(cls,state.policy[cls]);
+        toast(`${labels[cls]} set to ${levelLabels[state.policy[cls]]}`);
+      }catch(e){applyPolicySelection(cls,previous);toast(e.message)}
+    }
+    async function saveSettings(patch,selection){if(!state)return;if(state.running){render(true);return toast("Stop the task before changing settings")}
+      const s=state.settings;const settings={plva_enabled:s.plva_enabled,provider:s.provider,model:s.model,credential_source:s.credential_source||"auto",vision_mode:s.vision_mode,lifecycle:s.lifecycle,detector_version:s.detector_version,ocr_engine:s.ocr_engine,visual_detector:s.visual_detector,semantic_engine:s.semantic_engine,tools:s.tools||"off",features:{...s.features},...patch};
+      if(patch&&patch.features)settings.features={...s.features,...patch.features};
+      try{
+        const r=await api("/api/settings",{method:"PUT",body:JSON.stringify(settings)});
+        state.settings=r.settings;if(r.credentials)state.credentials=r.credentials;
+        if(tab==="lab"){
+          renderChrome();
+          if(selection){
+            applySettingSelection(selection.key,state.settings[selection.key]);
+            if(selection.key==="provider"||selection.key==="credential_source"){
+              const delay=Math.max(0,350-(performance.now()-selection.startedAt));
+              setTimeout(()=>{if(tab==="lab")renderLab()},delay);
+            }
+          }else if(!patch.features)renderLab();
+        }else render(true);
+      }catch(e){toast(e.message);if(tab==="lab")renderLab();else render(true)}}
+    async function connectHoloCli(){
+      if(!state||state.running)return toast("Stop the task before connecting");
+      try{
+        const r=await api("/api/credentials/connect-holo-cli",{method:"POST",body:"{}"});
+        state.settings=r.settings;state.credentials=r.credentials;render(true);
+        toast("Connected to Holo Desktop CLI");
+      }catch(e){toast(e.message)}
+    }
+
+    /* ---------- chrome ---------- */
+    function renderChrome(){
+      const el=$("#status");el.dataset.state=state.status;
+      swapText($("#status-label"),statusNames[state.status]||state.status);
+      const p=$("#plva-toggle");const on=state.settings.plva_enabled;
+      p.dataset.on=String(on);p.disabled=state.running;
+      swapText($("#protect-label"),on?"Protected":"Protection off");
+      document.querySelectorAll("[data-nav]").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.nav===tab)));
+    }
+
+    /* ---------- chat ---------- */
+    function sessionActive(){return state.running||state.has_frame||state.events.length>0}
+
+    function chatSkeleton(){
+      if(!sessionActive()){
+        return `<div class="hero">
+          <h1>What should your computer do?</h1>
+          <div class="composer">
+            <textarea id="prompt" rows="3" placeholder="What can I do for you?"></textarea>
+            <div class="composerrow">
+              <div class="modelwrap">
+                <button class="modelpill" id="model-pill">${pillLabel()} ${chevron}</button>
+                <div class="modelmenu t-dropdown" data-origin="top-left" id="model-menu">${modelMenuItems()}</div>
+              </div>
+              <span class="hint">Recorded to your local audit history</span>
+              <button class="send" id="run" title="Run privately">${arrowUp}</button>
+            </div>
+          </div>
+          <div class="suggestions">
+            <button class="suggest" data-suggest>Open Calendar and find my next meeting</button>
+            <button class="suggest" data-suggest>Copy the visible email into the form</button>
+            <button class="suggest" data-suggest>Open Terminal and run: echo plva-ok</button>
+          </div>
+          <div class="herohint">Runs locally behind the PLVA privacy boundary. Sensitive screen data never leaves this device.</div>
+          <div class="herohint" id="cred-hint" hidden></div>
+        </div>`;
+      }
+      const viewChip=(view,label)=>`<button class="chip t-tab" role="tab" data-view="${view}" aria-selected="${String(activeView===view)}">${label}</button>`;
+      const rail=state.running?"":`<aside class="sessionrail${sessionRailOpen?"":" collapsed"}" id="session-rail">
+        <div class="sessionrailhead"><h3>Past sessions</h3><button class="sessiontoggle" id="session-toggle" type="button" aria-label="${sessionRailOpen?"Hide":"Show"} past sessions" aria-expanded="${String(sessionRailOpen)}" title="${sessionRailOpen?"Hide":"Show"} past sessions">${sessionsIcon}</button></div>
+        <div id="session-list"><div class="empty">Loading…</div></div>
+      </aside>`;
+      return `<div class="workspace${state.running?"":" withrail"}${!state.running&&!sessionRailOpen?" rail-collapsed":""}">${rail}<div class="wsinner">
+          <div class="chips t-tabs" role="tablist">
+            <span class="t-tabs-pill" aria-hidden="true"></span>
+            ${viewChip("frame","Model view")}${viewChip("trace","Agent trace")}${viewChip("vault","Vault")}${viewChip("ocr","OCR")}${viewChip("filter","Stream guard")}
+          </div>
+          <div class="card viewcard" id="viewbody"></div>
+          <div class="card timelinecard">
+            <div class="cardhead"><h2>Private session activity</h2><small>Safe metadata only</small></div>
+            <div id="timeline"></div>
+          </div>
+        </div></div>
+        <div class="dock"><div class="dockbar">
+          <div class="modelwrap">
+            <button class="modelpill" id="model-pill">${pillLabel()} ${chevron}</button>
+            <div class="modelmenu t-dropdown" data-origin="bottom-left" id="model-menu">${modelMenuItems()}</div>
+          </div>
+          <textarea id="prompt" rows="1" placeholder="What can I do for you?"></textarea>
+          <button class="stoppill" id="stop" hidden>Stop</button>
+          <button class="send" id="run" title="Run privately">${arrowUp}</button>
+        </div></div>`;
+    }
+
+    function wireChat(){
+      const box=$("#prompt");
+      if(box){box.value=draft;box.oninput=()=>{draft=box.value};
+        box.onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();run()}}}
+      const runBtn=$("#run");if(runBtn)runBtn.onclick=run;
+      const stopBtn=$("#stop");if(stopBtn)stopBtn.onclick=stop;
+      const sessionToggle=$("#session-toggle");if(sessionToggle)sessionToggle.onclick=()=>{
+        sessionRailOpen=!sessionRailOpen;
+        const rail=$("#session-rail");rail.classList.toggle("collapsed",!sessionRailOpen);
+        rail.closest(".withrail").classList.toggle("rail-collapsed",!sessionRailOpen);
+        sessionToggle.setAttribute("aria-expanded",String(sessionRailOpen));
+        sessionToggle.setAttribute("aria-label",`${sessionRailOpen?"Hide":"Show"} past sessions`);
+        sessionToggle.title=`${sessionRailOpen?"Hide":"Show"} past sessions`;
+      };
+      const pill=$("#model-pill");
+      if(pill){pill.onclick=e=>{e.stopPropagation();const m=$("#model-menu");m.classList.contains("is-open")?closeDropdown(m):openDropdown(m)};
+        document.querySelectorAll("#model-menu [data-model]").forEach(b=>b.onclick=()=>{closeDropdown($("#model-menu"));saveSettings({provider:b.dataset.provider,model:b.dataset.model})})}
+      document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{activeView=b.dataset.view;reveal=false;selectTab(b,".chip");updateChat()});
+      document.querySelectorAll("[data-suggest]").forEach(b=>b.onclick=()=>{const box=$("#prompt");if(!box)return;box.value=b.textContent;draft=box.value;box.focus()});
+      initTabsPill(document.querySelector(".chips"));
+    }
+
+    async function updateChat(){
+      const pill=$("#model-pill");
+      if(pill){
+        const label=`${pillLabel()} ${chevron}`;
+        if(pill._label!==label){pill._label=label;pill.innerHTML=label}
+      }
+      const runBtn=$("#run");if(runBtn)runBtn.disabled=state.running;
+      if(!sessionActive()){
+        const hint=$("#cred-hint");
+        if(hint){
+          const cred=state.credentials;
+          const text=cred&&!cred.configured?credentialSummary():"";
+          hint.hidden=!text;
+          if(hint._text!==text){hint._text=text;hint.textContent=text}
+        }
+        return;
+      }
+      document.querySelectorAll(".chip").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.view===activeView)));
+      const stopBtn=$("#stop");if(stopBtn)stopBtn.hidden=!state.running;
+      const events=[...state.events].reverse();
+      const timelineHtml=events.length?events.map(e=>`<div class="event"><time>${esc(e.time)}</time><i></i><div><b>${esc(e.title)}</b><small>${esc(e.detail)}</small></div></div>`).join(""):`<div class="empty">No task has run yet.</div>`;
+      const timeline=$("#timeline");
+      if(timeline&&timeline._html!==timelineHtml){timeline._html=timelineHtml;timeline.innerHTML=timelineHtml}
+      await updateSessionRail();
+      await renderView();
+    }
+
+    // Assign innerHTML only when the rendered string actually changed, so the
+    // 900ms poll never rebuilds (and never flickers) a stable view.
+    function setView(box,cls,html){
+      if(box._html===html&&box.className===cls)return false;
+      box._html=html;box.className=cls;box.innerHTML=html;
+      return true;
+    }
+
+    async function renderView(){
+      const box=$("#viewbody");if(!box)return;
+      if(activeView==="frame"){
+        const s=state.stats||{};
+        setView(box,"card viewcard",`<div class="framewrap"><div class="empty" id="frame-empty">${state.settings.plva_enabled?"The redacted frame Holo receives will appear here.":"PLVA is off for this diagnostic run."}</div><img id="frame" alt="Redacted frame sent to Holo"></div>
+          <div class="metrics"><span class="metric"><b>${s.frames_seen||0}</b> frames</span><span class="metric"><b>${s.regions||0}</b> protected regions</span><span class="metric"><b>${s.total_ms||0} ms</b> pipeline</span><span class="metric"><b>${esc(s.backend||"waiting")}</b> backend</span></div>`);
+        if(state.has_frame){
+          const img=$("#frame");
+          // Key the frame on its content hash: the image reloads only when a
+          // genuinely new redacted frame exists, never on the poll itself.
+          const key=String(s.latest_sha12||"latest");
+          if(img.dataset.key!==key){img.dataset.key=key;img.src=`/api/frame?v=${encodeURIComponent(key)}`}
+          img.style.display="block";
+          const empty=$("#frame-empty");if(empty)empty.style.display="none";
+        }
+        return;
+      }
+      if(activeView==="vault"){
+        let data=await api("/api/vault"),approvalData=await api("/api/approvals"),rows=data.entries||[];
+        const approved=new Set((approvalData.approvals||[]).map(item=>item.token));
+        const tableRows=rows.map(r=>{const action=r.safety_level==="approval"?(approved.has(r.placeholder)?`<span class="level hide_use">Approved once</span>`:`<button class="linkbtn" data-approve="${esc(r.placeholder)}">Approve one write</button>`):"—";return `<tr><td><span class="token">${esc(r.placeholder)}</span></td><td>${esc(labels[r.class]||r.class)}</td><td><span class="level ${esc(r.safety_level)}">${esc(levelLabels[r.safety_level]||r.safety_level)}</span></td><td>${action}</td><td><span class="secret">${esc(r.value)}</span></td></tr>`}).join("");
+        const changed=setView(box,reveal?"card viewcard revealed":"card viewcard",`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local values</button></div>${rows.length?`<table><thead><tr><th>Placeholder</th><th>Class</th><th>Security</th><th>Local approval</th><th>Local value</th></tr></thead><tbody>${tableRows}</tbody></table>`:`<div class="empty">The session vault is empty. Values appear only after OCR finds allowed or approval-gated PII.</div>`}`);
+        if(changed){$("#reveal").onclick=()=>{reveal=!reveal;renderView()};document.querySelectorAll("[data-approve]").forEach(button=>button.onclick=async()=>{button.disabled=true;try{await api("/api/approve",{method:"POST",body:JSON.stringify({token:button.dataset.approve})});toast("One private write approved");await renderView()}catch(error){button.disabled=false;toast(error.message)}})}
+        return;
+      }
+      if(activeView==="ocr"){
+        let data=await api("/api/findings");let rows=data.findings||[];
+        const changed=setView(box,reveal?"card viewcard revealed":"card viewcard",`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local OCR text</button></div>${rows.length?rows.map((r,i)=>`<div class="finding"><div class="findingtop"><b>Finding ${i+1}</b><span>${esc((r.labels||[]).join(" · ")||"Unclassified")}</span></div><p><span class="secret">${esc(r.text||"No recognized text")}</span></p></div>`).join(""):`<div class="empty">No OCR findings yet.</div>`}`);
+        if(changed)$("#reveal").onclick=()=>{reveal=!reveal;renderView()};
+        return;
+      }
+      if(activeView==="trace"){
+        let data=await api("/api/traces");let rows=data.entries||[];
+        const changed=setView(box,reveal?"card viewcard revealed":"card viewcard",`<div class="toolbar"><button class="linkbtn" id="reveal">${reveal?'Hide':'Reveal'} local trace</button></div>${rows.length?`<div class="tracefeed" id="tracefeed">${rows.map(r=>`<div class="traceitem"><time>${esc(r.time)}</time><span class="tracechannel ${esc(r.channel)}">${esc(r.channel)}</span><span class="tracetext secret">${esc(r.text)}</span></div>`).join("")}</div>`:`<div class="empty">Agent reasoning and actions will appear here once the run begins.</div>`}<p class="sub" style="margin:12px 0 0;font-size:13px">Memory-only. The original prompt is excluded; resolved action values may appear, so trace text is hidden until revealed.</p>`);
+        if(changed){
+          $("#reveal").onclick=()=>{reveal=!reveal;renderView()};
+          const feed=$("#tracefeed");if(feed)feed.scrollTop=feed.scrollHeight;
+        }
+        return;
+      }
+      let d=await api("/api/filter");
+      setView(box,"card viewcard",`<div class="filtergrid"><div class="bigmetric"><strong>${esc(d.texts_scanned||0)}</strong><span>text blocks scanned</span></div><div class="bigmetric"><strong>${esc(d.plain_vault_hits||0)}</strong><span>exact vault matches</span></div><div class="bigmetric"><strong>${esc(d.semantic_hits||0)}</strong><span>semantic detections</span></div><div class="bigmetric"><strong>${esc(d.blocked_hits||0)}</strong><span>opaque blocked removals</span></div></div><div class="finding" style="margin-top:12px"><div class="findingtop"><b>Filter status</b><span class="level ${d.status==='failed'?'blocked':'hide_use'}">${esc(d.status||"idle")}</span></div><p>Diagnostic: ${esc(d.error_code||"none")}. Cleartext is never shown here; counts remain memory-only.</p></div>`);
+    }
+
+    async function updateSessionRail(){
+      const list=$("#session-list");if(!list)return;
+      let data;try{data=await api("/api/history/runs")}catch{return}
+      const runs=data.runs||[];
+      const sig=runs.map(r=>`${r.id}:${r.status}:${r.calls}`).join("|")+"@"+(selSession||"");
+      if(list._sig===sig)return;
+      list._sig=sig;
+      if(!runs.length){list.innerHTML=`<div class="empty">No recorded sessions yet.</div>`;return}
+      list.innerHTML=runs.map(r=>`<button class="runcard ${r.id===selSession?'active':''}" data-session="${esc(r.id)}" data-prompt="${esc(r.prompt||"")}">
+          <b>${esc(r.prompt||"(no prompt)")}</b>
+          <small>${esc(new Date((r.started_at||0)*1000).toLocaleString())} · ${r.calls} calls · ${esc(r.status||"")}</small>
+          <span class="replaylink" data-replay="${esc(r.id)}">View replay</span>
+        </button>`).join("");
+      list.querySelectorAll("[data-session]").forEach(b=>b.onclick=e=>{
+        if(e.target.closest("[data-replay]"))return;
+        selSession=b.dataset.session;list._sig="";
+        const box=$("#prompt");if(box){box.value=b.dataset.prompt;draft=box.value;box.focus()}
+        toast("Prompt loaded. Send it to run this session again.");
+      });
+      list.querySelectorAll("[data-replay]").forEach(s=>s.onclick=e=>{
+        e.stopPropagation();
+        curRun=s.dataset.replay;curIdx=0;setTab("history");reveal=false;
+        const nb=document.querySelector('[data-nav="history"]');if(nb)selectTab(nb,"[data-nav]");
+        render(true);
+      });
+    }
+
+    /* ---------- history panel: run rail + replay timeline ---------- */
+    let curRun=null,runDetail=null,curIdx=0,playing=false,playTimer=null,runsSig="",detailSig="",inspectKey="",selSession=null;
+    const playIcon=`<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.2v9.6a.6.6 0 00.9.5l7.5-4.8a.6.6 0 000-1L5.9 2.7a.6.6 0 00-.9.5z"/></svg>`;
+    const pauseIcon=`<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>`;
+    function historySkeleton(){
+      return `<div class="panel"><div class="panelinner" style="max-width:980px">
+        <h1>Audit timeline</h1>
+        <p class="sub">Every run is recorded to this device's local history: the redacted frames, scrubbed text, and raw placeholder replies that crossed the privacy boundary. Pick a run and scrub through its model calls like a replay.</p>
+        <div class="toolbar"><button class="linkbtn" id="export-run">Export audit log</button><button class="linkbtn" id="clear-history">Clear history</button></div>
+        <div class="runsrail" id="runs-rail"></div>
+        <div id="replay"></div>
+      </div></div>`;
+    }
+    function resetHistoryView(){runsSig="";detailSig="";inspectKey="";stopPlay();const eb=$("#export-run");if(eb)eb.onclick=exportRun;const cb=$("#clear-history");if(cb)cb.onclick=clearHistory}
+    async function clearHistory(){
+      if(!confirm("Delete every recorded run from this device? This cannot be undone."))return;
+      const btn=$("#clear-history");
+      if(btn){btn.disabled=true;btn.textContent="Clearing…"}
+      try{
+        const res=await api("/api/history/clear",{method:"POST"});
+        curRun=null;runDetail=null;curIdx=0;runsSig="";detailSig="";stopPlay();
+        await updateHistory(true);
+        toast(res.cleared?`${res.cleared} run${res.cleared===1?"":"s"} deleted from local history`:"History is already empty");
+      }catch(e){toast(e.message||"Clear failed")}
+      finally{if(btn){btn.disabled=false;btn.textContent="Clear history"}}
+    }
+    async function exportRun(){
+      if(!curRun)return toast("Select a run to export first");
+      const btn=$("#export-run");
+      if(btn){btn.disabled=true;btn.textContent="Exporting…"}
+      try{
+        const detail=await api(`/api/history/runs/${curRun}`);
+        const calls=await Promise.all((detail.calls||[]).map(c=>
+          api(`/api/history/runs/${curRun}/calls/${c.id}`).catch(()=>({...c,note:"full record unavailable"}))));
+        const payload={format:"plva-audit-log",exported_at:new Date().toISOString(),run:detail.run,calls};
+        const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url;a.download=`${curRun}-audit.json`;
+        document.body.appendChild(a);a.click();a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+        toast("Audit log saved. Screenshots stay in local history.");
+      }catch(e){toast(e.message||"Export failed")}
+      finally{if(btn){btn.disabled=false;btn.textContent="Export audit log"}}
+    }
+    async function updateHistory(force){
+      const rail=$("#runs-rail");if(!rail)return;
+      let data;try{data=await api("/api/history/runs")}catch{return}
+      const runs=data.runs||[];
+      const sig=runs.map(r=>`${r.id}:${r.status}:${r.calls}`).join("|");
+      if(sig!==runsSig||force){
+        runsSig=sig;
+        if(!runs.length){
+          rail.innerHTML=`<div class="empty">No recorded runs yet. Run a task and it will appear here, replayable call by call.</div>`;
+          $("#replay").innerHTML="";return;
+        }
+        if(!curRun||!runs.some(r=>r.id===curRun))curRun=runs[0].id;
+        rail.innerHTML=runs.map(r=>`<button class="runcard ${r.id===curRun?'active':''}" data-run="${esc(r.id)}">
+            <b>${esc(r.prompt||"(no prompt)")}</b>
+            <small>${esc(new Date((r.started_at||0)*1000).toLocaleString())} · ${r.calls} calls · ${esc(r.status||"")}</small>
+          </button>`).join("");
+        rail.querySelectorAll("[data-run]").forEach(b=>b.onclick=()=>{
+          curRun=b.dataset.run;curIdx=0;stopPlay();runsSig="";detailSig="";updateHistory(true);
+        });
+      }
+      if(!curRun)return;
+      let detail;try{detail=await api(`/api/history/runs/${curRun}`)}catch{return}
+      const dSig=`${curRun}:${(detail.calls||[]).length}:${detail.run&&detail.run.status}`;
+      if(dSig!==detailSig){
+        // Follow mode: if the playhead was on the newest call of a live run,
+        // stay pinned to the newest call as more arrive.
+        const followed=runDetail&&runDetail.calls&&curIdx>=runDetail.calls.length-1;
+        detailSig=dSig;runDetail=detail;
+        const total=(detail.calls||[]).length;
+        curIdx=followed?Math.max(0,total-1):Math.min(curIdx,Math.max(0,total-1));
+        renderReplay();
+      }
+    }
+    function markPos(i){
+      const calls=runDetail.calls;
+      const t0=calls[0].at,t1=calls[calls.length-1].at;
+      if(!(t1>t0))return calls.length>1?(i/(calls.length-1))*100:50;
+      return ((calls[i].at-t0)/(t1-t0))*100;
+    }
+    function renderReplay(){
+      const box=$("#replay");if(!box)return;
+      const calls=(runDetail&&runDetail.calls)||[];
+      if(!calls.length){box.innerHTML=`<div class="empty">This run recorded no model calls${runDetail&&runDetail.run&&runDetail.run.status==="running"?" yet":""}.</div>`;return}
+      box.innerHTML=`<div class="card player">
+          <div class="stage" id="stage"><div class="empty" id="stage-empty">No screenshot in this call.</div><img id="stage-img" alt="Redacted frame for this step"></div>
+          <div class="scrubrow">
+            <button class="playbtn" id="play" title="Replay">${playing?pauseIcon:playIcon}</button>
+            <div class="track" id="track">${calls.map((c,i)=>`<span class="marker" data-idx="${i}" style="left:${markPos(i)}%"></span>`).join("")}<div class="playhead" id="playhead"></div></div>
+            <span class="timecode" id="timecode"></span>
+          </div>
+        </div>
+        <div class="card inspect" id="call-inspect"></div>`;
+      $("#play").onclick=togglePlay;
+      const track=$("#track");
+      const pick=e=>{
+        const rect=track.getBoundingClientRect();
+        const x=Math.min(Math.max(e.clientX-rect.left,0),rect.width);
+        let best=0,bestDist=Infinity;
+        calls.forEach((c,i)=>{const px=markPos(i)/100*rect.width;const d=Math.abs(px-x);if(d<bestDist){bestDist=d;best=i}});
+        setIdx(best);
+      };
+      track.onpointerdown=e=>{track.setPointerCapture(e.pointerId);stopPlay();pick(e);track.onpointermove=pick};
+      track.onpointerup=()=>{track.onpointermove=null};
+      setIdx(curIdx,true);
+    }
+    async function setIdx(i,force){
+      const calls=(runDetail&&runDetail.calls)||[];if(!calls.length)return;
+      i=Math.min(Math.max(i,0),calls.length-1);
+      if(i===curIdx&&!force)return;
+      curIdx=i;
+      document.querySelectorAll(".marker").forEach(m=>{
+        const idx=Number(m.dataset.idx);
+        m.classList.toggle("active",idx===i);
+        m.classList.toggle("done",idx<i);
+      });
+      const playhead=$("#playhead");if(playhead)playhead.style.left=markPos(i)+"%";
+      const c=calls[i];
+      const tc=$("#timecode");if(tc)tc.textContent=`step ${i+1}/${calls.length} · call #${c.id} · ${new Date(c.at*1000).toLocaleTimeString()}`;
+      const base=`/api/history/runs/${curRun}/calls/${c.id}`;
+      const img=$("#stage-img"),stageEmpty=$("#stage-empty");
+      const imgs=c.images||[];
+      if(img&&imgs.length){
+        // The last screenshot in a call is the current frame for that step.
+        img.src=`${base}/image/${imgs.length-1}`;img.style.display="block";
+        if(stageEmpty)stageEmpty.style.display="none";
+      }else if(img){img.style.display="none";if(stageEmpty)stageEmpty.style.display="block"}
+      const key=`${curRun}:${c.id}`;
+      if(inspectKey!==key){
+        inspectKey=key;
+        const inspect=$("#call-inspect");
+        inspect.innerHTML=`<div class="empty">Loading…</div>`;
+        try{
+          const record=await api(base);
+          if(inspectKey===key)inspect.innerHTML=renderCallDetail(record,base);
+        }catch(e){if(inspectKey===key)inspect.innerHTML=`<div class="empty">${esc(e.message)}</div>`}
+      }
+    }
+    function togglePlay(){playing?stopPlay():startPlay()}
+    function startPlay(){
+      const calls=(runDetail&&runDetail.calls)||[];if(calls.length<2)return;
+      if(curIdx>=calls.length-1)setIdx(0);
+      playing=true;const b=$("#play");if(b)b.innerHTML=pauseIcon;
+      playTimer=setInterval(()=>{
+        if(!runDetail||curIdx>=runDetail.calls.length-1)stopPlay();
+        else setIdx(curIdx+1);
+      },1200);
+    }
+    function stopPlay(){playing=false;clearInterval(playTimer);const b=$("#play");if(b)b.innerHTML=playIcon}
+    document.addEventListener("keydown",e=>{
+      if(tab!=="history"||!runDetail||e.metaKey||e.ctrlKey)return;
+      if(e.key==="ArrowRight"){e.preventDefault();stopPlay();setIdx(curIdx+1)}
+      if(e.key==="ArrowLeft"){e.preventDefault();stopPlay();setIdx(curIdx-1)}
+      if(e.key===" "&&document.activeElement===document.body){e.preventDefault();togglePlay()}
+    });
+    function contentBlocks(base,content){
+      if(typeof content==="string")return `<pre class="block">${esc(content)}</pre>`;
+      if(!Array.isArray(content))return `<pre class="block">${esc(JSON.stringify(content,null,2))}</pre>`;
+      return content.map(part=>{
+        if(part&&part.type==="text")return `<pre class="block">${esc(part.text)}</pre>`;
+        if(part&&part.type==="image_url"){
+          const url=part.image_url&&part.image_url.url||"";
+          const match=/^plva:image\/(\d+)$/.exec(url);
+          if(match)return `<img class="callimg" src="${base}/image/${match[1]}" alt="Frame sent to the model" loading="lazy">`;
+          return `<pre class="block">${esc(url||"(image)")}</pre>`;
+        }
+        return `<pre class="block">${esc(JSON.stringify(part,null,2))}</pre>`;
+      }).join("");
+    }
+    function renderCallDetail(record,base){
+      const messages=(record.request&&record.request.messages)||[];
+      const request=messages.map(m=>`<div class="msg"><span class="rolechip ${esc(m.role||"")}">${esc(m.role||"message")}</span>${contentBlocks(base,m.content)}</div>`).join("");
+      const extras={...record.request};delete extras.messages;
+      const meta=`<span class="cstate ${esc(record.state)}">${esc(record.state)}</span> HTTP ${esc(record.status??"n/a")} · ${esc(record.model||"")} · ${record.duration_ms} ms`;
+      let response;
+      if(!record.response){
+        response=`<div class="empty" style="padding:16px">${record.state==="streamed"?"The reply streamed straight through to the agent and was not buffered.":"No response was recorded for this call."}</div>`;
+      }else{
+        const choice=(record.response.choices||[])[0]||{};
+        const message=choice.message||{};
+        let content=message.content;
+        try{content=JSON.stringify(JSON.parse(content),null,2)}catch{}
+        const usage=record.response.usage?` · ${record.response.usage.prompt_tokens??"?"} in / ${record.response.usage.completion_tokens??"?"} out tokens`:"";
+        response=`<div class="msg"><span class="rolechip assistant">${esc(message.role||"assistant")} · ${esc(choice.finish_reason||"")}${esc(usage)}</span><pre class="block">${esc(content??JSON.stringify(record.response,null,2))}</pre></div>`;
+      }
+      return `<div class="callsection"><h4>Call</h4><div style="font-size:13px;color:var(--fore-secondary)">${meta}</div></div>
+        <div class="callsection"><h4>Request: what the model saw</h4>${request||'<div class="empty">No messages.</div>'}</div>
+        <div class="callsection"><h4>Request parameters</h4><pre class="block">${esc(JSON.stringify(extras,null,2))}</pre></div>
+        <div class="callsection"><h4>Response: what the model returned</h4>${response}</div>`;
+    }
+
+    /* ---------- privacy panel ---------- */
+    function privacySkeleton(){
+      return `<div class="panel"><div class="panelinner">
+        <h1>Privacy controls</h1>
+        <p class="sub">Choose what Holo can use for each kind of sensitive information. Unknown types are always blocked. Changes apply to the next run.</p>
+        <div class="legend">
+          <div><b><span class="ldot" style="background:var(--ok)"></span>Hide &amp; use</b>Holo uses a token.</div>
+          <div><b><span class="ldot" style="background:var(--warn)"></span>Approval</b>Requires a short-lived, exact local grant from the Vault view.</div>
+          <div><b><span class="ldot" style="background:var(--bad)"></span>Blocked</b>No token or vault entry.</div>
+        </div>
+        <div class="card policycard" id="policy-list"></div>
+      </div></div>`;
+    }
+    function renderPanel(){
+      if(tab==="privacy"){
+        let html="";
+        for(const [group,classes] of Object.entries(groups)){
+          html+=`<section class="policygroup"><h3>${group}</h3>`;
+          for(const cls of classes){
+            const selected=state.policy[cls];
+            const selectedIndex=Object.keys(levelLabels).indexOf(selected);
+            html+=`<div class="policyrow"><div class="pname">${labels[cls]}<small>${cls}</small></div><div class="seg policyseg animatedseg" style="--seg-x:${selectedIndex};--seg-y:0"><span class="segindicator" aria-hidden="true"></span>${Object.keys(levelLabels).map(level=>`<button data-class="${cls}" data-level="${level}" class="${selected===level?'active':''}" aria-pressed="${String(selected===level)}"><span class="sdot"></span>${levelLabels[level]}</button>`).join("")}</div></div>`;
+          }
+          html+="</section>";
+        }
+        $("#policy-list").innerHTML=html;
+        document.querySelectorAll(".seg button").forEach(b=>b.onclick=()=>setPolicy(b.dataset.class,b.dataset.level));
+        return;
+      }
+      if(tab==="lab")renderLab();
+    }
+
+    /* ---------- lab panel ---------- */
+    function labSkeleton(){
+      return `<div class="panel"><div class="panelinner">
+        <h1>Settings</h1>
+        <p class="sub">Choose how PLVA connects to Holo and which models to use. Your API key stays local and is never shown here.</p>
+        <div class="legend">
+          <div><b><span class="ldot" style="background:var(--ok)"></span>Ready</b>A provider key is available for the selected source.</div>
+          <div><b><span class="ldot" style="background:var(--warn)"></span>Holo Desktop CLI</b>Uses <code>~/.holo/.env</code> from <code>holo login</code>.</div>
+          <div><b><span class="ldot" style="background:var(--fore-secondary)"></span>Project .env</b>Optional override in this app's <code>Holo/.env</code>.</div>
+        </div>
+        <div class="card policycard" id="lab-connection"></div>
+        <div class="card labcard" id="lab-pipeline"></div>
+        <section class="policygroup" style="margin-top:2px"><h3>Advanced diagnostics</h3></section>
+        <div class="card labcard" id="feature-list"></div>
+        <div class="warning">Disabling chips, history scrub, or resolution weakens privacy. Use synthetic data in the advanced lab.</div>
+      </div></div>`;
+    }
+    function segRow(title,detail,key,options,cols){
+      const current=state.settings[key]||"auto";
+      const klass=cols?` seg-${cols}`:"";
+      const selectedIndex=Math.max(0,options.findIndex(([value])=>value===current));
+      const x=cols===4?selectedIndex%2:selectedIndex,y=cols===4?Math.floor(selectedIndex/2):0;
+      return `<div class="connrow"><div class="connname">${title}<small>${detail}</small></div><div class="seg settingsseg animatedseg${klass}" style="--seg-x:${x};--seg-y:${y}"><span class="segindicator" aria-hidden="true"></span>${options.map(([v,l])=>`<button data-setting="${key}" data-value="${v}" class="${current===v?'active':''}" aria-pressed="${String(current===v)}" title="${esc(l)}">${esc(l)}</button>`).join("")}</div></div>`;
+    }
+    function modelSelectRow(models){
+      const current=state.settings.model||"";
+      const list=(current&&!models.some(([v])=>v===current))?[[current,modelLabel(current)],...models]:models;
+      const body=list.length
+        ?`<select class="labselect" id="lab-model-select">${list.map(([v,l])=>`<option value="${esc(v)}"${v===current?" selected":""}>${esc(l)}</option>`).join("")}</select>`
+        :`<small>No models reported for this provider yet.</small>`;
+      return `<div class="connrow"><div class="connname">Model<small>Holo variant for the selected provider</small></div>${body}</div>`;
+    }
+    function renderLab(){
+      const cred=credentialSummary();
+      const models=modelCatalog[state.settings.provider]||[];
+      $("#lab-connection").innerHTML=
+        `<section class="policygroup"><h3>Connection</h3>
+          <div class="connrow credentialrow"><div class="connname">API key status<small>${esc(cred)}</small></div><span class="cred ${credentialStatusClass()}">${credentialStatusLabel()}</span>${credentialActions()}</div>
+          ${segRow("API key source","Auto checks shell, Holo Desktop CLI, then project .env","credential_source",Object.entries(credentialSourceLabels),4)}
+          ${segRow("Provider","Inference endpoint","provider",[["hcompany","H Company"],["overshoot","Overshoot"]],2)}
+          ${modelSelectRow(models)}
+        </section>`;
+      $("#lab-pipeline").innerHTML=
+        `<section class="policygroup"><h3>Redaction pipeline</h3>
+          ${segRow("Vision mode","OCR quality / latency","vision_mode",[["fast","Fast"],["cascade","Cascade"],["accurate","Accurate"]],3)}
+          ${segRow("OCR engine","Apple Vision or Core ML RapidOCR","ocr_engine",[["apple","Apple OCR"],["rapidocr","RapidOCR"]],2)}
+          ${segRow("Visual detector","Off (default) detects PII from OCR + text filter only","visual_detector",[["off","Off"],["on","On"]],2)}
+          ${segRow("Detector version","Only used when the visual detector is on; v3 needs an exported ONNX detector","detector_version",[["v2","v2 baseline"],["v3","v3"]],2)}
+          ${segRow("Text filter","Alternatives need a local frozen model copy","semantic_engine",[["rampart","Rampart"],["gliner2","GLiNER2 PII"],["openai-pf","OpenAI PF"],["openai-pf-4bit","OpenAI PF 4-bit"]],2)}
+          ${segRow("Tool calls","Local tool channel: teaching, detection, bounded loop","tools",[["on","On"],["off","Off"]],2)}
+          ${segRow("Worker lifecycle","Startup versus idle memory","lifecycle",[["eager","Eager"],["adaptive","Adaptive"],["cold","Cold"]],3)}
+        </section>`;
+      document.querySelectorAll("[data-setting]").forEach(b=>b.onclick=()=>{
+        const key=b.dataset.setting,value=b.dataset.value;if(state.settings[key]===value)return;
+        applySegmentSelection(b);
+        saveSettings({[key]:value},{key,startedAt:performance.now()});
+      });
+      const modelSelect=$("#lab-model-select");
+      if(modelSelect)modelSelect.onchange=()=>saveSettings({model:modelSelect.value});
+      const connect=$("#connect-holo-cli");if(connect)connect.onclick=connectHoloCli;
+      const copy=$("#copy-holo-login");if(copy)copy.onclick=()=>navigator.clipboard.writeText("holo login").then(()=>toast("Copied holo login"));
+      const f=state.settings.features;
+      $("#feature-list").innerHTML=Object.entries(featureLabels).map(([key,[title,detail]])=>`<div class="setting"><div class="about">${title}<small>${detail}</small></div><label class="switch"><input type="checkbox" data-feature="${key}" ${f[key]?'checked':''}><span class="slider"></span></label></div>`).join("");
+      document.querySelectorAll("[data-feature]").forEach(i=>i.onchange=()=>saveSettings({features:{[i.dataset.feature]:i.checked}}));
+    }
+
+    /* ---------- render loop ---------- */
+    function render(force){
+      if(!state)return;
+      renderChrome();
+      const nextMode=tab==="chat"?(sessionActive()?(state.running?"chat-work":"chat-done"):"chat-hero"):tab;
+      if(nextMode!==mode||force){
+        mode=nextMode;
+        $("#main").innerHTML=tab==="chat"?chatSkeleton():tab==="history"?historySkeleton():tab==="privacy"?privacySkeleton():labSkeleton();
+        if(tab==="chat")wireChat();
+        if(tab==="history")resetHistoryView();
+        renderPanel();
+      }
+      if(tab==="chat")updateChat();
+      if(tab==="history")updateHistory(false);
+    }
+    async function refresh(){try{state=await api("/api/state");render(false)}catch(e){toast("Demo service unavailable")}}
+
+    document.querySelectorAll("[data-nav]").forEach(b=>{
+      b.setAttribute("aria-selected",String(b.dataset.nav===tab));
+      b.onclick=()=>{setTab(b.dataset.nav);reveal=false;selectTab(b,"[data-nav]");render(true)};
+    });
+    initTabsPill(document.querySelector(".mainnav"));
+    $("#plva-toggle").onclick=()=>saveSettings({plva_enabled:!state.settings.plva_enabled});
+    document.addEventListener("click",e=>{const m=$("#model-menu");if(m&&!e.target.closest(".modelwrap"))closeDropdown(m)});
+    document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="Enter")run()});
+    refresh();setInterval(refresh,900);
+    loadModelCatalog();setInterval(loadModelCatalog,300000);
+  </script>
+</body>
+</html>

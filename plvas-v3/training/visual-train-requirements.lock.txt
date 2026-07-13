@@ -1,0 +1,9 @@
+# Optional replacement-detector training environment. Not a PLVA runtime dependency.
+# Ultralytics is AGPL-3.0; publication requires an explicit licensing decision.
+numpy==2.4.6
+pillow==12.3.0
+pyyaml==6.0.3
+torch==2.13.0
+torchvision==0.28.0
+ultralytics==8.4.92
+

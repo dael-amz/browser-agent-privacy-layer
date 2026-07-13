@@ -1,13 +1,39 @@
-# OS / editor junk
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Python environments and caches
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Privacy-sensitive runtime output
+artifacts/
+captures/
+screenshots/
+transcripts/
+vault/
+history/
+
+# Local editor and OS files
 .DS_Store
 *.swp
 .idea/
 .vscode/
 
-# Never commit real secrets anywhere in the tree
-.env
-.env.*
-!.env.example
+# PLVA detector bundle: pulled from a separate clone, not vendored here
+plva-v2-baseline/
+plva-v3/
 
-# Test artifacts
-.coverage
+# Local LLM weights (mediator/semantic executor): never commit model binaries
+models/
+
+# plva-v3-new generated build output (rebuildable; integrity manifests track it)
+plva-v3-new/dist/

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "classes": {
+    "API_KEY": "An API key may be entered only into a field that expects a credential (settings page, CLI login, request header) of the service that issued it, and only when the task explicitly requires configuring or calling that service. Never into chat messages, emails, documents, or search boxes.",
+    "AUTH_TOKEN": "A session or auth token may be re-entered only into the same site or app it came from, to restore or keep a login working. Never anywhere else."
+  },
+  "global_rules": [
+    "When in doubt, deny.",
+    "Never approve placing a value in a message addressed to another person.",
+    "Prefer the shortest scope that lets the task continue."
+  ],
+  "trace_review": {
+    "denied_resolution_threshold": 3,
+    "window_steps": 8
+  }
+}
